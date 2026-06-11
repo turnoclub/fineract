@@ -146,6 +146,7 @@ import org.springframework.stereotype.Service;
 public class LoanScheduleAssembler {
 
     private final FromJsonHelper fromApiJsonHelper;
+    private final CutoffFirstRepaymentDateResolver cutoffFirstRepaymentDateResolver;
     private final LoanProductRepository loanProductRepository;
     private final ApplicationCurrencyRepositoryWrapper applicationCurrencyRepository;
     private final LoanChargeAssembler loanChargeAssembler;
@@ -316,13 +317,22 @@ public class LoanScheduleAssembler {
          * If user has not passed the first repayments date then then derive the same based on loan type.
          */
         if (calculatedRepaymentsStartingFromDate == null) {
-            LocalDate tmpCalculatedRepaymentsStartingFromDate = deriveFirstRepaymentDate(loanType, repaymentEvery, expectedDisbursementDate,
-                    repaymentPeriodFrequencyType, 0, calendar, submittedOnDate, repaymentStartDateType);
-            calculatedRepaymentsStartingFromDate = deriveFirstRepaymentDate(loanType, repaymentEvery, expectedDisbursementDate,
-                    repaymentPeriodFrequencyType, loanProduct.getMinimumDaysBetweenDisbursalAndFirstRepayment(), calendar, submittedOnDate,
-                    repaymentStartDateType);
-            if (!tmpCalculatedRepaymentsStartingFromDate.equals(calculatedRepaymentsStartingFromDate)) {
-                repaymentsStartingFromDate = calculatedRepaymentsStartingFromDate;
+            // Derive the first-EMI date from the product's installment_day/cutoff_day config (datatable)
+            // when present, so callers need not pass repaymentsStartingFromDate. Falls back to stock derivation.
+            final LocalDate cutoffFirstRepaymentDate = this.cutoffFirstRepaymentDateResolver.resolve(loanProduct.getId(),
+                    expectedDisbursementDate);
+            if (cutoffFirstRepaymentDate != null) {
+                calculatedRepaymentsStartingFromDate = cutoffFirstRepaymentDate;
+                repaymentsStartingFromDate = cutoffFirstRepaymentDate;
+            } else {
+                LocalDate tmpCalculatedRepaymentsStartingFromDate = deriveFirstRepaymentDate(loanType, repaymentEvery,
+                        expectedDisbursementDate, repaymentPeriodFrequencyType, 0, calendar, submittedOnDate, repaymentStartDateType);
+                calculatedRepaymentsStartingFromDate = deriveFirstRepaymentDate(loanType, repaymentEvery, expectedDisbursementDate,
+                        repaymentPeriodFrequencyType, loanProduct.getMinimumDaysBetweenDisbursalAndFirstRepayment(), calendar, submittedOnDate,
+                        repaymentStartDateType);
+                if (!tmpCalculatedRepaymentsStartingFromDate.equals(calculatedRepaymentsStartingFromDate)) {
+                    repaymentsStartingFromDate = calculatedRepaymentsStartingFromDate;
+                }
             }
         }
 
