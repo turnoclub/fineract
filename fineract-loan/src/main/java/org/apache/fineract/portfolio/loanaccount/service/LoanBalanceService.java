@@ -50,6 +50,7 @@ public class LoanBalanceService {
     private final CapitalizedIncomeBalanceService capitalizedIncomeBalanceService;
     private final FlushModeHandler flushModeHandler;
     private final LoanTransactionRepository loanTransactionRepository;
+    private final ForeclosureInterestResolver foreclosureInterestResolver;
 
     public Money calculateTotalOverpayment(final Loan loan) {
         Money totalPaidInRepayments = loan.getTotalPaidInRepayments();
@@ -243,8 +244,15 @@ public class LoanBalanceService {
         Money totalPrincipal = Money.of(loan.getCurrency(), loan.getSummary().getTotalPrincipalOutstanding());
         totalPrincipal = totalPrincipal.minus(receivables[3]);
         final LocalDate currentDate = DateUtils.getBusinessLocalDate();
+        Money interest = receivables[0];
+        // Per-product flat foreclosure-interest override (loan_product_foreclosure_config datatable);
+        // null -> keep the stock schedule-based (declining-balance) foreclosure interest above.
+        final BigDecimal customInterest = foreclosureInterestResolver.resolve(loan, closureDate);
+        if (customInterest != null) {
+            interest = Money.of(loan.getCurrency(), customInterest);
+        }
         return new LoanRepaymentScheduleInstallment(null, 0, currentDate, currentDate, totalPrincipal.getAmount(),
-                receivables[0].getAmount(), receivables[1].getAmount(), receivables[2].getAmount(), false, null);
+                interest.getAmount(), receivables[1].getAmount(), receivables[2].getAmount(), false, null);
     }
 
     public Money[] retrieveIncomeForOverlappingPeriod(final Loan loan, final LocalDate paymentDate) {

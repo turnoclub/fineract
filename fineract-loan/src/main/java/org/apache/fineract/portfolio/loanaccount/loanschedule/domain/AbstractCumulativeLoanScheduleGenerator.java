@@ -316,8 +316,18 @@ public abstract class AbstractCumulativeLoanScheduleGenerator implements LoanSch
                     loanApplicationTerms, scheduleParams.getPeriodNumber(), mc, mergeVariationsToMap(loanApplicationTerms, scheduleParams),
                     scheduleParams.getCompoundingMap(), periodStartDateApplicableForInterest, scheduledDueDate, interestRates);
 
-            // will check for EMI amount greater than interest calculated
-            if (loanApplicationTerms.getFixedEmiAmount() != null
+            // will check for EMI amount greater than interest calculated.
+            // Exempt the broken-period first installment: BrokenPeriodDecliningBalanceLoanScheduleGenerator
+            // intentionally charges the full (>30-day) broken-period interest on installment 1 as a surcharge
+            // on top of the level EMI, so that interest can legitimately exceed the level/fixed EMI here. The
+            // gate below mirrors that generator's own (periodNumber==1, SAME_AS_REPAYMENT_PERIOD, brokenDays>30).
+            // isCompletePeriod guards against a preclosure/partial run where scheduledDueDate was just
+            // truncated to scheduleTillDate (lines above) -- only the full first installment is exempt.
+            final boolean brokenFirstInstallment = isCompletePeriod && scheduleParams.getPeriodNumber() == 1
+                    && loanApplicationTerms.getInterestCalculationPeriodMethod().isSameAsRepaymentPeriod()
+                    && loanApplicationTerms.getExpectedDisbursementDate() != null
+                    && DateUtils.getExactDifferenceInDays(loanApplicationTerms.getExpectedDisbursementDate(), scheduledDueDate) > 30;
+            if (!brokenFirstInstallment && loanApplicationTerms.getFixedEmiAmount() != null
                     && loanApplicationTerms.getFixedEmiAmount().compareTo(principalInterestForThisPeriod.interest().getAmount()) < 0) {
                 String errorMsg = "EMI amount must be greater than : " + principalInterestForThisPeriod.interest().getAmount();
                 throw new MultiDisbursementEmiAmountException(errorMsg, principalInterestForThisPeriod.interest().getAmount(),
