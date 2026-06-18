@@ -27,7 +27,7 @@
     Registers a per-loan-product config datatable selecting the FORECLOSURE INTEREST method
     (foreclosure_interest_method, e.g. STANDARD | FLAT_ON_OUTSTANDING). Editable via Fineract's
     datatable API/UI; read by ForeclosureInterestResolver at foreclosure time. Day-in-year/month
-    are NOT stored here -- they come from the product's own daysInYearType / daysInMonthType.
+    are NOT stored here; they come from the product's own daysInYearType / daysInMonthType.
 -->
 <databaseChangeLog xmlns="http://www.liquibase.org/xml/ns/dbchangelog" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
                    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.1.xsd">
