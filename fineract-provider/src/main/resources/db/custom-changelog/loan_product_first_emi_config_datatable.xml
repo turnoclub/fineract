@@ -122,4 +122,21 @@
         </insert>
     </changeSet>
 
+    <!-- Per-product broken-period method for the first installment, read by BrokenPeriodMethodResolver
+         and dispatched in BrokenPeriodDecliningBalanceLoanScheduleGenerator:
+           NULL                    - legacy: actual-days math for any SAME_AS_REPAYMENT loan (pre-existing behaviour)
+           STANDARD                - stock Fineract first period (explicit opt-out)
+           ACTUAL_DAYS_SURCHARGE   - Vivriti: actual broken days; >30 surcharges the EMI, <30 keeps EMI flat
+           ADJUSTED_DAYS_SYMMETRIC - DMI: days normalized to a 30-day start month; installment = EMI +/- delta -->
+    <changeSet author="fineract" id="loan_product_first_emi_config-4-broken-period-method">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <columnExists tableName="loan_product_first_emi_config" columnName="broken_period_method"/>
+            </not>
+        </preConditions>
+        <addColumn tableName="loan_product_first_emi_config">
+            <column name="broken_period_method" type="VARCHAR(50)"/>
+        </addColumn>
+    </changeSet>
+
 </databaseChangeLog>

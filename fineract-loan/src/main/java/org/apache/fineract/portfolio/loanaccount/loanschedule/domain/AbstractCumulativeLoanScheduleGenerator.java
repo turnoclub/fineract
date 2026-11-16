@@ -320,13 +320,18 @@ public abstract class AbstractCumulativeLoanScheduleGenerator implements LoanSch
             // Exempt the broken-period first installment: BrokenPeriodDecliningBalanceLoanScheduleGenerator
             // intentionally charges the full (>30-day) broken-period interest on installment 1 as a surcharge
             // on top of the level EMI, so that interest can legitimately exceed the level/fixed EMI here. The
-            // gate below mirrors that generator's own (periodNumber==1, SAME_AS_REPAYMENT_PERIOD, brokenDays>30).
+            // gate below mirrors that generator's own anchor (interestChargedFromDate when given, else
+            // disbursement) and exempts when either the actual or the month-normalized day count (used by the
+            // ADJUSTED_DAYS_SYMMETRIC method: 31-day start month -1, February +2) exceeds 30.
             // isCompletePeriod guards against a preclosure/partial run where scheduledDueDate was just
             // truncated to scheduleTillDate (lines above) -- only the full first installment is exempt.
+            final LocalDate brokenPeriodAnchor = loanApplicationTerms.getInterestChargedFromLocalDate() != null
+                    ? loanApplicationTerms.getInterestChargedFromLocalDate()
+                    : loanApplicationTerms.getExpectedDisbursementDate();
             final boolean brokenFirstInstallment = isCompletePeriod && scheduleParams.getPeriodNumber() == 1
-                    && loanApplicationTerms.getInterestCalculationPeriodMethod().isSameAsRepaymentPeriod()
-                    && loanApplicationTerms.getExpectedDisbursementDate() != null
-                    && DateUtils.getExactDifferenceInDays(loanApplicationTerms.getExpectedDisbursementDate(), scheduledDueDate) > 30;
+                    && loanApplicationTerms.getInterestCalculationPeriodMethod().isSameAsRepaymentPeriod() && brokenPeriodAnchor != null
+                    && DateUtils.getExactDifferenceInDays(brokenPeriodAnchor, scheduledDueDate)
+                            - Math.min(0, brokenPeriodAnchor.lengthOfMonth() - 30) > 30;
             if (!brokenFirstInstallment && loanApplicationTerms.getFixedEmiAmount() != null
                     && loanApplicationTerms.getFixedEmiAmount().compareTo(principalInterestForThisPeriod.interest().getAmount()) < 0) {
                 String errorMsg = "EMI amount must be greater than : " + principalInterestForThisPeriod.interest().getAmount();

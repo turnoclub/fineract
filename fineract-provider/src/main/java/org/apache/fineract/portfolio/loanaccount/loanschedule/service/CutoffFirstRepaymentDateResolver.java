@@ -27,15 +27,21 @@ import org.springframework.stereotype.Component;
 
 /**
  * Derives the first repayment ("first EMI") date for a loan from per-product config stored in the
- * {@code loan_product_first_emi_config} datatable (installment_day + cutoff_day), so callers don't
- * have to pass {@code repaymentsStartingFromDate}.
+ * {@code loan_product_first_emi_config} datatable (installment_day + cutoff_day), so callers don't have to pass
+ * {@code repaymentsStartingFromDate}.
  *
- * <p>Rule (a common NBFC convention): if the disbursement day-of-month is &le; cutoff_day the first EMI
- * falls on the installment_day of the NEXT month, otherwise on the installment_day of the month after that.</p>
+ * <p>
+ * Rule (a common NBFC convention): if the anchor date's day-of-month is &le; cutoff_day the first EMI falls on the
+ * installment_day of the NEXT month, otherwise on the installment_day of the month after that. The anchor is the
+ * interest-start date ({@code interestChargedFromDate}) when the caller charges interest from a date other than
+ * disbursement, else the expected disbursement date.
+ * </p>
  *
- * <p>Returns {@code null} when the product has no config row (or the datatable is absent), in which case the
- * caller keeps Fineract's stock derivation. Add-only component; the only core touch-point is the single call
- * site in {@code LoanScheduleAssembler}.</p>
+ * <p>
+ * Returns {@code null} when the product has no config row (or the datatable is absent), in which case the caller keeps
+ * Fineract's stock derivation. Add-only component; the only core touch-point is the single call site in
+ * {@code LoanScheduleAssembler}.
+ * </p>
  */
 @Slf4j
 @Component
@@ -46,8 +52,8 @@ public class CutoffFirstRepaymentDateResolver {
 
     private final JdbcTemplate jdbcTemplate;
 
-    public LocalDate resolve(final Long loanProductId, final LocalDate disbursementDate) {
-        if (loanProductId == null || disbursementDate == null) {
+    public LocalDate resolve(final Long loanProductId, final LocalDate anchorDate) {
+        if (loanProductId == null || anchorDate == null) {
             return null;
         }
         final int[] config = readConfig(loanProductId);
@@ -56,8 +62,8 @@ public class CutoffFirstRepaymentDateResolver {
         }
         final int installmentDay = config[0];
         final int cutoffDay = config[1];
-        final int monthsToAdd = disbursementDate.getDayOfMonth() <= cutoffDay ? 1 : 2;
-        final LocalDate targetMonth = disbursementDate.plusMonths(monthsToAdd);
+        final int monthsToAdd = anchorDate.getDayOfMonth() <= cutoffDay ? 1 : 2;
+        final LocalDate targetMonth = anchorDate.plusMonths(monthsToAdd);
         final int dayOfMonth = Math.min(installmentDay, targetMonth.lengthOfMonth());
         return targetMonth.withDayOfMonth(dayOfMonth);
     }

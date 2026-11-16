@@ -216,6 +216,14 @@ public final class LoanApplicationTerms {
     @Getter
     private Integer installmentAmountInMultiplesOf;
 
+    /**
+     * Loan product id, for per-product schedule behaviour (e.g. broken-period method lookup). Not part of the static
+     * factory signatures; set explicitly wherever the terms are assembled.
+     */
+    @Getter
+    @Setter
+    private Long loanProductId;
+
     @Getter
     private LoanPreCloseInterestCalculationStrategy preClosureInterestCalculationStrategy;
 

@@ -32,19 +32,23 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
 /**
- * Resolves a per-product override for the foreclosure INTEREST amount from the
- * {@code loan_product_foreclosure_config} datatable (foreclosure_interest_method), so each loan product can use
- * a different foreclosure-interest logic without changing core behaviour.
+ * Resolves a per-product override for the foreclosure INTEREST amount from the {@code loan_product_foreclosure_config}
+ * datatable (foreclosure_interest_method), so each loan product can use a different foreclosure-interest logic without
+ * changing core behaviour.
  *
- * <p>For products configured {@code FLAT_ON_OUTSTANDING} the interest is a flat NBFC-style charge:
- * {@code principalOutstanding * annualRate% * days / daysInYear}, where {@code days} = actual calendar days,
- * inclusive, from the last fully-paid installment's due date (the date interest was last settled to) up to the
- * closure date, and {@code daysInYear} comes from the product's own {@code daysInYearType} (e.g. 360). This
- * differs from Fineract's stock schedule-based, declining-balance foreclosure interest.</p>
+ * <p>
+ * For products configured {@code FLAT_ON_OUTSTANDING} the interest is a flat NBFC-style charge:
+ * {@code principalOutstanding * annualRate% * days / daysInYear}, where {@code days} = actual calendar days, inclusive,
+ * from the last fully-paid installment's due date (the date interest was last settled to) up to the closure date, and
+ * {@code daysInYear} comes from the product's own {@code daysInYearType} (e.g. 360). This differs from Fineract's stock
+ * schedule-based, declining-balance foreclosure interest.
+ * </p>
  *
- * <p>Returns {@code null} when the product has no config row, the method is not {@code FLAT_ON_OUTSTANDING}, or the
- * datatable is absent -- in which case the caller keeps Fineract's stock foreclosure derivation. Add-only
- * component; the only core touch-point is the single call site in {@code LoanBalanceService}.</p>
+ * <p>
+ * Returns {@code null} when the product has no config row, the method is not {@code FLAT_ON_OUTSTANDING}, or the
+ * datatable is absent -- in which case the caller keeps Fineract's stock foreclosure derivation. Add-only component;
+ * the only core touch-point is the single call site in {@code LoanBalanceService}.
+ * </p>
  */
 @Slf4j
 @Component
@@ -58,8 +62,8 @@ public class ForeclosureInterestResolver {
     private final JdbcTemplate jdbcTemplate;
 
     /**
-     * @return the flat foreclosure interest for the loan as of {@code closureDate}, or {@code null} to fall back to
-     *         the stock (schedule-based) foreclosure interest.
+     * @return the flat foreclosure interest for the loan as of {@code closureDate}, or {@code null} to fall back to the
+     *         stock (schedule-based) foreclosure interest.
      */
     public BigDecimal resolve(final Loan loan, final LocalDate closureDate) {
         if (loan == null || closureDate == null) {
@@ -86,8 +90,8 @@ public class ForeclosureInterestResolver {
         // Inclusive day count from the last settled date to the closure date.
         final long days = DateUtils.getExactDifferenceInDays(anchor, closureDate) + 1L;
         if (days < 1L) {
-            log.warn("{}: closure date {} is before last settled date {} for product {}; charging zero foreclosure interest",
-                    DATATABLE, closureDate, anchor, loan.productId());
+            log.warn("{}: closure date {} is before last settled date {} for product {}; charging zero foreclosure interest", DATATABLE,
+                    closureDate, anchor, loan.productId());
             return BigDecimal.ZERO;
         }
         // interest = principal * (annualRate / 100) * days / daysInYear. Returned unrounded; the caller wraps it

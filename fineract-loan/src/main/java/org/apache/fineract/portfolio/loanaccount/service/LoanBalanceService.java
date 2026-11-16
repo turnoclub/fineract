@@ -251,8 +251,8 @@ public class LoanBalanceService {
         if (customInterest != null) {
             interest = Money.of(loan.getCurrency(), customInterest);
         }
-        return new LoanRepaymentScheduleInstallment(null, 0, currentDate, currentDate, totalPrincipal.getAmount(),
-                interest.getAmount(), receivables[1].getAmount(), receivables[2].getAmount(), false, null);
+        return new LoanRepaymentScheduleInstallment(null, 0, currentDate, currentDate, totalPrincipal.getAmount(), interest.getAmount(),
+                receivables[1].getAmount(), receivables[2].getAmount(), false, null);
     }
 
     public Money[] retrieveIncomeForOverlappingPeriod(final Loan loan, final LocalDate paymentDate) {

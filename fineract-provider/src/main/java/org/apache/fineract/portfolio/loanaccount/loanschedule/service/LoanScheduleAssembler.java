@@ -316,11 +316,15 @@ public class LoanScheduleAssembler {
         /*
          * If user has not passed the first repayments date then then derive the same based on loan type.
          */
+        // Extracted early (also passed to assembleFrom below): the cutoff rule anchors on the interest-start
+        // date when the caller charges interest from a date other than disbursement (e.g. DMI).
+        final LocalDate interestChargedFromDate = this.fromApiJsonHelper.extractLocalDateNamed("interestChargedFromDate", element);
+
         if (calculatedRepaymentsStartingFromDate == null) {
             // Derive the first-EMI date from the product's installment_day/cutoff_day config (datatable)
             // when present, so callers need not pass repaymentsStartingFromDate. Falls back to stock derivation.
             final LocalDate cutoffFirstRepaymentDate = this.cutoffFirstRepaymentDateResolver.resolve(loanProduct.getId(),
-                    expectedDisbursementDate);
+                    interestChargedFromDate != null ? interestChargedFromDate : expectedDisbursementDate);
             if (cutoffFirstRepaymentDate != null) {
                 calculatedRepaymentsStartingFromDate = cutoffFirstRepaymentDate;
                 repaymentsStartingFromDate = cutoffFirstRepaymentDate;
@@ -328,8 +332,8 @@ public class LoanScheduleAssembler {
                 LocalDate tmpCalculatedRepaymentsStartingFromDate = deriveFirstRepaymentDate(loanType, repaymentEvery,
                         expectedDisbursementDate, repaymentPeriodFrequencyType, 0, calendar, submittedOnDate, repaymentStartDateType);
                 calculatedRepaymentsStartingFromDate = deriveFirstRepaymentDate(loanType, repaymentEvery, expectedDisbursementDate,
-                        repaymentPeriodFrequencyType, loanProduct.getMinimumDaysBetweenDisbursalAndFirstRepayment(), calendar, submittedOnDate,
-                        repaymentStartDateType);
+                        repaymentPeriodFrequencyType, loanProduct.getMinimumDaysBetweenDisbursalAndFirstRepayment(), calendar,
+                        submittedOnDate, repaymentStartDateType);
                 if (!tmpCalculatedRepaymentsStartingFromDate.equals(calculatedRepaymentsStartingFromDate)) {
                     repaymentsStartingFromDate = calculatedRepaymentsStartingFromDate;
                 }
@@ -376,7 +380,6 @@ public class LoanScheduleAssembler {
             graceOnInterestPayment = loanProduct.getLoanProductRelatedDetail().getGraceOnInterestPayment();
         }
         final Integer graceOnInterestCharged = this.fromApiJsonHelper.extractIntegerWithLocaleNamed("graceOnInterestCharged", element);
-        final LocalDate interestChargedFromDate = this.fromApiJsonHelper.extractLocalDateNamed("interestChargedFromDate", element);
         final Boolean isInterestChargedFromDateSameAsDisbursalDateEnabled = this.configurationDomainService
                 .isInterestChargedFromDateSameAsDisbursementDate();
 
@@ -555,16 +558,16 @@ public class LoanScheduleAssembler {
             allowFullTermForTranche = this.fromApiJsonHelper.extractBooleanNamed(LoanApiConstants.ALLOW_FULL_TERM_FOR_TRANCHE, element);
         }
 
-        return LoanApplicationTerms.assembleFrom(applicationCurrency.toData(), loanTermFrequency, loanTermPeriodFrequencyType,
-                numberOfRepayments, repaymentEvery, repaymentPeriodFrequencyType, nthDay, weekDayType, amortizationMethod, interestMethod,
-                interestRatePerPeriod, interestRatePeriodFrequencyType, annualNominalInterestRate, interestCalculationPeriodMethod,
-                allowPartialPeriodInterestCalculation, principalMoney, expectedDisbursementDate, repaymentsStartingFromDate,
-                calculatedRepaymentsStartingFromDate, graceOnPrincipalPayment, recurringMoratoriumOnPrincipalPeriods,
-                graceOnInterestPayment, graceOnInterestCharged, interestChargedFromDate, inArrearsToleranceMoney,
-                loanProduct.isMultiDisburseLoan(), emiAmount, disbursementDatas, maxOutstandingBalance, graceOnArrearsAgeing,
-                daysInMonthType, daysInYearType, isInterestRecalculationEnabled, recalculationFrequencyType, restCalendarInstance,
-                compoundingMethod, compoundingCalendarInstance, compoundingFrequencyType, principalThresholdForLastInstalment,
-                loanProduct.getLoanProductRelatedDetail().getInstallmentAmountInMultiplesOf(),
+        final LoanApplicationTerms loanApplicationTerms = LoanApplicationTerms.assembleFrom(applicationCurrency.toData(), loanTermFrequency,
+                loanTermPeriodFrequencyType, numberOfRepayments, repaymentEvery, repaymentPeriodFrequencyType, nthDay, weekDayType,
+                amortizationMethod, interestMethod, interestRatePerPeriod, interestRatePeriodFrequencyType, annualNominalInterestRate,
+                interestCalculationPeriodMethod, allowPartialPeriodInterestCalculation, principalMoney, expectedDisbursementDate,
+                repaymentsStartingFromDate, calculatedRepaymentsStartingFromDate, graceOnPrincipalPayment,
+                recurringMoratoriumOnPrincipalPeriods, graceOnInterestPayment, graceOnInterestCharged, interestChargedFromDate,
+                inArrearsToleranceMoney, loanProduct.isMultiDisburseLoan(), emiAmount, disbursementDatas, maxOutstandingBalance,
+                graceOnArrearsAgeing, daysInMonthType, daysInYearType, isInterestRecalculationEnabled, recalculationFrequencyType,
+                restCalendarInstance, compoundingMethod, compoundingCalendarInstance, compoundingFrequencyType,
+                principalThresholdForLastInstalment, loanProduct.getLoanProductRelatedDetail().getInstallmentAmountInMultiplesOf(),
                 loanProduct.preCloseInterestCalculationStrategy(), calendar, BigDecimal.ZERO, loanTermVariations,
                 isInterestChargedFromDateSameAsDisbursalDateEnabled, numberOfDays, isSkipMeetingOnFirstDay, detailDTO,
                 allowCompoundingOnEod, isEqualAmortization, isInterestToBeRecoveredFirstWhenGreaterThanEMI,
@@ -584,6 +587,8 @@ public class LoanScheduleAssembler {
                 loanProduct.getLoanProductRelatedDetail().getBuyDownFeeStrategy(),
                 loanProduct.getLoanProductRelatedDetail().getBuyDownFeeIncomeType(),
                 loanProduct.getLoanProductRelatedDetail().isMerchantBuyDownFee(), allowFullTermForTranche);
+        loanApplicationTerms.setLoanProductId(loanProduct.getId());
+        return loanApplicationTerms;
     }
 
     private CalendarInstance createCalendarForSameAsRepayment(final Integer repaymentEvery,
