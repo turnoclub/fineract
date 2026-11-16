@@ -1,0 +1,4 @@
+[
+  { "name": "ENACH", "description": "E-NACH auto-debit", "isCashPayment": false, "position": 2 },
+  { "name": "Payment Link", "description": "Hosted payment link (e.g. Razorpay)", "isCashPayment": false, "position": 3 }
+]

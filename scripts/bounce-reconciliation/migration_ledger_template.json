@@ -1,0 +1,34 @@
+{
+  "loans": [
+    {
+      "external_id": "SRC-LOAN-1001",
+      "client_id": 3,
+      "product_id": 1,
+      "principal": 335000,
+      "loan_term_frequency": 36,
+      "loan_term_frequency_type": 2,
+      "number_of_repayments": 36,
+      "repayment_every": 1,
+      "repayment_frequency_type": 2,
+      "interest_rate_per_period": 25,
+      "amortization_type": 1,
+      "interest_type": 0,
+      "interest_calculation_period_type": 1,
+      "transaction_processing_strategy_code": "interest-principal-penalties-fees-order-strategy",
+      "submitted_on": "06 November 2024",
+      "approved_on": "30 November 2024",
+      "disbursed_on": "30 November 2024",
+      "events": [
+        {"date": "05 January 2025", "type": "repayment", "amount": 14715, "payment_type_id": 1, "payment_ref": "NACH-UTR-2025010500001", "external_id": "PAY-1001-2025-01"},
+        {"date": "06 February 2025", "type": "repayment", "amount": 13320},
+        {"date": "06 March 2025", "type": "repayment", "amount": 13320},
+        {"date": "05 April 2025", "type": "bounce", "amount": 708, "ref": "APR-BOUNCE"},
+        {"date": "06 April 2025", "type": "repayment", "amount": 13320},
+        {"date": "05 May 2025", "type": "bounce", "amount": 708, "ref": "MAY-BOUNCE"},
+        {"date": "20 May 2025", "type": "repayment", "amount": 13320},
+        {"date": "05 May 2025", "type": "waive", "ref": "MAY-BOUNCE"}
+      ],
+      "expect": {"outstanding": 0}
+    }
+  ]
+}

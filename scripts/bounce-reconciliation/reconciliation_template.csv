@@ -1,0 +1,5 @@
+loan_id,outcome,amount_paid,payment_date,payment_type_id,payment_ref,external_id
+103,full_waive,,,,,
+200,partial,11500,05 July 2025,1,NACH-UTR-2025070500123,PAY-200-2025-07
+201,full_collect,12685,05 July 2025,1,NACH-UTR-2025070500124,PAY-201-2025-07
+202,uncollect,,,,,

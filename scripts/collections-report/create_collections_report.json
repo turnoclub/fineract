@@ -1,0 +1,18 @@
+{
+  "reportName": "Collections",
+  "reportType": "Table",
+  "reportCategory": "Loan",
+  "useReport": true,
+  "description": "Per-installment collections report reproducing the LMS Collections export (principal/interest/charge split, paid date, UTRs, instrument type, investor settlement fields). Supports an optional loanIds filter (comma-separated internal or external loan ids; empty = all).",
+  "reportSql": "SELECT\nml.external_id AS application_id,\nml.external_id AS client_loan_id,\nlrs.installment AS installment_no,\nlrs.duedate AS due_date,\nCOALESCE(m.principal_portion_derived, 0) AS principal,\nCOALESCE(m.interest_portion_derived, 0) AS interest,\n0 AS other_charges,\nCOALESCE(cagg.overdue_amt, 0) AS overdue_charges,\nCOALESCE(m.penalty_charges_portion_derived, 0) AS penalty_charges,\nCOALESCE(cagg.other_amt, 0) AS fee_charges,\nCOALESCE(cagg.bounce_amt, 0) AS bounce_charges,\nlt.amount AS amount,\nlt.transaction_date AS paid_date,\neaot.effective_date_from AS investor_transfer_date,\neaot.settlement_date AS settlement_date,\npd.receipt_number AS client_utr_number,\nCASE WHEN lrs.completed_derived = true THEN 'Y' ELSE 'N' END AS emi_closed,\nCASE WHEN ml.loan_sub_status_id = 100 AND lt.transaction_date = ml.closedon_date THEN 'Y' ELSE 'N' END AS foreclosure,\n'normal' AS payment_type,\neaot.external_id AS investor_utr_number,\nlt.external_id AS reference_no,\npt.value AS instrument_type\nFROM m_loan_transaction lt\nJOIN m_loan ml ON ml.id = lt.loan_id\nJOIN m_loan_transaction_repayment_schedule_mapping m ON m.loan_transaction_id = lt.id\nJOIN m_loan_repayment_schedule lrs ON lrs.id = m.loan_repayment_schedule_id\nLEFT JOIN m_payment_detail pd ON pd.id = lt.payment_detail_id\nLEFT JOIN m_payment_type pt ON pt.id = pd.payment_type_id\nLEFT JOIN (SELECT cpb.loan_transaction_id AS txn_id, cpb.installment_number AS inst_no, SUM(CASE WHEN c.name LIKE '%Bounce%' THEN cpb.amount ELSE 0 END) AS bounce_amt, SUM(CASE WHEN c.charge_time_enum = 9 THEN cpb.amount ELSE 0 END) AS overdue_amt, SUM(CASE WHEN c.name NOT LIKE '%Bounce%' AND c.charge_time_enum != 9 THEN cpb.amount ELSE 0 END) AS other_amt FROM m_loan_charge_paid_by cpb JOIN m_loan_charge lc ON lc.id = cpb.loan_charge_id JOIN m_charge c ON c.id = lc.charge_id GROUP BY cpb.loan_transaction_id, cpb.installment_number) cagg ON cagg.txn_id = lt.id AND cagg.inst_no = lrs.installment\nLEFT JOIN (SELECT lm.loan_id AS loan_id, t.external_id AS external_id, t.settlement_date AS settlement_date, t.effective_date_from AS effective_date_from, ROW_NUMBER() OVER (PARTITION BY lm.loan_id ORDER BY t.settlement_date DESC, t.id DESC) AS rn FROM m_external_asset_owner_transfer_loan_mapping lm JOIN m_external_asset_owner_transfer t ON t.id = lm.owner_transfer_id) eaot ON eaot.loan_id = ml.id AND eaot.rn = 1\nWHERE lt.transaction_type_enum = 2 AND lt.is_reversed = false AND lt.transaction_date BETWEEN '${startDate}' AND '${endDate}'\nAND ('${loanIds}' = '' OR '${loanIds}' = CONCAT('$', '{loanIds}') OR CONCAT(',', REPLACE('${loanIds}', ' ', ''), ',') LIKE CONCAT('%,', ml.id, ',%') OR CONCAT(',', REPLACE('${loanIds}', ' ', ''), ',') LIKE CONCAT('%,', ml.external_id, ',%'))\nORDER BY lt.transaction_date, ml.external_id, lrs.installment",
+  "reportParameters": [
+    {
+      "parameterId": 1,
+      "reportParameterName": "startDate"
+    },
+    {
+      "parameterId": 2,
+      "reportParameterName": "endDate"
+    }
+  ]
+}
