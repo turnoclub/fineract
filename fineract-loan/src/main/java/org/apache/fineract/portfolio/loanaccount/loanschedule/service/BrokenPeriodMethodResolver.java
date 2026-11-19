@@ -41,6 +41,10 @@ import org.springframework.stereotype.Component;
  * <li>{@link #ADJUSTED_DAYS_SYMMETRIC} — DMI: broken days normalized so the interest-start month counts as 30 days
  * (31-day month &rarr; &minus;1, February &rarr; +2); the first installment is EMI + dailyRate&times;(days&minus;30),
  * moving in BOTH directions (smaller than the EMI for short broken periods).</li>
+ * <li>{@link #DAYS_360_LEVEL_EMI} — level EMI on 30/360 (used by Northern Arc): applies to EVERY period, not just the
+ * first. EMI = plain annuity rounded UP to the rupee; interest =
+ * round2(round2(balance&times;rate/100)/360)&times;days360(start, end); principal = EMI &minus; interest (so the first
+ * installment equals the EMI); the last installment clears the balance.</li>
  * </ul>
  *
  * <p>
@@ -56,6 +60,7 @@ public class BrokenPeriodMethodResolver {
     public static final String STANDARD = "STANDARD";
     public static final String ACTUAL_DAYS_SURCHARGE = "ACTUAL_DAYS_SURCHARGE";
     public static final String ADJUSTED_DAYS_SYMMETRIC = "ADJUSTED_DAYS_SYMMETRIC";
+    public static final String DAYS_360_LEVEL_EMI = "DAYS_360_LEVEL_EMI";
 
     private static final String DATATABLE = "loan_product_first_emi_config";
 

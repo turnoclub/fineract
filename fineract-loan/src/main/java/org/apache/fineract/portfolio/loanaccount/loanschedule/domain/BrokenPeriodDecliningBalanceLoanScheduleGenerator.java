@@ -20,6 +20,7 @@ package org.apache.fineract.portfolio.loanaccount.loanschedule.domain;
 
 import java.math.BigDecimal;
 import java.math.MathContext;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.util.Collection;
 import java.util.Map;
@@ -29,6 +30,7 @@ import org.apache.fineract.infrastructure.core.exception.GeneralPlatformDomainRu
 import org.apache.fineract.infrastructure.core.service.DateUtils;
 import org.apache.fineract.organisation.monetary.domain.Money;
 import org.apache.fineract.organisation.monetary.mapper.CurrencyMapper;
+import org.apache.fineract.portfolio.common.domain.PeriodFrequencyType;
 import org.apache.fineract.portfolio.loanaccount.data.LoanTermVariationsData;
 import org.apache.fineract.portfolio.loanaccount.domain.LoanTransactionRepository;
 import org.apache.fineract.portfolio.loanaccount.loanschedule.service.BrokenPeriodMethodResolver;
@@ -56,6 +58,10 @@ import org.springframework.stereotype.Component;
  * moves symmetrically: EMI + dailyRate&times;(adjustedDays&minus;30), smaller than the EMI for short broken
  * periods.</li>
  * <li>{@code STANDARD}: explicit opt-out, stock Fineract first period.</li>
+ * <li>{@code DAYS_360_LEVEL_EMI} (used by Northern Arc): replaces EVERY period, not just the first: EMI = annuity
+ * rounded UP to the rupee; interest = round2(round2(balance &times; rate / 100) / 360) &times; days360(start, end);
+ * principal = EMI &minus; interest; the last installment clears the balance. See
+ * {@link #calculateDays360LevelEmiPeriod}.</li>
  * </ul>
  *
  * <p>
@@ -82,6 +88,8 @@ public class BrokenPeriodDecliningBalanceLoanScheduleGenerator extends Cumulativ
     private static final BigDecimal DAILY_RATE_DIVISOR = BigDecimal.valueOf(36000);
     // Monthly rate = annualRate% / 12 / 100 = annualRate / 1200 (also the full 30-day-month interest factor).
     private static final BigDecimal MONTHLY_RATE_DIVISOR = BigDecimal.valueOf(1200);
+    private static final BigDecimal HUNDRED = BigDecimal.valueOf(100);
+    private static final BigDecimal DAYS_IN_YEAR_360 = BigDecimal.valueOf(360);
 
     private final BrokenPeriodMethodResolver brokenPeriodMethodResolver;
 
@@ -101,6 +109,13 @@ public class BrokenPeriodDecliningBalanceLoanScheduleGenerator extends Cumulativ
             final TreeMap<LocalDate, Money> principalVariation, final Map<LocalDate, Money> compoundingMap, final LocalDate periodStartDate,
             final LocalDate periodEndDate, final Collection<LoanTermVariationsData> termVariations) {
 
+        // Per-product method, memoized on the terms (DAYS_360_LEVEL_EMI needs it for every period).
+        final String method = resolveBrokenPeriodMethod(loanApplicationTerms);
+        if (BrokenPeriodMethodResolver.DAYS_360_LEVEL_EMI.equalsIgnoreCase(method)) {
+            return calculateDays360LevelEmiPeriod(outstandingBalance, cumulatingInterestPaymentDueToGrace, loanApplicationTerms,
+                    periodNumber, periodStartDate, periodEndDate, principalVariation, termVariations);
+        }
+
         final PrincipalInterest stock = super.calculatePrincipalInterestComponentsForPeriod(calculator,
                 interestCalculationGraceOnRepaymentPeriodFraction, totalCumulativePrincipal, totalCumulativeInterest,
                 totalInterestDueForLoan, cumulatingInterestPaymentDueToGrace, outstandingBalance, loanApplicationTerms, periodNumber, mc,
@@ -111,10 +126,9 @@ public class BrokenPeriodDecliningBalanceLoanScheduleGenerator extends Cumulativ
             return stock;
         }
 
-        // Per-product method; null (no config row) keeps the legacy actual-days behaviour for compatibility.
+        // null (no config row) keeps the legacy actual-days behaviour for compatibility.
         // Any OTHER value is a misconfigured datatable row: fail loudly rather than silently pricing the
         // schedule with the wrong lender's math.
-        final String method = brokenPeriodMethodResolver.resolve(loanApplicationTerms.getLoanProductId());
         if (BrokenPeriodMethodResolver.STANDARD.equalsIgnoreCase(method)) {
             return stock;
         }
@@ -184,5 +198,139 @@ public class BrokenPeriodDecliningBalanceLoanScheduleGenerator extends Cumulativ
         final PrincipalInterest result = new PrincipalInterest(newPrincipal, brokenInterest, stock.interestPaymentDueToGrace());
         result.setRescheduleInterestPortion(stock.getRescheduleInterestPortion());
         return result;
+    }
+
+    private String resolveBrokenPeriodMethod(final LoanApplicationTerms loanApplicationTerms) {
+        if (loanApplicationTerms.isBrokenPeriodMethodResolved()) {
+            return loanApplicationTerms.getBrokenPeriodMethod();
+        }
+        final String method = brokenPeriodMethodResolver.resolve(loanApplicationTerms.getLoanProductId());
+        loanApplicationTerms.setBrokenPeriodMethod(method);
+        loanApplicationTerms.setBrokenPeriodMethodResolved(true);
+        return method;
+    }
+
+    /**
+     * DAYS_360_LEVEL_EMI period: level-EMI 30/360 schedule with paise-rounded daily interest. Currently used by
+     * Northern Arc; it is a port of Turno's {@code NorthernArcEmiServiceImpl}, which was fitted to Northern Arc's
+     * demand schedules:
+     * <ul>
+     * <li>EMI = plain annuity at annualRate/12, rounded UP to the whole rupee (or the fixedEmiAmount given on the
+     * loan).</li>
+     * <li>interest = round2(round2(balance &times; annualRate / 100) / 360) &times; days360(start, end), HALF_UP.
+     * Period 1 starts at the interest-start date (interestChargedFromDate, else disbursement); later periods start at
+     * the previous due date.</li>
+     * <li>principal = EMI &minus; interest, so the first installment equals the EMI whatever the broken period; the
+     * last installment's principal is the remaining balance.</li>
+     * </ul>
+     * Only plain single-disbursement, monthly, SAME_AS_REPAYMENT_PERIOD loans are supported. Interest recalculation,
+     * grace, multi-disbursement, term variations, principal variations and any other repayment frequency or interest
+     * calculation period are not part of this convention, so such a loan is rejected rather than priced wrongly.
+     */
+    private PrincipalInterest calculateDays360LevelEmiPeriod(final Money outstandingBalance,
+            final Money cumulatingInterestPaymentDueToGrace, final LoanApplicationTerms loanApplicationTerms, final int periodNumber,
+            final LocalDate periodStartDate, final LocalDate periodEndDate, final TreeMap<LocalDate, Money> principalVariation,
+            final Collection<LoanTermVariationsData> termVariations) {
+        validateDays360LevelEmiTerms(loanApplicationTerms, principalVariation, termVariations);
+
+        final LocalDate interestStartDate;
+        if (periodNumber == 1) {
+            // Under SAME_AS_REPAYMENT the period start passed in is the nominal month start, not the disbursal date.
+            interestStartDate = loanApplicationTerms.getInterestChargedFromLocalDate() != null
+                    ? loanApplicationTerms.getInterestChargedFromLocalDate()
+                    : loanApplicationTerms.getExpectedDisbursementDate();
+        } else {
+            interestStartDate = periodStartDate;
+        }
+
+        final BigDecimal balance = outstandingBalance.getAmount();
+        final BigDecimal rate = loanApplicationTerms.getAnnualNominalInterestRate();
+        final BigDecimal annualInterest = balance.multiply(rate).divide(HUNDRED, 2, RoundingMode.HALF_UP);
+        final BigDecimal dailyInterest = annualInterest.divide(DAYS_IN_YEAR_360, 2, RoundingMode.HALF_UP);
+        final int days = days360(interestStartDate, periodEndDate);
+        if (days < 0) {
+            throw new GeneralPlatformDomainRuleException("error.msg.loan.product.broken.period.method.invalid.dates",
+                    BrokenPeriodMethodResolver.DAYS_360_LEVEL_EMI + " interest start " + interestStartDate
+                            + " is after installment due date " + periodEndDate
+                            + " (loan product " + loanApplicationTerms.getLoanProductId() + ")",
+                    loanApplicationTerms.getLoanProductId());
+        }
+        final Money interest = Money.of(outstandingBalance.getCurrency(), dailyInterest.multiply(BigDecimal.valueOf(days)));
+
+        Money principal;
+        if (loanApplicationTerms.isLastRepaymentPeriod(periodNumber)) {
+            principal = outstandingBalance;
+        } else {
+            principal = Money.of(outstandingBalance.getCurrency(), ceiledAnnuityEmi(loanApplicationTerms)).minus(interest);
+            if (principal.isLessThanZero()) {
+                throw new GeneralPlatformDomainRuleException("error.msg.loan.product.broken.period.method.interest.exceeds.emi",
+                        BrokenPeriodMethodResolver.DAYS_360_LEVEL_EMI + " installment " + periodNumber + " interest " + interest.getAmount()
+                                + " exceeds the EMI (loan product " + loanApplicationTerms.getLoanProductId() + ")",
+                        loanApplicationTerms.getLoanProductId());
+            }
+            if (principal.isGreaterThan(outstandingBalance)) {
+                principal = outstandingBalance;
+            }
+        }
+        return new PrincipalInterest(principal, interest, cumulatingInterestPaymentDueToGrace);
+    }
+
+    private static void validateDays360LevelEmiTerms(final LoanApplicationTerms terms, final TreeMap<LocalDate, Money> principalVariation,
+            final Collection<LoanTermVariationsData> termVariations) {
+        final boolean monthly = terms.getRepaymentPeriodFrequencyType() == PeriodFrequencyType.MONTHS
+                && Integer.valueOf(1).equals(terms.getRepaymentEvery());
+        final String unsupported;
+        if (terms.isInterestRecalculationEnabled()) {
+            unsupported = "interest recalculation";
+        } else if (terms.getPrincipalGrace() > 0 || terms.getInterestPaymentGrace() > 0 || terms.getInterestChargingGrace() > 0) {
+            unsupported = "grace";
+        } else if (terms.isMultiDisburseLoan()) {
+            unsupported = "multiple disbursements";
+        } else if (!monthly) {
+            unsupported = "repayment frequency other than every 1 month";
+        } else if (terms.getInterestCalculationPeriodMethod() == null
+                || !terms.getInterestCalculationPeriodMethod().isSameAsRepaymentPeriod()) {
+            unsupported = "interest calculation period other than SAME_AS_REPAYMENT_PERIOD";
+        } else if ((termVariations != null && !termVariations.isEmpty()) || (principalVariation != null && !principalVariation.isEmpty())) {
+            unsupported = "term or principal variations";
+        } else {
+            return;
+        }
+        throw new GeneralPlatformDomainRuleException("error.msg.loan.product.broken.period.method.unsupported.terms",
+                BrokenPeriodMethodResolver.DAYS_360_LEVEL_EMI + " does not support " + unsupported + " (loan product "
+                        + terms.getLoanProductId() + ")",
+                terms.getLoanProductId());
+    }
+
+    /**
+     * Ceil-to-rupee annuity on the loan principal. Uses double arithmetic deliberately, identical to Turno's
+     * {@code AppUtils.calculateMonthlyPaymentWithoutRounding} + {@code roundCeilUp}, so both sides land on the same
+     * rupee even when the exact annuity sits a hair above a whole number.
+     */
+    private static BigDecimal ceiledAnnuityEmi(final LoanApplicationTerms loanApplicationTerms) {
+        // Only an EMI supplied on the loan itself (actualFixedEmiAmount) overrides the ceiled annuity.
+        // getFixedEmiAmount() can't be used: the cumulative generator pre-fills it with its own 2-decimal PMT.
+        if (loanApplicationTerms.getActualFixedEmiAmount() != null) {
+            return loanApplicationTerms.getActualFixedEmiAmount();
+        }
+        final double monthlyRate = loanApplicationTerms.getAnnualNominalInterestRate().doubleValue() / 12 / 100;
+        final int n = loanApplicationTerms.getNumberOfRepayments();
+        final double principal = loanApplicationTerms.getPrincipal().getAmount().doubleValue();
+        if (monthlyRate == 0) {
+            // Zero-rate loan: the annuity formula is 0/0, so the EMI is simply principal / n.
+            return BigDecimal.valueOf(principal / n).setScale(0, RoundingMode.CEILING);
+        }
+        final double emi = (principal * monthlyRate) / (1 - Math.pow(1 + monthlyRate, -n));
+        return BigDecimal.valueOf(emi).setScale(0, RoundingMode.CEILING);
+    }
+
+    /**
+     * 30/360 day count used by this method: both day-of-month values are capped at 30 (unlike the US/NASD rule, the end
+     * day is capped regardless of the start day).
+     */
+    static int days360(final LocalDate start, final LocalDate end) {
+        final int d1 = Math.min(start.getDayOfMonth(), DAYS_IN_MONTH);
+        final int d2 = Math.min(end.getDayOfMonth(), DAYS_IN_MONTH);
+        return (end.getYear() - start.getYear()) * 360 + (end.getMonthValue() - start.getMonthValue()) * DAYS_IN_MONTH + (d2 - d1);
     }
 }

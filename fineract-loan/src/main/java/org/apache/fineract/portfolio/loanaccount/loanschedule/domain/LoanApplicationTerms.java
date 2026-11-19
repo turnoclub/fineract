@@ -224,6 +224,18 @@ public final class LoanApplicationTerms {
     @Setter
     private Long loanProductId;
 
+    /**
+     * Per-schedule memo of the product's {@code loan_product_first_emi_config.broken_period_method}, so methods that
+     * apply to every period (e.g. DAYS_360_LEVEL_EMI) don't hit the datatable once per installment. Terms are rebuilt
+     * for each schedule generation, so a datatable edit is picked up on the next generation.
+     */
+    @Getter
+    @Setter
+    private String brokenPeriodMethod;
+    @Getter
+    @Setter
+    private boolean brokenPeriodMethodResolved;
+
     @Getter
     private LoanPreCloseInterestCalculationStrategy preClosureInterestCalculationStrategy;
 

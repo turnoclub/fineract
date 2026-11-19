@@ -127,7 +127,10 @@
            NULL                    - legacy: actual-days math for any SAME_AS_REPAYMENT loan (pre-existing behaviour)
            STANDARD                - stock Fineract first period (explicit opt-out)
            ACTUAL_DAYS_SURCHARGE   - Vivriti: actual broken days; >30 surcharges the EMI, <30 keeps EMI flat
-           ADJUSTED_DAYS_SYMMETRIC - DMI: days normalized to a 30-day start month; installment = EMI +/- delta -->
+           ADJUSTED_DAYS_SYMMETRIC - DMI: days normalized to a 30-day start month; installment = EMI +/- delta
+           DAYS_360_LEVEL_EMI      - level EMI on 30/360, every period (used by Northern Arc): ceil-rupee EMI,
+                                     paise-rounded daily interest, installment = EMI, last clears the balance
+         VARCHAR(50) holds any of these, so adding a method needs no schema change. -->
     <changeSet author="fineract" id="loan_product_first_emi_config-4-broken-period-method">
         <preConditions onFail="MARK_RAN">
             <not>
