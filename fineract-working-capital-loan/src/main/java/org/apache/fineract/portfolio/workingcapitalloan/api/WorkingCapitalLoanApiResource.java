@@ -48,10 +48,11 @@ import org.apache.fineract.infrastructure.core.api.jersey.Pagination;
 import org.apache.fineract.infrastructure.core.data.CommandProcessingResult;
 import org.apache.fineract.infrastructure.core.domain.ExternalId;
 import org.apache.fineract.infrastructure.core.exception.UnrecognizedQueryParamException;
-import org.apache.fineract.infrastructure.core.service.CommandParameterUtil;
 import org.apache.fineract.infrastructure.core.service.ExternalIdFactory;
 import org.apache.fineract.infrastructure.security.service.PlatformSecurityContext;
+import org.apache.fineract.portfolio.workingcapitalloan.WorkingCapitalLoanCommandParameterUtil;
 import org.apache.fineract.portfolio.workingcapitalloan.WorkingCapitalLoanConstants;
+import org.apache.fineract.portfolio.workingcapitalloan.data.MarkWorkingCapitalLoanAsFraudRequest;
 import org.apache.fineract.portfolio.workingcapitalloan.data.WorkingCapitalLoanData;
 import org.apache.fineract.portfolio.workingcapitalloan.data.WorkingCapitalLoanDelinquencyTagHistoryData;
 import org.apache.fineract.portfolio.workingcapitalloan.data.WorkingCapitalLoanPeriodPaymentRateChangeData;
@@ -159,6 +160,43 @@ public class WorkingCapitalLoanApiResource {
         return modifyLoanApplication(loanId, null, apiRequestBodyAsJson);
     }
 
+    @PUT
+    @Path("{loanId}/mark-as-fraud")
+    @Consumes({ MediaType.APPLICATION_JSON })
+    @Produces({ MediaType.APPLICATION_JSON })
+    @Operation(operationId = "markWorkingCapitalLoanAsFraudById", summary = "Mark or unmark a Working Capital Loan as fraudulent", description = "Flags the loan as fraudulent. When the loan is later charged off, a fraudulent loan is routed to the charge-off fraud expense account instead of the regular charge-off expense account. Does not change the loan status.")
+    @RequestBody(required = true, content = @Content(schema = @Schema(implementation = MarkWorkingCapitalLoanAsFraudRequest.class)))
+    @ApiResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = CommandProcessingResult.class)))
+    public CommandProcessingResult markAsFraudById(
+            @PathParam("loanId") @Parameter(description = "loanId", required = true) final Long loanId,
+            @Parameter(hidden = true) final String apiRequestBodyAsJson) {
+        return markAsFraud(loanId, null, apiRequestBodyAsJson);
+    }
+
+    @PUT
+    @Path("external-id/{loanExternalId}/mark-as-fraud")
+    @Consumes({ MediaType.APPLICATION_JSON })
+    @Produces({ MediaType.APPLICATION_JSON })
+    @Operation(operationId = "markWorkingCapitalLoanAsFraudByExternalId", summary = "Mark or unmark a Working Capital Loan as fraudulent by external id", description = "Flags the loan as fraudulent. When the loan is later charged off, a fraudulent loan is routed to the charge-off fraud expense account instead of the regular charge-off expense account. Does not change the loan status.")
+    @RequestBody(required = true, content = @Content(schema = @Schema(implementation = MarkWorkingCapitalLoanAsFraudRequest.class)))
+    @ApiResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = CommandProcessingResult.class)))
+    public CommandProcessingResult markAsFraudByExternalId(
+            @PathParam("loanExternalId") @Parameter(description = "loanExternalId", required = true) final String loanExternalId,
+            @Parameter(hidden = true) final String apiRequestBodyAsJson) {
+        return markAsFraud(null, loanExternalId, apiRequestBodyAsJson);
+    }
+
+    private CommandProcessingResult markAsFraud(final Long loanId, final String loanExternalIdStr, final String apiRequestBodyAsJson) {
+        final Long resolvedLoanId = loanId != null ? loanId
+                : readPlatformService.getResolvedLoanId(ExternalIdFactory.produce(loanExternalIdStr));
+        if (resolvedLoanId == null) {
+            throw new WorkingCapitalLoanNotFoundException(ExternalIdFactory.produce(loanExternalIdStr));
+        }
+        final CommandWrapper commandRequest = new CommandWrapperBuilder().withJson(apiRequestBodyAsJson)
+                .markAsFraudWorkingCapitalLoan(resolvedLoanId).build();
+        return this.commandsSourceWritePlatformService.logCommandSource(commandRequest);
+    }
+
     @DELETE
     @Path("{loanId}")
     @Produces({ MediaType.APPLICATION_JSON })
@@ -233,7 +271,7 @@ public class WorkingCapitalLoanApiResource {
     @Path("{loanId}")
     @Consumes({ MediaType.APPLICATION_JSON })
     @Produces({ MediaType.APPLICATION_JSON })
-    @Operation(operationId = "stateTransitionWorkingCapitalLoanById", summary = "Approve/Reject/Undo-approve/Disburse/Undo-disburse a Working Capital Loan", description = "Mandatory command query parameter: approve, reject, undoapproval, disburse, or undodisbursal.")
+    @Operation(operationId = "stateTransitionWorkingCapitalLoanById", summary = "Approve/Reject/Undo-approve/Disburse/Undo-disburse a Working Capital Loan", description = "Mandatory command query parameter: approve, reject, undoapproval, disburse, or undodisbursal. The command value is case-insensitive and hyphens are ignored, e.g. chargeOff, chargeoff and charge-off are equivalent.")
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = WorkingCapitalLoanApiResourceSwagger.PostWorkingCapitalLoansLoanIdRequest.class)))
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = WorkingCapitalLoanApiResourceSwagger.PostWorkingCapitalLoansLoanIdResponse.class))) })
@@ -248,7 +286,7 @@ public class WorkingCapitalLoanApiResource {
     @Path("external-id/{loanExternalId}")
     @Consumes({ MediaType.APPLICATION_JSON })
     @Produces({ MediaType.APPLICATION_JSON })
-    @Operation(operationId = "stateTransitionWorkingCapitalLoanByExternalId", summary = "Approve/Reject/Undo-approve/Disburse/Undo-disburse a Working Capital Loan by external id", description = "Mandatory command query parameter: approve, reject, undoapproval, disburse, or undodisbursal.")
+    @Operation(operationId = "stateTransitionWorkingCapitalLoanByExternalId", summary = "Approve/Reject/Undo-approve/Disburse/Undo-disburse a Working Capital Loan by external id", description = "Mandatory command query parameter: approve, reject, undoapproval, disburse, or undodisbursal. The command value is case-insensitive and hyphens are ignored, e.g. chargeOff, chargeoff and charge-off are equivalent.")
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = WorkingCapitalLoanApiResourceSwagger.PostWorkingCapitalLoansLoanIdRequest.class)))
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = WorkingCapitalLoanApiResourceSwagger.PostWorkingCapitalLoansLoanIdResponse.class))) })
@@ -292,15 +330,15 @@ public class WorkingCapitalLoanApiResource {
 
         final CommandWrapperBuilder builder = new CommandWrapperBuilder().withJson(apiRequestBodyAsJson);
         CommandWrapper commandRequest = null;
-        if (CommandParameterUtil.is(commandParam, "approve")) {
+        if (WorkingCapitalLoanCommandParameterUtil.is(commandParam, "approve")) {
             commandRequest = builder.approveWorkingCapitalLoanApplication(resolvedLoanId).build();
-        } else if (CommandParameterUtil.is(commandParam, "reject")) {
+        } else if (WorkingCapitalLoanCommandParameterUtil.is(commandParam, "reject")) {
             commandRequest = builder.rejectWorkingCapitalLoanApplication(resolvedLoanId).build();
-        } else if (CommandParameterUtil.is(commandParam, "undoapproval")) {
+        } else if (WorkingCapitalLoanCommandParameterUtil.is(commandParam, "undoapproval")) {
             commandRequest = builder.undoWorkingCapitalLoanApplicationApproval(resolvedLoanId).build();
-        } else if (CommandParameterUtil.is(commandParam, "disburse")) {
+        } else if (WorkingCapitalLoanCommandParameterUtil.is(commandParam, "disburse")) {
             commandRequest = builder.disburseWorkingCapitalLoanApplication(resolvedLoanId).build();
-        } else if (CommandParameterUtil.is(commandParam, "undodisbursal")) {
+        } else if (WorkingCapitalLoanCommandParameterUtil.is(commandParam, "undodisbursal")) {
             commandRequest = builder.undoWorkingCapitalLoanApplicationDisbursal(resolvedLoanId).build();
         }
 

@@ -76,6 +76,8 @@ import org.springframework.util.CollectionUtils;
 @RequiredArgsConstructor
 public abstract class AbstractLoanRepaymentScheduleTransactionProcessor implements LoanRepaymentScheduleTransactionProcessor {
 
+    private static final Comparator<Long> CHARGE_ID_ORDER = Comparator.nullsLast(Comparator.naturalOrder());
+
     protected final SingleLoanChargeRepaymentScheduleProcessingWrapper loanChargeProcessor = new SingleLoanChargeRepaymentScheduleProcessingWrapper();
     protected final ExternalIdFactory externalIdFactory;
     protected final LoanChargeValidator loanChargeValidator;
@@ -506,6 +508,17 @@ public abstract class AbstractLoanRepaymentScheduleTransactionProcessor implemen
         changedTransactionDetail.addTransactionChange(new TransactionChangeData(loanTransaction, newLoanTransaction));
     }
 
+    /**
+     * Whether the installment is the additional (N+1) installment that amounts credited after maturity go to. A re-age
+     * keeps an additional installment that something was paid, waived or written off on within the re-aged schedule:
+     * regular installments follow it, and amounts credited after the re-age belong to those.
+     */
+    protected static boolean isTrailingAdditionalInstallment(final LoanRepaymentScheduleInstallment installment,
+            final List<LoanRepaymentScheduleInstallment> installments) {
+        return installment.isAdditional() && installments.stream()
+                .noneMatch(i -> !i.isAdditional() && !i.isDownPayment() && i.getDueDate().isAfter(installment.getDueDate()));
+    }
+
     protected void processCreditTransaction(LoanTransaction loanTransaction, MoneyHolder overpaymentHolder, MonetaryCurrency currency,
             List<LoanRepaymentScheduleInstallment> installments) {
         loanTransaction.resetDerivedComponents();
@@ -540,7 +553,7 @@ public abstract class AbstractLoanRepaymentScheduleTransactionProcessor implemen
 
                     // If already exists an additional installment just update the due date and
                     // principal from the Loan chargeback / CBR transaction
-                } else if (currentInstallment.isAdditional()) {
+                } else if (isTrailingAdditionalInstallment(currentInstallment, installmentToBeProcessed)) {
                     if (DateUtils.isAfter(transactionDate, currentInstallment.getDueDate())) {
                         currentInstallment.updateDueDate(transactionDate);
                     }
@@ -746,8 +759,7 @@ public abstract class AbstractLoanRepaymentScheduleTransactionProcessor implemen
                         installemntCharge = loanCharge;
                         chargePerInstallment = unpaidLoanChargePerInstallment;
                     }
-                } else if (earliestUnpaidCharge == null
-                        || DateUtils.isBefore(loanCharge.getDueLocalDate(), earliestUnpaidCharge.getDueLocalDate())) {
+                } else if (earliestUnpaidCharge == null || isPaidBefore(loanCharge, earliestUnpaidCharge)) {
                     earliestUnpaidCharge = loanCharge;
                 }
             }
@@ -881,8 +893,7 @@ public abstract class AbstractLoanRepaymentScheduleTransactionProcessor implemen
                         installemntCharge = loanCharge;
                         chargePerInstallment = paidLoanChargePerInstallment;
                     }
-                } else if (latestPaidCharge == null || (loanCharge.isPaidOrPartiallyPaid(currency)
-                        && DateUtils.isAfter(loanCharge.getDueLocalDate(), latestPaidCharge.getDueLocalDate()))) {
+                } else if (latestPaidCharge == null || isPaidBefore(latestPaidCharge, loanCharge)) {
                     latestPaidCharge = loanCharge;
                 }
             }
@@ -893,6 +904,18 @@ public abstract class AbstractLoanRepaymentScheduleTransactionProcessor implemen
         }
 
         return latestPaidCharge;
+    }
+
+    /**
+     * The order in which charges of the same kind are paid: by due date, then by id, so that charges due on the same
+     * date are paid in the order they were created. A charge not saved yet comes after the saved ones. Undoing a
+     * payment goes in the reverse order.
+     */
+    private static boolean isPaidBefore(final LoanCharge charge, final LoanCharge other) {
+        if (!DateUtils.isEqual(charge.getDueLocalDate(), other.getDueLocalDate())) {
+            return DateUtils.isBefore(charge.getDueLocalDate(), other.getDueLocalDate());
+        }
+        return CHARGE_ID_ORDER.compare(charge.getId(), other.getId()) < 0;
     }
 
     protected void addChargeOnlyRepaymentInstallmentIfRequired(Set<LoanCharge> charges,

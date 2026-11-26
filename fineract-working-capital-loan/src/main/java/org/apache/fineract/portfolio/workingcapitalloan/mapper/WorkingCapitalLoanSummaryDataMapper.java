@@ -34,16 +34,19 @@ public interface WorkingCapitalLoanSummaryDataMapper {
     @Named("toSummaryData")
     @Mapping(target = "currency", source = ".", qualifiedByName = "toCurrency")
     // Principal
-    @Mapping(target = "principal", source = "balance.principal", qualifiedByName = "nullToZero")
+    @Mapping(target = "principal", source = "balance.totalPrincipalDue", qualifiedByName = "nullToZero")
     @Mapping(target = "principalPaid", source = "balance.principalPaid", qualifiedByName = "nullToZero")
+    @Mapping(target = "principalAdjustment", source = "balance.principalAdjustment", qualifiedByName = "nullToZero")
     @Mapping(target = "principalOutstanding", source = "balance.principalOutstanding", qualifiedByName = "nullToZero")
     // Fee
     @Mapping(target = "fee", source = "balance.fee", qualifiedByName = "nullToZero")
     @Mapping(target = "feePaid", source = "balance.feePaid", qualifiedByName = "nullToZero")
+    @Mapping(target = "feeWaived", source = "balance.feeWaived", qualifiedByName = "nullToZero")
     @Mapping(target = "feeOutstanding", source = "balance.feeOutstanding", qualifiedByName = "nullToZero")
     // Penalty
     @Mapping(target = "penalty", source = "balance.penalty", qualifiedByName = "nullToZero")
     @Mapping(target = "penaltyPaid", source = "balance.penaltyPaid", qualifiedByName = "nullToZero")
+    @Mapping(target = "penaltyWaived", source = "balance.penaltyWaived", qualifiedByName = "nullToZero")
     @Mapping(target = "penaltyOutstanding", source = "balance.penaltyOutstanding", qualifiedByName = "nullToZero")
     // Income recognition
     @Mapping(target = "realizedIncomeFromDiscountFee", source = "balance.realizedIncomeFromDiscountFee", qualifiedByName = "nullToZero")
@@ -57,6 +60,8 @@ public interface WorkingCapitalLoanSummaryDataMapper {
     @Mapping(target = "totalDisbursement", source = "balance.totalDisbursement", qualifiedByName = "nullToZero")
     @Mapping(target = "totalDiscountFee", source = "balance.totalDiscountFee", qualifiedByName = "nullToZero")
     @Mapping(target = "totalDiscountFeeAdjustment", source = "balance.totalDiscountFeeAdjustment", qualifiedByName = "nullToZero")
+    @Mapping(target = "totalPayment", ignore = true)
+    @Mapping(target = "overdueSinceDate", ignore = true)
     WorkingCapitalLoanSummaryData toData(WorkingCapitalLoan loan);
 
     @Named("toCurrency")

@@ -36,24 +36,13 @@ public class DefaultPaymentPeriodsInOneYearCalculator implements PaymentPeriodsI
 
         Integer paymentPeriodsInOneYear = 0;
         switch (repaymentFrequencyType) {
-            case DAYS:
-                paymentPeriodsInOneYear = 365;
-            break;
-            case WEEKS:
-                paymentPeriodsInOneYear = 52;
-            break;
-            case MONTHS:
-                paymentPeriodsInOneYear = 12;
-            break;
-            case YEARS:
-                paymentPeriodsInOneYear = 1;
-            break;
-            case INVALID:
-                paymentPeriodsInOneYear = 0;
-            break;
-            case WHOLE_TERM:
-                log.error("TODO Implement repaymentFrequencyType for WHOLE_TERM");
-            break;
+            case DAYS -> paymentPeriodsInOneYear = 365;
+            case WEEKS -> paymentPeriodsInOneYear = 52;
+            case MONTHS -> paymentPeriodsInOneYear = 12;
+            case YEARS -> paymentPeriodsInOneYear = 1;
+            case SEMI_MONTHLY -> paymentPeriodsInOneYear = 24;
+            case INVALID -> paymentPeriodsInOneYear = 0;
+            case WHOLE_TERM -> log.error("TODO Implement repaymentFrequencyType for WHOLE_TERM");
         }
         return paymentPeriodsInOneYear;
     }
@@ -86,10 +75,11 @@ public class DefaultPaymentPeriodsInOneYearCalculator implements PaymentPeriodsI
         BigDecimal repayEveryBD = BigDecimal.valueOf(repaidEvery);
         BigDecimal noDaysInterestCalculationGrace = BigDecimal.valueOf(numberOfDaysInterestCalculationGrace);
         return switch (repaymentPeriodFrequencyType) {
-            case DAYS -> noDaysInterestCalculationGrace.multiply(repayEveryBD, mc);
-            case WEEKS -> noDaysInterestCalculationGrace.divide(BigDecimal.valueOf(7), mc).multiply(repayEveryBD, mc);
-            case MONTHS -> noDaysInterestCalculationGrace.divide(BigDecimal.valueOf(30), mc).multiply(repayEveryBD, mc);
-            case YEARS -> noDaysInterestCalculationGrace.divide(BigDecimal.valueOf(365), mc).multiply(repayEveryBD, mc);
+            case DAYS -> noDaysInterestCalculationGrace.divide(repayEveryBD, mc);
+            case WEEKS -> noDaysInterestCalculationGrace.divide(BigDecimal.valueOf(7).multiply(repayEveryBD), mc);
+            case SEMI_MONTHLY -> noDaysInterestCalculationGrace.divide(BigDecimal.valueOf(15).multiply(repayEveryBD), mc);
+            case MONTHS -> noDaysInterestCalculationGrace.divide(BigDecimal.valueOf(30).multiply(repayEveryBD), mc);
+            case YEARS -> noDaysInterestCalculationGrace.divide(BigDecimal.valueOf(365).multiply(repayEveryBD), mc);
             case WHOLE_TERM -> {
                 log.error("TODO Implement repaymentPeriodFrequencyType for WHOLE_TERM");
                 yield BigDecimal.ZERO;

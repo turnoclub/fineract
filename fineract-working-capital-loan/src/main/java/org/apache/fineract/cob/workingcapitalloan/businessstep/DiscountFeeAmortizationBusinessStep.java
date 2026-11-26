@@ -18,6 +18,7 @@
  */
 package org.apache.fineract.cob.workingcapitalloan.businessstep;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -35,20 +36,35 @@ public class DiscountFeeAmortizationBusinessStep extends WorkingCapitalLoanCOBBu
     private final WorkingCapitalLoanDiscountFeeAmortizationService discountFeeAmortizationService;
 
     @Override
-    public WorkingCapitalLoan execute(final WorkingCapitalLoan input) {
-        final boolean discountPresent = input.getLoanProductRelatedDetails() != null
-                && MathUtil.isGreaterThanZero(input.getLoanProductRelatedDetails().getDiscount());
-        final boolean adjustmentNeeded = input.getBalance() != null
-                && MathUtil.isGreaterThanZero(input.getBalance().getRealizedIncomeFromDiscountFee());
-
-        if (discountPresent || adjustmentNeeded) {
-            final LocalDate businessDate = DateUtils.getBusinessLocalDate();
-            discountFeeAmortizationService.processDiscountFeeAmortization(input, businessDate);
-            return input;
+    public WorkingCapitalLoan execute(final WorkingCapitalLoan loan) {
+        if (loan.isClosed()) {
+            log.debug("Skipping discount fee amortization for WC loan {} - loan is closed", loan.getId());
+            return loan;
+        }
+        if (loan.getLoanProductRelatedDetails() == null) {
+            log.debug("Skipping discount fee amortization for WC loan {} - no loan product details", loan.getId());
+            return loan;
+        }
+        if (loan.isChargedOff()) {
+            log.debug("Skipping discount fee amortization for WC loan {} - loan is charged off", loan.getId());
+            return loan;
+        }
+        // Run when there is still a discount to amortize, OR when income was previously recognized and now needs to be
+        // reconciled down (e.g. a full discount adjustment reduced the discount to zero). Otherwise there is nothing to
+        // do.
+        final BigDecimal discount = loan.getLoanProductRelatedDetails().getDiscount();
+        final BigDecimal recognizedIncome = loan.getBalance() == null ? null : loan.getBalance().getRealizedIncomeFromDiscountFee();
+        if (!MathUtil.isGreaterThanZero(discount) && !MathUtil.isGreaterThanZero(recognizedIncome)) {
+            log.debug("Skipping discount fee amortization for WC loan {} - no discount fee and no recognized income to reconcile",
+                    loan.getId());
+            return loan;
         }
 
-        log.debug("Skipping discount fee amortization for WC loan {} - no discount fee", input.getId());
-        return input;
+        final LocalDate businessDate = DateUtils.getBusinessLocalDate();
+
+        discountFeeAmortizationService.processDiscountFeeAmortization(loan, businessDate);
+
+        return loan;
     }
 
     @Override

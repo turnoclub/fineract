@@ -20,8 +20,9 @@ package org.apache.fineract.infrastructure.jobs.service;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.util.Date;
+import java.time.Instant;
 import java.util.List;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.fineract.infrastructure.core.api.IdTypeResolver;
 import org.apache.fineract.infrastructure.core.service.Page;
@@ -30,48 +31,57 @@ import org.apache.fineract.infrastructure.core.service.SearchParameters;
 import org.apache.fineract.infrastructure.core.service.database.DatabaseSpecificSQLGenerator;
 import org.apache.fineract.infrastructure.jobs.data.JobDetailData;
 import org.apache.fineract.infrastructure.jobs.data.JobDetailHistoryData;
+import org.apache.fineract.infrastructure.jobs.domain.ScheduledJobDetail;
 import org.apache.fineract.infrastructure.jobs.domain.ScheduledJobDetailRepository;
+import org.apache.fineract.infrastructure.jobs.domain.ScheduledJobRunHistoryRepository;
+import org.apache.fineract.infrastructure.jobs.domain.SchedulerDetail;
+import org.apache.fineract.infrastructure.jobs.domain.SchedulerDetailRepository;
 import org.apache.fineract.infrastructure.jobs.exception.JobNotFoundException;
 import org.apache.fineract.infrastructure.jobs.exception.OperationNotAllowedException;
+import org.apache.fineract.infrastructure.security.service.SqlValidator;
 import org.apache.fineract.infrastructure.security.utils.ColumnValidator;
-import org.springframework.beans.factory.annotation.Autowired;
+import org.jspecify.annotations.NonNull;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
-import org.springframework.lang.NonNull;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
 @Slf4j
 @Transactional(readOnly = true)
-public class SchedulerJobRunnerReadServiceImpl implements SchedulerJobRunnerReadService {
+@RequiredArgsConstructor
+public class SchedulerJobRunnerReadServiceImpl implements SchedulerJobRunnerReadService, ScheduledJobReadService {
 
     private final JdbcTemplate jdbcTemplate;
     private final ColumnValidator columnValidator;
     private final DatabaseSpecificSQLGenerator sqlGenerator;
     private final ScheduledJobDetailRepository jobDetailRepository;
-
+    private final ScheduledJobRunHistoryRepository scheduledJobRunHistoryRepository;
+    private final SchedulerDetailRepository schedulerDetailRepository;
     private final PaginationHelper paginationHelper;
+    private final SqlValidator sqlValidator;
 
-    @Autowired
-    public SchedulerJobRunnerReadServiceImpl(final JdbcTemplate jdbcTemplate, final ColumnValidator columnValidator,
-            DatabaseSpecificSQLGenerator sqlGenerator, ScheduledJobDetailRepository jobDetailRepository,
-            PaginationHelper paginationHelper) {
-        this.jdbcTemplate = jdbcTemplate;
-        this.columnValidator = columnValidator;
-        this.sqlGenerator = sqlGenerator;
-        this.jobDetailRepository = jobDetailRepository;
-        this.paginationHelper = paginationHelper;
+    @Override
+    public ScheduledJobDetail findByJobId(final Long jobId) {
+        return this.jobDetailRepository.findByJobId(jobId);
+    }
+
+    @Override
+    public SchedulerDetail retrieveSchedulerDetail() {
+        final List<SchedulerDetail> schedulerDetailList = schedulerDetailRepository.findAllSchedulerDetails();
+        if (schedulerDetailList != null && !schedulerDetailList.isEmpty()) {
+            return schedulerDetailList.get(0);
+        }
+        return null;
     }
 
     @Override
     public List<JobDetailData> findAllJobDetails() {
         return jobDetailRepository.getAllData();
-
     }
 
     @Override
-    public JobDetailData retrieveOne(@NonNull IdTypeResolver.IdType idType, String identifier) {
+    public JobDetailData retrieveOne(IdTypeResolver.@NonNull IdType idType, String identifier) {
         JobDetailData jobDetail = switch (idType) {
             case ID -> jobDetailRepository.getDataById(Long.valueOf(identifier));
             case SHORT_NAME -> jobDetailRepository.getDataByShortName(identifier);
@@ -84,8 +94,30 @@ public class SchedulerJobRunnerReadServiceImpl implements SchedulerJobRunnerRead
     }
 
     @Override
-    public Page<JobDetailHistoryData> retrieveJobHistory(@NonNull IdTypeResolver.IdType idType, String identifier,
+    public List<ScheduledJobDetail> retrieveAllJobs(final String nodeId) {
+        return this.jobDetailRepository.findAllJobs(Integer.parseInt(nodeId));
+    }
+
+    @Override
+    public ScheduledJobDetail findByJobKey(final String jobKey) {
+        return this.jobDetailRepository.findByJobKey(jobKey);
+    }
+
+    @Override
+    public Long fetchMaxVersionBy(final String jobKey) {
+        Long version = 0L;
+        final Long versionFromDB = this.scheduledJobRunHistoryRepository.findMaxVersionByJobKey(jobKey);
+        if (versionFromDB != null) {
+            version = versionFromDB;
+        }
+        return version;
+    }
+
+    @Override
+    public Page<JobDetailHistoryData> retrieveJobHistory(IdTypeResolver.@NonNull IdType idType, String identifier,
             SearchParameters searchParameters) {
+        sqlValidator.validate(searchParameters.getOrderBy());
+        sqlValidator.validate(searchParameters.getSortOrder());
         if (!isJobExist(idType, identifier)) {
             throw new JobNotFoundException(idType, identifier);
         }
@@ -128,7 +160,7 @@ public class SchedulerJobRunnerReadServiceImpl implements SchedulerJobRunnerRead
 
     @Override
     @NonNull
-    public Long retrieveId(@NonNull IdTypeResolver.IdType idType, String identifier) {
+    public Long retrieveId(IdTypeResolver.@NonNull IdType idType, String identifier) {
         return switch (idType) {
             case ID -> Long.valueOf(identifier);
             case SHORT_NAME ->
@@ -149,7 +181,7 @@ public class SchedulerJobRunnerReadServiceImpl implements SchedulerJobRunnerRead
         return true;
     }
 
-    private boolean isJobExist(@NonNull IdTypeResolver.IdType idType, @NonNull String jobId) {
+    private boolean isJobExist(IdTypeResolver.@NonNull IdType idType, @NonNull String jobId) {
         return switch (idType) {
             case ID -> jobDetailRepository.existsById(Long.valueOf(jobId));
             case SHORT_NAME -> jobDetailRepository.existsByShortName(jobId);
@@ -162,27 +194,28 @@ public class SchedulerJobRunnerReadServiceImpl implements SchedulerJobRunnerRead
         private final String sql;
 
         JobHistoryMapper(DatabaseSpecificSQLGenerator sqlGenerator) {
-            sql = " runHistory.version, runHistory.start_time as runStartTime, runHistory.end_time as runEndTime, " + "runHistory."
-                    + sqlGenerator.escape("status")
+            sql = " runHistory.id, runHistory.version, runHistory.start_time as runStartTime, runHistory.end_time as runEndTime, "
+                    + "runHistory." + sqlGenerator.escape("status")
                     + ", runHistory.error_message as jobRunErrorMessage, runHistory.trigger_type as triggerType, runHistory.error_log as jobRunErrorLog "
                     + "from job job join job_run_history runHistory ON job.id=runHistory.job_id";
         }
 
-        public String schema() {
+        private String schema() {
             return sql;
         }
 
         @Override
         public JobDetailHistoryData mapRow(final ResultSet rs, @SuppressWarnings("unused") final int rowNum) throws SQLException {
+            final Long id = rs.getLong("id");
             final Long version = rs.getLong("version");
-            final Date jobRunStartTime = rs.getTimestamp("runStartTime");
-            final Date jobRunEndTime = rs.getTimestamp("runEndTime");
+            final Instant jobRunStartTime = rs.getTimestamp("runStartTime") != null ? rs.getTimestamp("runStartTime").toInstant() : null;
+            final Instant jobRunEndTime = rs.getTimestamp("runEndTime") != null ? rs.getTimestamp("runEndTime").toInstant() : null;
             final String status = rs.getString("status");
             final String jobRunErrorMessage = rs.getString("jobRunErrorMessage");
             final String triggerType = rs.getString("triggerType");
             final String jobRunErrorLog = rs.getString("jobRunErrorLog");
-            return new JobDetailHistoryData().setVersion(version).setJobRunStartTime(jobRunStartTime).setJobRunEndTime(jobRunEndTime)
-                    .setStatus(status).setJobRunErrorMessage(jobRunErrorMessage).setTriggerType(triggerType)
+            return new JobDetailHistoryData().setId(id).setVersion(version).setJobRunStartTime(jobRunStartTime)
+                    .setJobRunEndTime(jobRunEndTime).setStatus(status).setJobRunErrorMessage(jobRunErrorMessage).setTriggerType(triggerType)
                     .setJobRunErrorLog(jobRunErrorLog);
         }
     }

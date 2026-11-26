@@ -1,3 +1,4 @@
+@SerialChargeAccrualConfig
 @LoanFeature
 Feature: Loan - Part2
 
@@ -473,7 +474,7 @@ Feature: Loan - Part2
       | Transaction Type | Amount | Principal | Interest | Fees | Penalties | Loan Balance |
       | Repayment        | 9.0    | 0.0       | 0.0      | 0.0  | 9.0       | 1000.0       |
       | Repayment        | 8.0    | 0.0       | 0.0      | 0.0  | 8.0       | 1000.0       |
-      | Repayment        | 7.0    | 5.0       | 0.0      | 0.0  | 2.0       | 993.0        |
+      | Repayment        | 7.0    | 5.0       | 0.0      | 0.0  | 2.0       | 995.0        |
     When Customer undo "2"th repayment on "02 November 2022"
     Then Loan Transactions tab has a transaction with date: "02 November 2022", and with the following data:
       | Transaction Type | Amount | Principal | Interest | Fees | Penalties | Loan Balance |
@@ -2034,6 +2035,7 @@ Feature: Loan - Part2
       | 4  | 15   | 31 May 2023  |             | 500.0           | 250.0         | 0.0      | 0.0  | 0.0       | 250.0 | 187.5 | 187.5      | 0.0   | 62.5        |
       | 5  | 43   | 13 July 2023 |             | 250.0           | 250.0         | 0.0      | 0.0  | 0.0       | 250.0 | 25.0  | 25.0       | 0.0   | 225.0       |
       | 6  | 15   | 28 July 2023 |             | 0.0             | 250.0         | 0.0      | 0.0  | 0.0       | 250.0 | 0.0   | 0.0        | 0.0   | 250.0       |
+    Then Loan Repayment schedule periods do not overlap
     Then Loan Repayment schedule has the following data in Total row:
       | Principal due | Interest | Fees | Penalties | Due    | Paid  | In advance | Late  | Outstanding |
       | 1250.0        | 0        | 0.0  | 0         | 1250.0 | 650.0 | 400.0      | 250.0 | 600.0       |
@@ -2578,4 +2580,3 @@ Feature: Loan - Part2
       | NSF fee | true      | Specified due date | 17 October 2023   | Flat             | 20.0 | 20.0 | 0.0    | 0.0         |
       | NSF fee | true      | Specified due date | 16 October 2023   | Flat             | 20.0 | 20.0 | 0.0    | 0.0         |
       | NSF fee | true      | Specified due date | 17 September 2023 | Flat             | 20.0 | 20.0 | 0.0    | 0.0         |
-

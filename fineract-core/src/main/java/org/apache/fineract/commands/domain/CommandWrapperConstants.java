@@ -70,6 +70,7 @@ public final class CommandWrapperConstants {
     public static final String ACTION_FORECLOSURE = "FORECLOSURE";
     public static final String ACTION_CREDITBALANCEREFUND = "CREDITBALANCEREFUND";
     public static final String ACTION_UNDO = "UNDO";
+    public static final String ACTION_ADJUST_BY_DELTA = "ADJUSTBYDELTA";
     public static final String ACTION_BOUNCE = "BOUNCE";
     public static final String ACTION_SETFRAUD = "SETFRAUD";
     public static final String ACTION_UNDODISBURSAL = "UNDODISBURSAL";
@@ -147,6 +148,8 @@ public final class CommandWrapperConstants {
     public static final String ACTION_BUYDOWNFEEADJUSTMENT = "BUYDOWNFEEADJUSTMENT";
     public static final String ACTION_CONTRACT_TERMINATION = "CONTRACT_TERMINATION";
     public static final String ACTION_CONTRACT_TERMINATION_UNDO = "CONTRACT_TERMINATION_UNDO";
+    public static final String ACTION_LOAN_WITHDRAWAL = "LOAN_WITHDRAWAL";
+    public static final String ACTION_LOAN_WITHDRAWAL_UNDO = "LOAN_WITHDRAWAL_UNDO";
     public static final String ACTION_BUYDOWNFEE = "BUYDOWNFEE";
     public static final String ACTION_UPDATE_APPROVED_AMOUNT = "UPDATE_APPROVED_AMOUNT";
     public static final String ACTION_MANUAL_INTEREST_REFUND_TRANSACTION = "MANUAL_INTEREST_REFUND_TRANSACTION";
@@ -165,7 +168,6 @@ public final class CommandWrapperConstants {
     public static final String ENTITY_CREDITREPORT = "CREDITREPORT";
     public static final String ENTITY_CREDITBUREAU_CONFIGURATION = "CREDITBUREAU_CONFIGURATION";
     public static final String ENTITY_ADDRESS = "ADDRESS";
-    public static final String ENTITY_FAMILYMEMBERS = "FAMILYMEMBERS";
     public static final String ENTITY_CONFIGURATION = "CONFIGURATION";
     public static final String ENTITY_PERMISSION = "PERMISSION";
     public static final String ENTITY_ROLE = "ROLE";
@@ -183,6 +185,7 @@ public final class CommandWrapperConstants {
     public static final String ENTITY_LOANPRODUCT = "LOANPRODUCT";
     public static final String ENTITY_WORKINGCAPITALLOANPRODUCT = "WORKINGCAPITALLOANPRODUCT";
     public static final String ENTITY_WORKINGCAPITALLOAN = "WORKINGCAPITALLOAN";
+    public static final String ENTITY_WORKINGCAPITALLOANTRANSACTION = "WORKINGCAPITALLOANTRANSACTION";
     public static final String ENTITY_CLIENTIDENTIFIER = "CLIENTIDENTIFIER";
     public static final String ENTITY_CLIENT = "CLIENT";
     public static final String ENTITY_DATATABLE = "DATATABLE";
@@ -246,11 +249,13 @@ public final class CommandWrapperConstants {
     public static final String ENTITY_BATCH_BUSINESS_STEP = "BATCH_BUSINESS_STEP";
     public static final String ENTITY_INLINE_JOB = "INLINE_JOB";
     public static final String ENTITY_EXTERNAL_ASSET_OWNER_LOAN_PRODUCT_ATTRIBUTE = "EXTERNAL_ASSET_OWNER_LOAN_PRODUCT_ATTRIBUTE";
+    public static final String ENTITY_EXTERNAL_ASSET_OWNER_LOAN_ATTRIBUTE = "EXTERNAL_ASSET_OWNER_LOAN_ATTRIBUTE";
     public static final String ENTITY_EXTERNAL_ASSET_OWNER = "EXTERNAL_ASSET_OWNER";
     public static final String ENTITY_ASSET_OWNER_TRANSACTION = "ASSET_OWNER_TRANSACTION";
     public static final String ENTITY_DELINQUENCY_ACTION = "DELINQUENCY_ACTION";
     public static final String ENTITY_LOAN_AVAILABLE_DISBURSEMENT_AMOUNT = "LOAN_AVAILABLE_DISBURSEMENT_AMOUNT";
     public static final String ENTITY_LOAN_ORIGINATOR = "LOAN_ORIGINATOR";
+    public static final String ENTITY_WORKING_CAPITAL_LOAN_ORIGINATOR = "WORKING_CAPITAL_LOAN_ORIGINATOR";
     public static final String ENTITY_WORKINGDAYS = "WORKINGDAYS";
     public static final String ENTITY_SHAREPRODUCT = "SHAREPRODUCT";
     public static final String ENTITY_INTEREST_PAUSE = "INTEREST_PAUSE";

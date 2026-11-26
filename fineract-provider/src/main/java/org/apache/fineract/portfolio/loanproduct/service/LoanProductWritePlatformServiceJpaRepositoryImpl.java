@@ -21,20 +21,28 @@ package org.apache.fineract.portfolio.loanproduct.service;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import jakarta.persistence.PersistenceException;
+import java.text.MessageFormat;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.exception.ExceptionUtils;
 import org.apache.fineract.accounting.producttoaccountmapping.service.ProductToGLAccountMappingWritePlatformService;
 import org.apache.fineract.infrastructure.core.api.JsonCommand;
+import org.apache.fineract.infrastructure.core.data.ApiParameterError;
 import org.apache.fineract.infrastructure.core.data.CommandProcessingResult;
 import org.apache.fineract.infrastructure.core.data.CommandProcessingResultBuilder;
 import org.apache.fineract.infrastructure.core.exception.ErrorHandler;
+import org.apache.fineract.infrastructure.core.exception.GeneralPlatformDomainRuleException;
+import org.apache.fineract.infrastructure.core.exception.PlatformApiDataValidationException;
 import org.apache.fineract.infrastructure.core.exception.PlatformDataIntegrityException;
 import org.apache.fineract.infrastructure.core.service.DateUtils;
+import org.apache.fineract.infrastructure.dataqueries.data.EntityTables;
+import org.apache.fineract.infrastructure.dataqueries.data.StatusEnum;
+import org.apache.fineract.infrastructure.dataqueries.service.EntityDatatableChecksWritePlatformService;
 import org.apache.fineract.infrastructure.entityaccess.domain.FineractEntityAccessType;
 import org.apache.fineract.infrastructure.entityaccess.service.FineractEntityAccessUtil;
 import org.apache.fineract.infrastructure.event.business.domain.loan.product.LoanProductCreateBusinessEvent;
@@ -43,8 +51,10 @@ import org.apache.fineract.infrastructure.security.service.PlatformSecurityConte
 import org.apache.fineract.organisation.monetary.exception.InvalidCurrencyException;
 import org.apache.fineract.portfolio.charge.domain.Charge;
 import org.apache.fineract.portfolio.charge.domain.ChargeRepositoryWrapper;
+import org.apache.fineract.portfolio.delinquency.api.DelinquencyApiConstants;
 import org.apache.fineract.portfolio.delinquency.domain.DelinquencyBucket;
 import org.apache.fineract.portfolio.delinquency.domain.DelinquencyBucketRepository;
+import org.apache.fineract.portfolio.delinquency.domain.DelinquencyBucketType;
 import org.apache.fineract.portfolio.delinquency.exception.DelinquencyBucketNotFoundException;
 import org.apache.fineract.portfolio.floatingrates.domain.FloatingRate;
 import org.apache.fineract.portfolio.floatingrates.domain.FloatingRateRepositoryWrapper;
@@ -64,6 +74,7 @@ import org.apache.fineract.portfolio.loanproduct.domain.LoanProduct;
 import org.apache.fineract.portfolio.loanproduct.domain.LoanProductCreditAllocationRule;
 import org.apache.fineract.portfolio.loanproduct.domain.LoanProductPaymentAllocationRule;
 import org.apache.fineract.portfolio.loanproduct.domain.LoanProductRepository;
+import org.apache.fineract.portfolio.loanproduct.domain.LoanSupportedFeeRefundTypes;
 import org.apache.fineract.portfolio.loanproduct.domain.LoanSupportedInterestRefundTypes;
 import org.apache.fineract.portfolio.loanproduct.exception.LoanProductCannotBeModifiedDueToNonClosedLoansException;
 import org.apache.fineract.portfolio.loanproduct.exception.LoanProductDateException;
@@ -97,6 +108,7 @@ public class LoanProductWritePlatformServiceJpaRepositoryImpl implements LoanPro
     private final CreditAllocationsJsonParser creditAllocationsJsonParser;
     private final LoanProductAssembler loanProductAssembler;
     private final LoanProductUpdateUtil loanProductUpdateUtil;
+    private final EntityDatatableChecksWritePlatformService entityDatatableChecksWritePlatformService;
     private final LoanProductPaymentAllocationRuleMerger loanProductPaymentAllocationRuleMerger = new LoanProductPaymentAllocationRuleMerger();
     private final LoanProductCreditAllocationRuleMerger loanProductCreditAllocationRuleMerger = new LoanProductCreditAllocationRuleMerger();
 
@@ -131,6 +143,7 @@ public class LoanProductWritePlatformServiceJpaRepositoryImpl implements LoanPro
                     command, this.aprCalculator, floatingRate, rates, loanProductPaymentAllocationRules, loanProductCreditAllocationRules);
 
             loanProduct.updateLoanProductInRelatedClasses();
+            validateDownPaymentCharges(loanProduct);
             loanProduct.setTransactionProcessingStrategyName(
                     loanRepaymentScheduleTransactionProcessorFactory.determineProcessor(loanTransactionProcessingStrategyCode).getName());
 
@@ -143,11 +156,20 @@ public class LoanProductWritePlatformServiceJpaRepositoryImpl implements LoanPro
 
             // save accounting mappings
             this.accountMappingWritePlatformService.createLoanProductToGLAccountMapping(loanProduct.getId(), command);
+            this.fromApiJsonDeserializer.validateChargeAmortization(loanProduct);
             // check if the office specific products are enabled. If yes, then
             // save this savings product against a specific office
             // i.e. this savings product is specific for this office.
             fineractEntityAccessUtil.checkConfigurationAndAddProductResrictionsForUserOffice(
                     FineractEntityAccessType.OFFICE_ACCESS_TO_LOAN_PRODUCTS, loanProduct.getId());
+
+            if (command.parameterExists(LoanProductDataValidator.DATATABLES)) {
+                this.entityDatatableChecksWritePlatformService.saveDatatables(StatusEnum.CREATE.getValue(),
+                        EntityTables.LOAN_PRODUCT.getName(), loanProduct.getId(), null,
+                        command.arrayOfParameterNamed(LoanProductDataValidator.DATATABLES));
+            }
+            this.entityDatatableChecksWritePlatformService.runTheCheck(loanProduct.getId(), EntityTables.LOAN_PRODUCT.getName(),
+                    StatusEnum.CREATE.getValue(), EntityTables.LOAN_PRODUCT.getForeignKeyColumnNameOnDatatable(), null);
 
             businessEventNotifierService.notifyPostBusinessEvent(new LoanProductCreateBusinessEvent(loanProduct));
 
@@ -180,6 +202,13 @@ public class LoanProductWritePlatformServiceJpaRepositoryImpl implements LoanPro
         if (delinquencyBucketId != null) {
             delinquencyBucket = delinquencyBucketRepository.findById(delinquencyBucketId)
                     .orElseThrow(() -> DelinquencyBucketNotFoundException.notFound(delinquencyBucketId));
+            if (!DelinquencyBucketType.REGULAR.equals(delinquencyBucket.getBucketType())) {
+                final String expectedType = DelinquencyBucketType.REGULAR.name();
+                throw new PlatformApiDataValidationException(List.of(
+                        ApiParameterError.parameterError(DelinquencyApiConstants.LOAN_PRODUCT_DELINQUENCY_BUCKET_ID_MUST_BE_OF_TYPE_CODE,
+                                MessageFormat.format(DelinquencyApiConstants.DELINQUENCY_BUCKET_ID_MUST_BE_OF_TYPE_MESSAGE, expectedType),
+                                LoanProductConstants.DELINQUENCY_BUCKET_PARAM_NAME, new Object[] { expectedType })));
+            }
         }
         return delinquencyBucket;
     }
@@ -236,6 +265,8 @@ public class LoanProductWritePlatformServiceJpaRepositoryImpl implements LoanPro
                 }
             }
 
+            validateDownPaymentCharges(product);
+
             if (changes.containsKey("paymentAllocation")) {
                 final List<LoanProductPaymentAllocationRule> loanProductPaymentAllocationRules = advancedPaymentJsonParser
                         .assembleLoanProductPaymentAllocationRules(command, product.getTransactionProcessingStrategyCode());
@@ -267,13 +298,15 @@ public class LoanProductWritePlatformServiceJpaRepositoryImpl implements LoanPro
             if (changes.containsKey(LoanProductConstants.ENABLE_BUY_DOWN_FEE_PARAM_NAME)) {
                 enableBuyDownFee = (boolean) changes.get(LoanProductConstants.ENABLE_BUY_DOWN_FEE_PARAM_NAME);
             }
+            final boolean enableChargeAmortization = product.getLoanProductRelatedDetail().isEnableChargeAmortization();
 
             // accounting related changes
             final boolean accountingTypeChanged = changes.containsKey("accountingRule");
             final Map<String, Object> accountingMappingChanges = this.accountMappingWritePlatformService
                     .updateLoanProductToGLAccountMapping(product.getId(), command, accountingTypeChanged, product.getAccountingRule(),
-                            enableIncomeCapitalization, enableBuyDownFee, merchantBuyDownFee);
+                            enableIncomeCapitalization, enableBuyDownFee, merchantBuyDownFee, enableChargeAmortization);
             changes.putAll(accountingMappingChanges);
+            this.fromApiJsonDeserializer.validateChargeAmortization(product);
 
             if (changes.containsKey(LoanProductConstants.RATES_PARAM_NAME)) {
                 final List<Rate> productRates = assembleListOfProductRates(command);
@@ -291,6 +324,15 @@ public class LoanProductWritePlatformServiceJpaRepositoryImpl implements LoanPro
                     supportedInterestRefundTypes.add(LoanSupportedInterestRefundTypes.valueOf(value.getAsString()));
                 });
                 product.getLoanProductRelatedDetail().setSupportedInterestRefundTypes(supportedInterestRefundTypes);
+            }
+
+            if (command.parameterExists(LoanProductConstants.SUPPORTED_FEE_REFUND_TYPES)) {
+                final JsonArray supportedTransactionsForFeeRefund = command
+                        .arrayOfParameterNamed(LoanProductConstants.SUPPORTED_FEE_REFUND_TYPES);
+                final List<LoanSupportedFeeRefundTypes> supportedFeeRefundTypes = new ArrayList<>();
+                supportedTransactionsForFeeRefund.iterator()
+                        .forEachRemaining(value -> supportedFeeRefundTypes.add(LoanSupportedFeeRefundTypes.valueOf(value.getAsString())));
+                product.getLoanProductRelatedDetail().setSupportedFeeRefundTypes(supportedFeeRefundTypes);
             }
 
             if (command.parameterExists(LoanProductConstants.CHARGE_OFF_BEHAVIOUR)) {
@@ -328,6 +370,16 @@ public class LoanProductWritePlatformServiceJpaRepositoryImpl implements LoanPro
                         || command.isChangeInBigDecimalParameterNamed("interestRateDifferential",
                                 product.getFloatingRates().getInterestRateDifferential()));
         return isChangeFromFloatingToFlatOrViceVersa || isChangeInCriticalFloatingRateParams;
+    }
+
+    private void validateDownPaymentCharges(final LoanProduct product) {
+        if (product.supportsDownPaymentCharges()) {
+            return;
+        }
+        product.getCharges().stream().filter(Charge::isDownPaymentCharge).findFirst().ifPresent(charge -> {
+            throw new GeneralPlatformDomainRuleException("error.msg.loan.product.down.payment.charge.requires.progressive.down.payment",
+                    "Down payment charge can be attached only to a progressive loan product with down payment enabled.", charge.getId());
+        });
     }
 
     private List<Charge> assembleListOfProductCharges(final JsonCommand command, final String currencyCode) {
@@ -389,12 +441,12 @@ public class LoanProductWritePlatformServiceJpaRepositoryImpl implements LoanPro
      * Guaranteed to throw an exception no matter what the data integrity issue is.
      */
     private void handleDataIntegrityIssues(final JsonCommand command, final Throwable realCause, final Exception dve) {
-        if (realCause.getMessage().contains("'external_id'")) {
+        if (realCause.getMessage().contains("'external_id'") || realCause.getMessage().contains("m_product_loan_external_id_key")) {
 
             final String externalId = command.stringValueOfParameterNamed("externalId");
             throw new PlatformDataIntegrityException("error.msg.product.loan.duplicate.externalId",
                     "Loan Product with externalId `" + externalId + "` already exists", "externalId", externalId, realCause);
-        } else if (realCause.getMessage().contains("'unq_name'")) {
+        } else if (realCause.getMessage().contains("'unq_name'") || realCause.getMessage().contains("m_product_loan_name_key")) {
 
             final String name = command.stringValueOfParameterNamed("name");
             throw new PlatformDataIntegrityException("error.msg.product.loan.duplicate.name",
@@ -420,7 +472,7 @@ public class LoanProductWritePlatformServiceJpaRepositoryImpl implements LoanPro
     }
 
     private static boolean containsDuplicateShortnameErrorForMySQL(Throwable realCause) {
-        return (realCause.getMessage().contains("short_name") && realCause.getMessage().toLowerCase().contains("duplicate"));
+        return (realCause.getMessage().contains("short_name") && realCause.getMessage().toLowerCase(Locale.ROOT).contains("duplicate"));
     }
 
     private void validateInputDates(final JsonCommand command) {

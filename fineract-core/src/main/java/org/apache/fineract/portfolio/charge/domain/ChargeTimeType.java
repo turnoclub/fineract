@@ -38,7 +38,8 @@ public enum ChargeTimeType {
     SHAREACCOUNT_ACTIVATION(13, "chargeTimeType.activation"), // only for shares
     SHARE_PURCHASE(14, "chargeTimeType.sharespurchase"), // only for shares
     SHARE_REDEEM(15, "chargeTimeType.sharesredeem"), // only for shares
-    SAVINGS_NOACTIVITY_FEE(16, "chargeTimeType.savingsNoActivityFee"); // only for savings
+    SAVINGS_NOACTIVITY_FEE(16, "chargeTimeType.savingsNoActivityFee"), // only for savings
+    DOWN_PAYMENT(17, "chargeTimeType.downPayment"); // only for loan charges
 
     private final Integer value;
     private final String code;
@@ -59,20 +60,23 @@ public enum ChargeTimeType {
     public static Object[] validLoanValues() {
         return new Integer[] { ChargeTimeType.DISBURSEMENT.getValue(), ChargeTimeType.SPECIFIED_DUE_DATE.getValue(),
                 ChargeTimeType.INSTALMENT_FEE.getValue(), ChargeTimeType.OVERDUE_INSTALLMENT.getValue(),
-                ChargeTimeType.TRANCHE_DISBURSEMENT.getValue() };
+                ChargeTimeType.TRANCHE_DISBURSEMENT.getValue(), ChargeTimeType.DOWN_PAYMENT.getValue() };
     }
 
-    public static List<ChargeTimeType> validWorkingCapitalLoan() {
+    public static List<ChargeTimeType> validWorkingCapitalLoanProduct() {
+        return List.of(ChargeTimeType.DISBURSEMENT, ChargeTimeType.SPECIFIED_DUE_DATE);
+    }
+
+    public static Object[] validWorkingCapitalLoanProductValues() {
+        return validWorkingCapitalLoanProduct().stream().map(ChargeTimeType::getValue).toArray();
+    }
+
+    public static List<ChargeTimeType> validWorkingCapitalLoanAccount() {
         return List.of(ChargeTimeType.SPECIFIED_DUE_DATE);
     }
 
-    public static Object[] validWorkingCapitalLoanValues() {
-        return validWorkingCapitalLoan().stream().map(ChargeTimeType::getValue).toArray();
-    }
-
-    public static Object[] validLoanChargeValues() {
-        return new Integer[] { ChargeTimeType.DISBURSEMENT.getValue(), ChargeTimeType.SPECIFIED_DUE_DATE.getValue(),
-                ChargeTimeType.INSTALMENT_FEE.getValue() };
+    public static List<Integer> validWorkingCapitalLoanAccountValues() {
+        return validWorkingCapitalLoanAccount().stream().map(ChargeTimeType::getValue).toList();
     }
 
     public static Object[] validSavingsValues() {
@@ -143,6 +147,9 @@ public enum ChargeTimeType {
                 case 16:
                     chargeTimeType = SAVINGS_NOACTIVITY_FEE;
                 break;
+                case 17:
+                    chargeTimeType = DOWN_PAYMENT;
+                break;
                 default:
                     chargeTimeType = INVALID;
                 break;
@@ -153,6 +160,10 @@ public enum ChargeTimeType {
 
     public boolean isTimeOfDisbursement() {
         return ChargeTimeType.DISBURSEMENT.equals(this);
+    }
+
+    public boolean isTimeOfDownPayment() {
+        return ChargeTimeType.DOWN_PAYMENT.equals(this);
     }
 
     public boolean isOnSpecifiedDueDate() {
@@ -199,8 +210,16 @@ public enum ChargeTimeType {
         return this.equals(ChargeTimeType.OVERDUE_INSTALLMENT);
     }
 
+    /**
+     * Whether the income of a loan fee with this charge time type can be amortized.
+     */
+    public boolean isAllowedChargeAmortizationTime() {
+        return isTimeOfDisbursement() || isTrancheDisbursement() || isSpecifiedDueDate();
+    }
+
     public boolean isAllowedLoanChargeTime() {
-        return isTimeOfDisbursement() || isOnSpecifiedDueDate() || isInstalmentFee() || isOverdueInstallment() || isTrancheDisbursement();
+        return isTimeOfDisbursement() || isOnSpecifiedDueDate() || isInstalmentFee() || isOverdueInstallment() || isTrancheDisbursement()
+                || isTimeOfDownPayment();
     }
 
     public boolean isAllowedClientChargeTime() {

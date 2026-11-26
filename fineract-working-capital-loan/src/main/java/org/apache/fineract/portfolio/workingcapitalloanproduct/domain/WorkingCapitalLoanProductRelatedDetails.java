@@ -27,6 +27,7 @@ import jakarta.persistence.FetchType;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import java.math.BigDecimal;
+import java.util.Map;
 import lombok.Getter;
 import lombok.Setter;
 import org.apache.fineract.organisation.monetary.domain.MonetaryCurrency;
@@ -35,6 +36,7 @@ import org.apache.fineract.portfolio.workingcapitalloan.domain.WorkingCapitalLoa
 import org.apache.fineract.portfolio.workingcapitalloan.domain.WorkingCapitalLoanPeriodFrequencyType;
 import org.apache.fineract.portfolio.workingcapitalloanbreach.domain.WorkingCapitalBreach;
 import org.apache.fineract.portfolio.workingcapitalloannearbreach.domain.WorkingCapitalNearBreach;
+import org.apache.fineract.portfolio.workingcapitalloanproduct.WorkingCapitalLoanProductConstants;
 
 /**
  * WCLoanProductRelatedDetail encapsulates all the details of a {@link WorkingCapitalLoanProduct} that are also used and
@@ -48,11 +50,28 @@ public class WorkingCapitalLoanProductRelatedDetails {
     @Embedded
     private MonetaryCurrency currency;
 
+    /**
+     * Active contractual principal. On a loan it tracks the lifecycle: the proposed amount while the application is
+     * submitted or modified, the approved amount from approval, and the amount actually disbursed from disbursement.
+     * Undoing approval or disbursal restores the previous stage's value. It is not the outstanding balance - that lives
+     * in {@code m_wc_loan_balance} and is published as {@code summary.principalOutstanding}. On a product this is the
+     * default principal offered to new applications.
+     */
     @Column(name = "principal_amount", scale = 6, precision = 19)
     private BigDecimal principal;
 
-    @Column(name = "period_payment_rate", scale = 6, precision = 19, nullable = false)
+    @Column(name = "period_payment_rate", scale = 6, precision = 19)
     private BigDecimal periodPaymentRate;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "payment_amount_calculation_strategy", nullable = false)
+    private WorkingCapitalPaymentAmountCalculationStrategy paymentAmountCalculationStrategy = WorkingCapitalPaymentAmountCalculationStrategy.TPV;
+
+    @Column(name = "annual_eir", scale = 6, precision = 19)
+    private BigDecimal annualEir;
+
+    @Column(name = "payment_amount", scale = 6, precision = 19)
+    private BigDecimal paymentAmount;
 
     @Column(name = "repayment_every", nullable = false)
     private Integer repaymentEvery;
@@ -89,10 +108,41 @@ public class WorkingCapitalLoanProductRelatedDetails {
     @JoinColumn(name = "near_breach_id")
     private WorkingCapitalNearBreach nearBreach;
 
-    @Column(name = "delinquency_grace_days", nullable = false)
-    private Integer delinquencyGraceDays = 0;
+    @Column(name = "delinquency_grace_days")
+    private Integer delinquencyGraceDays;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "delinquency_start_type", nullable = false)
+    @Column(name = "delinquency_start_type")
     private WorkingCapitalLoanDelinquencyStartType delinquencyStartType;
+
+    @Column(name = "breach_grace_days")
+    private Integer breachGraceDays;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "breach_start_type")
+    private WorkingCapitalLoanBreachStartType breachStartType;
+
+    // Clears grace days and start type that depend on a delinquency bucket
+    public void clearDelinquencySettings(final Map<String, Object> changes) {
+        if (this.delinquencyGraceDays != null) {
+            this.delinquencyGraceDays = null;
+            changes.put(WorkingCapitalLoanProductConstants.delinquencyGraceDaysParamName, null);
+        }
+        if (this.delinquencyStartType != null) {
+            this.delinquencyStartType = null;
+            changes.put(WorkingCapitalLoanProductConstants.delinquencyStartTypeParamName, null);
+        }
+    }
+
+    // Clears grace days and start type that depend on a breach
+    public void clearBreachSettings(final Map<String, Object> changes) {
+        if (this.breachGraceDays != null) {
+            this.breachGraceDays = null;
+            changes.put(WorkingCapitalLoanProductConstants.breachGraceDaysParamName, null);
+        }
+        if (this.breachStartType != null) {
+            this.breachStartType = null;
+            changes.put(WorkingCapitalLoanProductConstants.breachStartTypeParamName, null);
+        }
+    }
 }

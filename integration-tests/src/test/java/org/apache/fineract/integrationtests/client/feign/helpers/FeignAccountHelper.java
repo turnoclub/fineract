@@ -21,10 +21,15 @@ package org.apache.fineract.integrationtests.client.feign.helpers;
 import static org.apache.fineract.client.feign.util.FeignCalls.ok;
 
 import java.util.Collections;
+import java.util.List;
 import org.apache.fineract.client.feign.FineractFeignClient;
+import org.apache.fineract.client.feign.services.GeneralLedgerAccountApi.RetrieveAllAccountsQueryParams;
+import org.apache.fineract.client.models.DeleteGLAccountsResponse;
 import org.apache.fineract.client.models.GetGLAccountsResponse;
 import org.apache.fineract.client.models.PostGLAccountsRequest;
 import org.apache.fineract.client.models.PostGLAccountsResponse;
+import org.apache.fineract.client.models.PutGLAccountsRequest;
+import org.apache.fineract.client.models.PutGLAccountsResponse;
 import org.apache.fineract.integrationtests.common.Utils;
 import org.apache.fineract.integrationtests.common.accounting.Account;
 
@@ -36,12 +41,32 @@ public class FeignAccountHelper {
         this.fineractClient = fineractClient;
     }
 
+    public Account createAssetAccount() {
+        return createAssetAccount("ASSET");
+    }
+
+    public Account createLiabilityAccount() {
+        return createLiabilityAccount("LIABILITY");
+    }
+
+    public Account createIncomeAccount() {
+        return createIncomeAccount("INCOME");
+    }
+
+    public Account createExpenseAccount() {
+        return createExpenseAccount("EXPENSE");
+    }
+
     public Account createAssetAccount(String name) {
         return createAccount(name, "1", "ASSET");
     }
 
     public Account createLiabilityAccount(String name) {
         return createAccount(name, "2", "LIABILITY");
+    }
+
+    public Account createEquityAccount(String name) {
+        return createAccount(name, "3", "EQUITY");
     }
 
     public Account createIncomeAccount(String name) {
@@ -75,6 +100,37 @@ public class FeignAccountHelper {
         GetGLAccountsResponse response = ok(
                 () -> fineractClient.generalLedgerAccount().retreiveAccount(account.getAccountID().longValue(), Collections.emptyMap()));
         return response.getGlCode();
+    }
+
+    public List<GetGLAccountsResponse> findGLAccountsByName(String name) {
+        return ok(() -> fineractClient.generalLedgerAccount().retrieveAllAccounts(new RetrieveAllAccountsQueryParams())).stream()
+                .filter(account -> name.equals(account.getName())).toList();
+    }
+
+    public GetGLAccountsResponse createEquityAccountWithExactName(String name) {
+        PostGLAccountsRequest request = new PostGLAccountsRequest()//
+                .name(name)//
+                .glCode(Utils.uniqueRandomStringGenerator("GL_3", 6))//
+                .manualEntriesAllowed(true)//
+                .type(getAccountTypeId("EQUITY"))//
+                .usage(1);
+        return getGLAccount(createGLAccount(request).getResourceId());
+    }
+
+    public PostGLAccountsResponse createGLAccount(PostGLAccountsRequest request) {
+        return ok(() -> fineractClient.generalLedgerAccount().createGLAccount(request));
+    }
+
+    public GetGLAccountsResponse getGLAccount(Long glAccountId) {
+        return ok(() -> fineractClient.generalLedgerAccount().retreiveAccount(glAccountId, Collections.emptyMap()));
+    }
+
+    public PutGLAccountsResponse updateGLAccount(Long glAccountId, PutGLAccountsRequest request) {
+        return ok(() -> fineractClient.generalLedgerAccount().updateGLAccount(glAccountId, request));
+    }
+
+    public DeleteGLAccountsResponse deleteGLAccount(Long glAccountId) {
+        return ok(() -> fineractClient.generalLedgerAccount().deleteGLAccount(glAccountId, Collections.emptyMap()));
     }
 
     private Integer getAccountTypeId(String type) {

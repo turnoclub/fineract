@@ -24,6 +24,7 @@ import com.google.gson.JsonObject;
 import jakarta.persistence.PersistenceException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.exception.ExceptionUtils;
@@ -122,7 +123,8 @@ public class EntityDatatableChecksWritePlatformServiceImpl implements EntityData
                 }
             }
 
-            final EntityDatatableChecks check = EntityDatatableChecks.fromJson(command);
+            final boolean systemDefined = command.booleanPrimitiveValueOfParameterNamed("systemDefined");
+            final EntityDatatableChecks check = new EntityDatatableChecks(entity, datatableName, status, systemDefined, productId);
 
             this.entityDatatableChecksRepository.saveAndFlush(check);
 
@@ -147,7 +149,7 @@ public class EntityDatatableChecksWritePlatformServiceImpl implements EntityData
             tableRequiredBeforeClientActivation = entityDatatableChecksRepository.findByEntityAndStatus(entityName, status);
         } else {
             tableRequiredBeforeClientActivation = entityDatatableChecksRepository.findByEntityAndStatusAndSubtype(entityName, status,
-                    entitySubtype.toUpperCase());
+                    entitySubtype.toUpperCase(Locale.ROOT));
         }
 
         if (tableRequiredBeforeClientActivation != null) {
@@ -163,7 +165,7 @@ public class EntityDatatableChecksWritePlatformServiceImpl implements EntityData
                 }
             }
             if (!reqDatatables.isEmpty()) {
-                throw new DatatableEntryRequiredException(reqDatatables.toString());
+                throw new DatatableEntryRequiredException(reqDatatables, entityName, status);
             }
         }
     }
@@ -191,7 +193,7 @@ public class EntityDatatableChecksWritePlatformServiceImpl implements EntityData
                 }
             }
             if (!reqDatatables.isEmpty()) {
-                throw new DatatableEntryRequiredException(reqDatatables.toString());
+                throw new DatatableEntryRequiredException(reqDatatables, entityName, status);
             }
         }
     }
@@ -271,7 +273,7 @@ public class EntityDatatableChecksWritePlatformServiceImpl implements EntityData
             msgCode += ".unknown.data.integrity.issue";
             msgArgs = new Object[] { dae };
         }
-        log.error("Error occured.", dae);
+        log.error("Error occurred.", dae);
         throw ErrorHandler.getMappable(dae, msgCode, msg, param, msgArgs);
     }
 }

@@ -126,11 +126,13 @@ public class HookWritePlatformServiceImpl implements HookWritePlatformService {
             var hook = hookRepository.findById(request.getId()).orElseThrow(() -> new HookNotFoundException(request.getId()));
             var changes = new HashMap<String, Object>();
 
-            if (!Objects.equals(request.getDisplayName(), hook.getName())) {
+            if (request.getDisplayName() != null && !Objects.equals(request.getDisplayName(), hook.getName())) {
                 changes.put(HookUpdateRequest.Fields.displayName, request.getDisplayName());
+                hook.setName(request.getDisplayName());
             }
-            if (!Objects.equals(request.getIsActive(), hook.getIsActive())) {
+            if (request.getIsActive() != null && !Objects.equals(request.getIsActive(), hook.getIsActive())) {
                 changes.put(HookUpdateRequest.Fields.isActive, request.getIsActive());
+                hook.setIsActive(request.getIsActive());
             }
             var optionalTemplateId = Optional.ofNullable(request.getTemplateId());
 
@@ -240,8 +242,8 @@ public class HookWritePlatformServiceImpl implements HookWritePlatformService {
             if (conf.getFieldName().equals(payloadURLName)) {
                 try {
                     var service = processorHelper.createWebHookService(fieldValue);
-                    service.sendEmptyRequest().execute();
-                } catch (IOException re) {
+                    service.sendEmptyRequest(fieldValue).execute();
+                } catch (IOException | IllegalArgumentException re) {
                     baseDataValidator.reset().failWithCodeNoParameterAddedToErrorCode("url.invalid");
                 }
             }

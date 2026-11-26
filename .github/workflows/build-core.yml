@@ -2,6 +2,12 @@ name: Fineract Build Core
 
 on:
   workflow_call:
+    inputs:
+      upload_artifacts:
+        description: Upload reports and logs even when the job succeeds
+        required: false
+        default: false
+        type: boolean
     secrets:
       DEVELOCITY_ACCESS_KEY:
         required: false
@@ -11,7 +17,7 @@ permissions:
 
 jobs:
   build-core:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 60
 
     env:
@@ -20,14 +26,14 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           fetch-depth: 0
           fetch-tags: true
 
       - name: Build Fineract
-        uses: ./.github/actions/setup-and-build-fineract
+        uses: $/.github/actions/setup-and-build-fineract
         with:
           cache-read-only: false
 
@@ -36,7 +42,7 @@ jobs:
           tar --use-compress-program='gzip -9' -cf "${RUNNER_TEMP}/fineract-workspace.tar" -C "${GITHUB_WORKSPACE}" .
 
       - name: Upload workspace
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: fineract-workspace-${{ github.run_id }}
           path: ${{ runner.temp }}/fineract-workspace.tar
@@ -44,20 +50,11 @@ jobs:
           compression-level: 9
 
       - name: Archive test results
-        if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ failure() || inputs.upload_artifacts }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: test-results-build-core
           path: '**/build/reports/'
           if-no-files-found: ignore
-          retention-days: 5
-          compression-level: 9
-
-      - name: Archive server logs
-        if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: server-logs-build-core
-          path: '**/build/cargo/'
           retention-days: 5
           compression-level: 9

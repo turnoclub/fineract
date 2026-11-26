@@ -18,16 +18,24 @@
  */
 package org.apache.fineract.portfolio.workingcapitalloan.service;
 
+import com.google.gson.JsonArray;
 import jakarta.persistence.PersistenceException;
 import java.util.List;
 import java.util.Map;
-import lombok.RequiredArgsConstructor;
+import java.util.Optional;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.exception.ExceptionUtils;
 import org.apache.fineract.infrastructure.core.api.JsonCommand;
 import org.apache.fineract.infrastructure.core.data.CommandProcessingResult;
 import org.apache.fineract.infrastructure.core.data.CommandProcessingResultBuilder;
-import org.apache.fineract.portfolio.loanaccount.domain.LoanStatus;
+import org.apache.fineract.infrastructure.dataqueries.data.EntityTables;
+import org.apache.fineract.infrastructure.dataqueries.data.StatusEnum;
+import org.apache.fineract.infrastructure.dataqueries.service.DatatableWriteService;
+import org.apache.fineract.infrastructure.dataqueries.service.EntityDatatableChecksWritePlatformService;
+import org.apache.fineract.infrastructure.event.business.domain.workingcapitalloan.loan.WorkingCapitalLoanApplicationModifiedBusinessEvent;
+import org.apache.fineract.infrastructure.event.business.domain.workingcapitalloan.loan.WorkingCapitalLoanCreatedBusinessEvent;
+import org.apache.fineract.infrastructure.event.business.service.BusinessEventNotifierService;
+import org.apache.fineract.portfolio.loanaccount.service.LoanOriginatorLinkingService;
 import org.apache.fineract.portfolio.workingcapitalloan.WorkingCapitalLoanConstants;
 import org.apache.fineract.portfolio.workingcapitalloan.domain.WorkingCapitalLoan;
 import org.apache.fineract.portfolio.workingcapitalloan.domain.WorkingCapitalLoanNote;
@@ -37,13 +45,13 @@ import org.apache.fineract.portfolio.workingcapitalloan.repository.ProjectedAmor
 import org.apache.fineract.portfolio.workingcapitalloan.repository.WorkingCapitalLoanNoteRepository;
 import org.apache.fineract.portfolio.workingcapitalloan.repository.WorkingCapitalLoanRepository;
 import org.apache.fineract.portfolio.workingcapitalloan.serialization.WorkingCapitalLoanApplicationDataValidator;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.orm.jpa.JpaSystemException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
-@RequiredArgsConstructor
 public class WorkingCapitalLoanApplicationWritePlatformServiceImpl implements WorkingCapitalLoanApplicationWritePlatformService {
 
     private final WorkingCapitalLoanApplicationDataValidator validator;
@@ -51,18 +59,46 @@ public class WorkingCapitalLoanApplicationWritePlatformServiceImpl implements Wo
     private final WorkingCapitalLoanAssembler assembler;
     private final WorkingCapitalLoanNoteRepository noteRepository;
     private final ProjectedAmortizationLoanModelRepository projectedAmortizationLoanModelRepository;
+    private final Optional<LoanOriginatorLinkingService> loanOriginatorLinkingService;
+    private final EntityDatatableChecksWritePlatformService entityDatatableChecksWritePlatformService;
+    private final BusinessEventNotifierService businessEventNotifierService;
+    private final DatatableWriteService datatableWriteService;
+
+    public WorkingCapitalLoanApplicationWritePlatformServiceImpl(WorkingCapitalLoanApplicationDataValidator validator,
+            WorkingCapitalLoanRepository repository, WorkingCapitalLoanAssembler assembler, WorkingCapitalLoanNoteRepository noteRepository,
+            ProjectedAmortizationLoanModelRepository projectedAmortizationLoanModelRepository,
+            @Qualifier("workingCapitalLoanOriginatorLinkingServiceImpl") Optional<LoanOriginatorLinkingService> loanOriginatorLinkingService,
+            EntityDatatableChecksWritePlatformService entityDatatableChecksWritePlatformService,
+            BusinessEventNotifierService businessEventNotifierService, DatatableWriteService datatableWriteService) {
+        this.validator = validator;
+        this.repository = repository;
+        this.assembler = assembler;
+        this.noteRepository = noteRepository;
+        this.projectedAmortizationLoanModelRepository = projectedAmortizationLoanModelRepository;
+        this.loanOriginatorLinkingService = loanOriginatorLinkingService;
+        this.entityDatatableChecksWritePlatformService = entityDatatableChecksWritePlatformService;
+        this.businessEventNotifierService = businessEventNotifierService;
+        this.datatableWriteService = datatableWriteService;
+    }
 
     @Transactional
     @Override
     public CommandProcessingResult submitApplication(final JsonCommand command) {
+        this.validator.validateForCreate(command);
+        final WorkingCapitalLoan loan = this.assembler.assembleFrom(command);
         try {
-            this.validator.validateForCreate(command);
-            final WorkingCapitalLoan loan = this.assembler.assembleFrom(command);
+            // The generated account number is built from the IDENTITY id, so it can only be set after the INSERT.
+            // Until then account_no is NULL, which the unique index lets concurrent creates insert without waiting.
             final WorkingCapitalLoan saved = this.repository.saveAndFlush(loan);
-            this.assembler.accountNumberGeneration(command, saved);
-            this.repository.saveAndFlush(saved);
+            this.assembler.accountNumberGeneration(saved);
+            // Flush here so a duplicate generated number is reported via handleDataIntegrityIssues below
+            this.repository.flush();
             final String submittedOnNote = command.stringValueOfParameterNamed(WorkingCapitalLoanConstants.submittedOnNoteParameterName);
             createNote(submittedOnNote, saved);
+            saveDatatablesIfProvided(command, saved);
+            attachOriginatorsIfProvided(command, saved);
+
+            this.businessEventNotifierService.notifyPostBusinessEvent(new WorkingCapitalLoanCreatedBusinessEvent(saved));
 
             return new CommandProcessingResultBuilder() //
                     .withCommandId(command.commandId()) //
@@ -73,11 +109,11 @@ public class WorkingCapitalLoanApplicationWritePlatformServiceImpl implements Wo
                     .withLoanId(saved.getId()) //
                     .build();
         } catch (final JpaSystemException | DataIntegrityViolationException dve) {
-            this.validator.handleDataIntegrityIssues(command, dve.getMostSpecificCause(), dve);
+            this.validator.handleDataIntegrityIssues(command, loan.getAccountNumber(), dve.getMostSpecificCause(), dve);
             return CommandProcessingResult.empty();
         } catch (final PersistenceException dve) {
             Throwable throwable = ExceptionUtils.getRootCause(dve.getCause());
-            this.validator.handleDataIntegrityIssues(command, throwable, dve);
+            this.validator.handleDataIntegrityIssues(command, loan.getAccountNumber(), throwable, dve);
             return CommandProcessingResult.empty();
         }
     }
@@ -96,6 +132,8 @@ public class WorkingCapitalLoanApplicationWritePlatformServiceImpl implements Wo
             final WorkingCapitalLoan saved = this.repository.saveAndFlush(loan);
             final String submittedOnNote = command.stringValueOfParameterNamed(WorkingCapitalLoanConstants.submittedOnNoteParameterName);
             createNote(submittedOnNote, saved);
+
+            this.businessEventNotifierService.notifyPostBusinessEvent(new WorkingCapitalLoanApplicationModifiedBusinessEvent(saved));
 
             return new CommandProcessingResultBuilder() //
                     .withEntityId(loanId) //
@@ -119,12 +157,14 @@ public class WorkingCapitalLoanApplicationWritePlatformServiceImpl implements Wo
     @Override
     public CommandProcessingResult deleteApplication(final Long loanId) {
         final WorkingCapitalLoan loan = retrieveLoanBy(loanId);
-        if (loan.getLoanStatus() != LoanStatus.SUBMITTED_AND_PENDING_APPROVAL) {
+        if (loan.isNotSubmittedAndPendingApproval()) {
             throw new WorkingCapitalLoanApplicationNotInSubmittedStateCannotBeDeletedException(loanId);
         }
         final List<WorkingCapitalLoanNote> relatedNotes = this.noteRepository.findByWcLoanId(loan.getId());
         this.noteRepository.deleteAllInBatch(relatedNotes);
         projectedAmortizationLoanModelRepository.findByLoanId(loan.getId()).ifPresent(projectedAmortizationLoanModelRepository::delete);
+        // a datatable entry references the loan, so it goes first
+        this.datatableWriteService.deleteDatatableEntriesOfEntity(EntityTables.WC_LOAN, loan.getId());
         this.repository.delete(loan);
 
         return new CommandProcessingResultBuilder() //
@@ -145,5 +185,24 @@ public class WorkingCapitalLoanApplicationWritePlatformServiceImpl implements Wo
             final WorkingCapitalLoanNote note = WorkingCapitalLoanNote.create(loan, submittedOnNote);
             this.noteRepository.save(note);
         }
+    }
+
+    private void attachOriginatorsIfProvided(final JsonCommand command, final WorkingCapitalLoan loan) {
+        if (this.loanOriginatorLinkingService.isPresent()
+                && command.parameterExists(WorkingCapitalLoanConstants.originatorsParameterName)) {
+            final JsonArray originatorsArray = command.arrayOfParameterNamed(WorkingCapitalLoanConstants.originatorsParameterName);
+            if (originatorsArray != null && !originatorsArray.isEmpty()) {
+                this.loanOriginatorLinkingService.get().processOriginatorsForLoanApplication(loan.getId(), originatorsArray);
+            }
+        }
+    }
+
+    private void saveDatatablesIfProvided(final JsonCommand command, final WorkingCapitalLoan loan) {
+        if (command.parameterExists(WorkingCapitalLoanConstants.datatablesParameterName)) {
+            this.entityDatatableChecksWritePlatformService.saveDatatables(StatusEnum.CREATE.getValue(), EntityTables.WC_LOAN.getName(),
+                    loan.getId(), loan.productId(), command.arrayOfParameterNamed(WorkingCapitalLoanConstants.datatablesParameterName));
+        }
+        this.entityDatatableChecksWritePlatformService.runTheCheckForProduct(loan.getId(), EntityTables.WC_LOAN.getName(),
+                StatusEnum.CREATE.getValue(), EntityTables.WC_LOAN.getForeignKeyColumnNameOnDatatable(), loan.productId());
     }
 }

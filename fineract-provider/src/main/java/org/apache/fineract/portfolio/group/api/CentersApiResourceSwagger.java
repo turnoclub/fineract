@@ -20,6 +20,7 @@ package org.apache.fineract.portfolio.group.api;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.LocalDate;
+import java.util.List;
 import java.util.Set;
 
 /**
@@ -89,11 +90,15 @@ final class CentersApiResourceSwagger {
 
             @Schema(example = "2")
             public Long id;
+            @Schema(example = "000000002")
+            public String accountNo;
             public GetCentersStatus status;
             @Schema(example = "false")
             public Boolean active;
             @Schema(example = "Center 1")
             public String name;
+            @Schema(example = "EXT-001")
+            public String externalId;
             @Schema(example = "1")
             public Long officeId;
             @Schema(example = "Head Office")
@@ -112,19 +117,41 @@ final class CentersApiResourceSwagger {
 
         private GetCentersCenterIdResponse() {}
 
+        static final class GetCentersGroupMembers {
+
+            private GetCentersGroupMembers() {}
+
+            @Schema(example = "4")
+            public Long id;
+            @Schema(example = "AnotherGroup")
+            public String name;
+        }
+
         @Schema(example = "8")
         public Long id;
+        @Schema(example = "000000008")
+        public String accountNo;
         public GetCentersResponse.GetCentersPageItems.GetCentersStatus status;
         @Schema(example = "false")
         public Boolean active;
+        @Schema(example = "[2013, 4, 18]")
+        public LocalDate activationDate;
         @Schema(example = "First Center (No groups)")
         public String name;
+        @Schema(example = "externalId1")
+        public String externalId;
+        @Schema(example = "1")
+        public Long staffId;
+        @Schema(example = "D, Mary")
+        public String staffName;
         @Schema(example = "1")
         public Long officeId;
         @Schema(example = "Head Office")
         public String officeName;
         @Schema(example = ".8.")
         public String hierarchy;
+        @Schema(description = "Returned when the groupMembers association is requested")
+        public List<GetCentersGroupMembers> groupMembers;
     }
 
     @Schema(description = "PostCentersRequest")
@@ -138,6 +165,20 @@ final class CentersApiResourceSwagger {
         public Long officeId;
         @Schema(example = "false")
         public Boolean active;
+        @Schema(example = "externalId1")
+        public String externalId;
+        @Schema(example = "1")
+        public Long staffId;
+        @Schema(example = "dd MMMM yyyy")
+        public String dateFormat;
+        @Schema(example = "en")
+        public String locale;
+        @Schema(example = "04 March 2011")
+        public String activationDate;
+        @Schema(example = "04 March 2011")
+        public String submittedOnDate;
+        @Schema(description = "List of group ids to associate at creation")
+        public List<Long> groupMembers;
     }
 
     @Schema(description = "PostCentersResponse")
@@ -160,6 +201,10 @@ final class CentersApiResourceSwagger {
 
         @Schema(example = "First Center (No groups)")
         public String name;
+        @Schema(example = "externalId1")
+        public String externalId;
+        @Schema(example = "1")
+        public Long staffId;
     }
 
     @Schema(description = "PutCentersCenterIdResponse")
@@ -173,6 +218,10 @@ final class CentersApiResourceSwagger {
 
             @Schema(example = "First Center (No groups) - modified")
             public String name;
+            @Schema(example = "externalId1")
+            public String externalId;
+            @Schema(example = "1")
+            public Long staffId;
         }
 
         @Schema(example = "1")
@@ -212,6 +261,8 @@ final class CentersApiResourceSwagger {
         public String locale;
         @Schema(example = "dd MMMM yyyy")
         public String dateFormat;
+        @Schema(description = "List of group ids to associate with or disassociate from the center")
+        public List<Long> groupMembers;
     }
 
     @Schema(description = "PostCentersCenterIdResponse")
@@ -219,8 +270,21 @@ final class CentersApiResourceSwagger {
 
         private PostCentersCenterIdResponse() {}
 
+        static final class PostCentersCenterIdChanges {
+
+            private PostCentersCenterIdChanges() {}
+
+            @Schema(description = "Ids of the groups associated or disassociated by the command")
+            public List<String> groupMembers;
+        }
+
+        @Schema(example = "1")
+        public Long officeId;
+        @Schema(example = "1")
+        public Long groupId;
         @Schema(example = "1")
         public Long resourceId;
+        public PostCentersCenterIdChanges changes;
     }
 
     @Schema(description = "GetCentersCenterIdAccountsResponse")

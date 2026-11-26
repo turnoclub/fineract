@@ -25,6 +25,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.parameters.RequestBody;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.ws.rs.Consumes;
+import jakarta.ws.rs.DELETE;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.POST;
 import jakarta.ws.rs.PUT;
@@ -35,15 +36,18 @@ import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.UriInfo;
+import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.apache.fineract.commands.domain.CommandWrapper;
 import org.apache.fineract.commands.service.CommandWrapperBuilder;
 import org.apache.fineract.commands.service.PortfolioCommandSourceWritePlatformService;
+import org.apache.fineract.infrastructure.core.annotation.AlternativeOperationId;
 import org.apache.fineract.infrastructure.core.data.CommandProcessingResult;
 import org.apache.fineract.infrastructure.core.service.Page;
 import org.apache.fineract.infrastructure.security.service.PlatformUserRightsContext;
 import org.apache.fineract.investor.config.InvestorModuleIsEnabledCondition;
 import org.apache.fineract.investor.data.ExternalTransferLoanProductAttributesData;
+import org.apache.fineract.investor.data.ExternalTransferLoanProductAttributesTemplateData;
 import org.apache.fineract.investor.service.ExternalAssetOwnerLoanProductAttributesReadService;
 import org.springframework.context.annotation.Conditional;
 import org.springframework.stereotype.Component;
@@ -59,11 +63,22 @@ public class ExternalAssetOwnerLoanProductAttributesApiResource {
     private final PortfolioCommandSourceWritePlatformService commandsSourceWritePlatformService;
     private final ExternalAssetOwnerLoanProductAttributesReadService externalAssetOwnerLoanProductAttributesReadService;
 
+    @GET
+    @Path("/template")
+    @Produces({ MediaType.APPLICATION_JSON })
+    @Operation(summary = "Retrieve External Asset Owner Loan Product Attributes Template", operationId = "retrieveTemplateExternalAssetOwnerLoanProductAttributes", description = "Retrieves all available external asset owner loan product attributes and the values each attribute can take.")
+    public List<ExternalTransferLoanProductAttributesTemplateData> getExternalAssetOwnerLoanProductAttributesTemplate() {
+        platformUserRightsContext.isAuthenticated();
+
+        return externalAssetOwnerLoanProductAttributesReadService.retrieveExternalAssetOwnerLoanProductAttributesTemplate();
+    }
+
     @POST
     @Path("/{loanProductId}/attributes")
     @Consumes({ MediaType.APPLICATION_JSON })
     @Produces({ MediaType.APPLICATION_JSON })
     @Operation(summary = "Create External Asset Owner Loan Product Attribute", operationId = "createExternalAssetOwnerLoanProductAttribute")
+    @AlternativeOperationId("postExternalAssetOwnerLoanProductAttribute")
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = ExternalAssetOwnerLoanProductAttributesApiResourceSwagger.PostExternalAssetOwnerLoanProductAttributeRequest.class)))
     public CommandProcessingResult postExternalAssetOwnerLoanProductAttribute(
             @PathParam("loanProductId") @Parameter(description = "loanProductId") final Long loanProductId,
@@ -82,6 +97,7 @@ public class ExternalAssetOwnerLoanProductAttributesApiResource {
             "External Asset Owner Loan Product Attributes" }, summary = "Retrieve All Loan Product Attributes", operationId = "retrieveAllExternalAssetOwnerLoanProductAttributes", description = "Retrieves all Loan Product Attributes with a given loanProductId", parameters = {
                     @Parameter(name = "loanProductId", description = "loanProductId"),
                     @Parameter(name = "attributeKey", description = "attributeKey") })
+    @AlternativeOperationId("getExternalAssetOwnerLoanProductAttributes")
     public Page<ExternalTransferLoanProductAttributesData> getExternalAssetOwnerLoanProductAttributes(@Context final UriInfo uriInfo,
             @PathParam("loanProductId") @Parameter(description = "loanProductId") final Long loanProductId,
             @QueryParam("attributeKey") @Parameter(description = "attributeKey") final String attributeKey) {
@@ -100,6 +116,7 @@ public class ExternalAssetOwnerLoanProductAttributesApiResource {
             "External Asset Owner Loan Product Attributes" }, summary = "Update a Loan Product Attribute", operationId = "updateExternalAssetOwnerLoanProductAttribute", description = "Updates a loan product attribute with a given loan product id and attribute id", parameters = {
                     @Parameter(name = "loanProductId", description = "loanProductId"),
                     @Parameter(name = "attributeId", description = "attributeId") })
+    @AlternativeOperationId("updateLoanProductAttribute")
     public CommandProcessingResult updateLoanProductAttribute(
             @PathParam("loanProductId") @Parameter(description = "loanProductId") final Long loanProductId,
             @PathParam("id") @Parameter(description = "attributeId") final Long attributeId,
@@ -107,6 +124,24 @@ public class ExternalAssetOwnerLoanProductAttributesApiResource {
         platformUserRightsContext.isAuthenticated();
         final CommandWrapperBuilder builder = new CommandWrapperBuilder().withJson(apiRequestBodyAsJson);
         CommandWrapper request = builder.updateExternalAssetOwnerLoanProductAttribute(loanProductId, attributeId).build();
+
+        return commandsSourceWritePlatformService.logCommandSource(request);
+    }
+
+    @DELETE
+    @Path("/{loanProductId}/attributes/{id}")
+    @Produces({ MediaType.APPLICATION_JSON })
+    @Operation(tags = {
+            "External Asset Owner Loan Product Attributes" }, summary = "Delete a Loan Product Attribute", operationId = "deleteExternalAssetOwnerLoanProductAttribute", description = "Deletes a loan product attribute with a given loan product id and attribute id, so that the loan product falls back to the default behaviour of the attribute", parameters = {
+                    @Parameter(name = "loanProductId", description = "loanProductId"),
+                    @Parameter(name = "attributeId", description = "attributeId") })
+    @AlternativeOperationId("deleteLoanProductAttribute")
+    public CommandProcessingResult deleteLoanProductAttribute(
+            @PathParam("loanProductId") @Parameter(description = "loanProductId") final Long loanProductId,
+            @PathParam("id") @Parameter(description = "attributeId") final Long attributeId) {
+        platformUserRightsContext.isAuthenticated();
+        final CommandWrapperBuilder builder = new CommandWrapperBuilder();
+        CommandWrapper request = builder.deleteExternalAssetOwnerLoanProductAttribute(loanProductId, attributeId).build();
 
         return commandsSourceWritePlatformService.logCommandSource(request);
     }

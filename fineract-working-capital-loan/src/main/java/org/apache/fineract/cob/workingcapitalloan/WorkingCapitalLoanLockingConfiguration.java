@@ -18,9 +18,11 @@
  */
 package org.apache.fineract.cob.workingcapitalloan;
 
+import com.querydsl.sql.SQLQueryFactory;
 import lombok.RequiredArgsConstructor;
 import org.apache.fineract.cob.domain.LockingService;
 import org.apache.fineract.infrastructure.core.config.FineractProperties;
+import org.apache.fineract.infrastructure.core.service.database.DatabaseSpecificSQLGenerator;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -31,11 +33,12 @@ import org.springframework.jdbc.core.JdbcTemplate;
 public class WorkingCapitalLoanLockingConfiguration {
 
     private final JdbcTemplate jdbcTemplate;
+    private final DatabaseSpecificSQLGenerator sqlGenerator;
     private final FineractProperties fineractProperties;
 
     @Bean
     @ConditionalOnMissingBean(name = "workingCapitalLoanLockingService")
-    public LockingService workingCapitalLoanLockingService() {
-        return new WorkingCapitalLoanLockingServiceImpl(jdbcTemplate, fineractProperties);
+    public LockingService workingCapitalLoanLockingService(final SQLQueryFactory queryFactory) {
+        return new WorkingCapitalLoanLockingServiceImpl(jdbcTemplate, sqlGenerator, fineractProperties, queryFactory);
     }
 }

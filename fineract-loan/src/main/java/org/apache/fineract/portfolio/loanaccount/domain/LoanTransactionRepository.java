@@ -28,6 +28,7 @@ import org.apache.fineract.infrastructure.codes.domain.CodeValue;
 import org.apache.fineract.infrastructure.core.domain.ExternalId;
 import org.apache.fineract.portfolio.loanaccount.data.CumulativeIncomeFromIncomePosting;
 import org.apache.fineract.portfolio.loanaccount.data.LoanScheduleDelinquencyData;
+import org.apache.fineract.portfolio.loanaccount.data.LoanTransactionOwnerTaggingData;
 import org.apache.fineract.portfolio.loanaccount.data.TransactionPortionsForForeclosure;
 import org.apache.fineract.portfolio.loanaccount.data.UnpaidChargeData;
 import org.springframework.data.domain.Pageable;
@@ -73,6 +74,10 @@ public interface LoanTransactionRepository extends JpaRepository<LoanTransaction
 
     @Query("SELECT lt.loan.id FROM LoanTransaction lt WHERE lt.id = :id")
     Optional<Long> findLoanIdById(@Param("id") Long id);
+
+    @Query("SELECT new org.apache.fineract.portfolio.loanaccount.data.LoanTransactionOwnerTaggingData("
+            + "lt.loan.id, lt.loan.loanProduct.id, lt.typeOf) FROM LoanTransaction lt WHERE lt.id = :id")
+    Optional<LoanTransactionOwnerTaggingData> findOwnerTaggingDataById(@Param("id") Long id);
 
     @Query("""
                 SELECT COALESCE(SUM(lt.unrecognizedIncomePortion), 0)
@@ -151,11 +156,11 @@ public interface LoanTransactionRepository extends JpaRepository<LoanTransaction
     List<Long> findReversedTransactionIdsByLoan(@Param("loan") Loan loan);
 
     @Query("""
-            SELECT
-                lt.typeOf AS transactionType,
-                lt.interestPortion AS interestPortion,
-                lt.feeChargesPortion AS feeChargesPortion,
-                lt.penaltyChargesPortion AS penaltyChargesPortion
+            SELECT new org.apache.fineract.portfolio.loanaccount.data.TransactionPortionsForForeclosure(
+                lt.typeOf,
+                lt.interestPortion,
+                lt.feeChargesPortion,
+                lt.penaltyChargesPortion)
             FROM LoanTransaction lt
             WHERE lt.loan = :loan
                 AND lt.reversed = false
@@ -283,6 +288,21 @@ public interface LoanTransactionRepository extends JpaRepository<LoanTransaction
                 AND lt.reversed = false
             """)
     BigDecimal findChargeAccrualAmount(@Param("loanCharge") LoanCharge loanCharge);
+
+    // (0 - x) instead of -x: avoids EclipseLink concurrent unary-negation race in ArgumentListFunctionExpression
+    @Query("""
+            SELECT COALESCE(SUM(CASE WHEN lt.typeOf = org.apache.fineract.portfolio.loanaccount.domain.LoanTransactionType.ACCRUAL_ADJUSTMENT THEN (0 - lcpb.amount)
+                 ELSE lcpb.amount END), 0)
+            FROM LoanChargePaidBy lcpb
+            JOIN lcpb.loanTransaction lt
+            WHERE lcpb.loanCharge = :loanCharge
+                AND lt.reversed = false
+                AND lt.id < :transactionId
+                AND lt.typeOf IN :types
+                AND lcpb.amount > 0
+            """)
+    BigDecimal findChargeAmountPaidByEarlierTransactions(@Param("loanCharge") LoanCharge loanCharge,
+            @Param("transactionId") Long transactionId, @Param("types") Set<LoanTransactionType> types);
 
     // (0 - x) instead of -x: avoids EclipseLink concurrent unary-negation race in ArgumentListFunctionExpression
     @Query("""
@@ -418,6 +438,7 @@ public interface LoanTransactionRepository extends JpaRepository<LoanTransaction
                     org.apache.fineract.portfolio.loanaccount.domain.LoanTransactionType.DOWN_PAYMENT,
                     org.apache.fineract.portfolio.loanaccount.domain.LoanTransactionType.INTEREST_PAYMENT_WAIVER,
                     org.apache.fineract.portfolio.loanaccount.domain.LoanTransactionType.INTEREST_REFUND,
+                    org.apache.fineract.portfolio.loanaccount.domain.LoanTransactionType.FEE_REFUND,
                     org.apache.fineract.portfolio.loanaccount.domain.LoanTransactionType.CAPITALIZED_INCOME_ADJUSTMENT
                 )
             """)
@@ -453,20 +474,12 @@ public interface LoanTransactionRepository extends JpaRepository<LoanTransaction
                     org.apache.fineract.portfolio.loanaccount.domain.LoanTransactionType.REAGE,
                     org.apache.fineract.portfolio.loanaccount.domain.LoanTransactionType.CAPITALIZED_INCOME_AMORTIZATION,
                     org.apache.fineract.portfolio.loanaccount.domain.LoanTransactionType.CONTRACT_TERMINATION,
+                    org.apache.fineract.portfolio.loanaccount.domain.LoanTransactionType.LOAN_WITHDRAWAL,
                     org.apache.fineract.portfolio.loanaccount.domain.LoanTransactionType.CAPITALIZED_INCOME_AMORTIZATION_ADJUSTMENT
                 )
             ORDER BY lt.dateOf, lt.createdDate, lt.id
             """)
     List<LoanTransaction> findNonReversedMonetaryTransactionsByLoan(@Param("loan") Loan loan);
-
-    @Query("""
-            SELECT COALESCE(SUM(lt.amount), 0)
-            FROM LoanTransaction lt
-            WHERE lt.loan = :loan
-                AND lt.reversed = false
-                AND lt.typeOf = org.apache.fineract.portfolio.loanaccount.domain.LoanTransactionType.RECOVERY_REPAYMENT
-            """)
-    BigDecimal calculateTotalRecoveryPaymentAmount(@Param("loan") Loan loan);
 
     @Query("""
             SELECT CASE WHEN COUNT(lt) > 0 THEN true ELSE false END

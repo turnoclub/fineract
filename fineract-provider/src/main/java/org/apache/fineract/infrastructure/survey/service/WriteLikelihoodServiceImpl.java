@@ -24,6 +24,7 @@ import org.apache.fineract.infrastructure.core.data.CommandProcessingResult;
 import org.apache.fineract.infrastructure.core.data.CommandProcessingResultBuilder;
 import org.apache.fineract.infrastructure.core.exception.ErrorHandler;
 import org.apache.fineract.infrastructure.security.service.PlatformSecurityContext;
+import org.apache.fineract.infrastructure.survey.api.LikelihoodApiConstants;
 import org.apache.fineract.infrastructure.survey.data.LikelihoodDataValidator;
 import org.apache.fineract.infrastructure.survey.data.LikelihoodStatus;
 import org.apache.fineract.infrastructure.survey.domain.Likelihood;
@@ -67,10 +68,14 @@ public class WriteLikelihoodServiceImpl implements WriteLikelihoodService {
 
             final Likelihood likelihood = this.repository.findById(likelihoodId).orElse(null);
 
-            if (!likelihood.update(command).isEmpty()) {
+            final boolean enabled = command.booleanPrimitiveValueOfParameterNamed(LikelihoodApiConstants.ACTIVE);
+            final Long changeToValue = enabled ? LikelihoodStatus.ENABLED : LikelihoodStatus.DISABLED;
+
+            if (!changeToValue.equals(likelihood.getEnabled())) {
+                likelihood.setEnabled(changeToValue);
                 this.repository.save(likelihood);
 
-                if (likelihood.isActivateCommand(command)) {
+                if (enabled) {
                     List<Likelihood> likelihoods = this.repository.findByPpiNameAndLikeliHoodId(likelihood.getPpiName(),
                             likelihood.getId());
 
@@ -99,7 +104,7 @@ public class WriteLikelihoodServiceImpl implements WriteLikelihoodService {
      * Guaranteed to throw an exception no matter what the data integrity issue is.
      */
     private void handleDataIntegrityIssues(final Throwable realCause, final NonTransientDataAccessException dve) {
-        LOG.error("Error occured.", dve);
+        LOG.error("Error occurred.", dve);
         throw ErrorHandler.getMappable(dve, "error.msg.likelihood.unknown.data.integrity.issue",
                 "Unknown data integrity issue with resource: " + realCause.getMessage());
     }

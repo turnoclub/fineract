@@ -18,6 +18,8 @@
  */
 package org.apache.fineract.infrastructure.configuration.service;
 
+import com.querydsl.core.Tuple;
+import com.querydsl.sql.SQLQueryFactory;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
@@ -31,74 +33,24 @@ import org.apache.fineract.infrastructure.configuration.data.SMTPCredentialsData
 import org.apache.fineract.infrastructure.configuration.exception.ExternalServiceConfigurationNotFoundException;
 import org.apache.fineract.infrastructure.core.service.StringUtil;
 import org.apache.fineract.infrastructure.gcm.domain.NotificationConfigurationData;
+import org.apache.fineract.query.QCExternalService;
+import org.apache.fineract.query.QCExternalServiceProperties;
 import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.ResultSetExtractor;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 @Service
 @RequiredArgsConstructor
+@Transactional(readOnly = true)
 public class ExternalServicesPropertiesReadPlatformServiceImpl implements ExternalServicesPropertiesReadPlatformService {
 
     private final JdbcTemplate jdbcTemplate;
-
-    private static final class S3CredentialsDataExtractor implements ResultSetExtractor<S3CredentialsData> {
-
-        @Override
-        public S3CredentialsData extractData(final ResultSet rs) throws SQLException, DataAccessException {
-            String accessKey = null;
-            String bucketName = null;
-            String secretKey = null;
-            while (rs.next()) {
-                if (rs.getString("name").equalsIgnoreCase(ExternalServicesConstants.S3_ACCESS_KEY)) {
-                    accessKey = rs.getString("value");
-                } else if (rs.getString("name").equalsIgnoreCase(ExternalServicesConstants.S3_BUCKET_NAME)) {
-                    bucketName = rs.getString("value");
-                } else if (rs.getString("name").equalsIgnoreCase(ExternalServicesConstants.S3_SECRET_KEY)) {
-                    secretKey = rs.getString("value");
-                }
-            }
-            return new S3CredentialsData().setBucketName(bucketName).setAccessKey(accessKey).setSecretKey(secretKey);
-        }
-    }
-
-    private static final class SMTPCredentialsDataExtractor implements ResultSetExtractor<SMTPCredentialsData> {
-
-        @Override
-        public SMTPCredentialsData extractData(final ResultSet rs) throws SQLException, DataAccessException {
-            String username = null;
-            String password = null;
-            String host = null;
-            String port = "587";
-            boolean useTLS = false;
-            String fromEmail = null;
-            String fromName = null;
-
-            while (rs.next()) {
-                String name = rs.getString("name");
-                String value = rs.getString("value");
-
-                if (ExternalServicesConstants.SMTP_USERNAME.equalsIgnoreCase(name)) {
-                    username = value;
-                } else if (ExternalServicesConstants.SMTP_PORT.equalsIgnoreCase(name)) {
-                    port = value;
-                } else if (ExternalServicesConstants.SMTP_PASSWORD.equalsIgnoreCase(name)) {
-                    password = value;
-                } else if (ExternalServicesConstants.SMTP_HOST.equalsIgnoreCase(name)) {
-                    host = value;
-                } else if (ExternalServicesConstants.SMTP_USE_TLS.equalsIgnoreCase(name)) {
-                    useTLS = Boolean.parseBoolean(value);
-                } else if (ExternalServicesConstants.SMTP_FROM_EMAIL.equalsIgnoreCase(name)) {
-                    fromEmail = value;
-                } else if (ExternalServicesConstants.SMTP_FROM_NAME.equalsIgnoreCase(name)) {
-                    fromName = value;
-                }
-            }
-            return new SMTPCredentialsData().setUsername(username).setPassword(password).setHost(host).setPort(port).setUseTLS(useTLS)
-                    .setFromEmail(fromEmail).setFromName(fromName);
-        }
-    }
+    private final SQLQueryFactory queryFactory;
+    private final QCExternalServiceProperties esp = new QCExternalServiceProperties("esp");
+    private final QCExternalService es = new QCExternalService("es");
 
     private static final class ExternalServiceMapper implements RowMapper<ExternalServicesPropertiesData> {
 
@@ -149,19 +101,51 @@ public class ExternalServicesPropertiesReadPlatformServiceImpl implements Extern
 
     @Override
     public S3CredentialsData getS3Credentials() {
-        final ResultSetExtractor<S3CredentialsData> resultSetExtractor = new S3CredentialsDataExtractor();
-        final String sql = "SELECT esp.name, esp.value FROM c_external_service_properties esp inner join c_external_service es on esp.external_service_id = es.id where es.name = '"
-                + ExternalServicesConstants.S3_SERVICE_NAME + "'";
-        final S3CredentialsData s3CredentialsData = this.jdbcTemplate.query(sql, resultSetExtractor, new Object[] {});
+        List<Tuple> rows = queryFactory.select(esp.name, esp.value).from(esp).innerJoin(es).on(esp.externalServiceId.eq(es.id))
+                .where(es.name.eq(ExternalServicesConstants.S3_SERVICE_NAME)).fetch();
+
+        S3CredentialsData s3CredentialsData = new S3CredentialsData();
+        for (Tuple t : rows) {
+            String name = t.get(esp.name);
+            String value = t.get(esp.value);
+            if (ExternalServicesConstants.S3_ACCESS_KEY.equalsIgnoreCase(name)) {
+                s3CredentialsData.setAccessKey(value);
+            } else if (ExternalServicesConstants.S3_BUCKET_NAME.equalsIgnoreCase(name)) {
+                s3CredentialsData.setBucketName(value);
+            } else if (ExternalServicesConstants.S3_SECRET_KEY.equalsIgnoreCase(name)) {
+                s3CredentialsData.setSecretKey(value);
+            }
+        }
         return s3CredentialsData;
     }
 
     @Override
     public SMTPCredentialsData getSMTPCredentials() {
-        final ResultSetExtractor<SMTPCredentialsData> resultSetExtractor = new SMTPCredentialsDataExtractor();
-        final String sql = "SELECT esp.name, esp.value FROM c_external_service_properties esp inner join c_external_service es on esp.external_service_id = es.id where es.name = '"
-                + ExternalServicesConstants.SMTP_SERVICE_NAME + "'";
-        final SMTPCredentialsData smtpCredentialsData = this.jdbcTemplate.query(sql, resultSetExtractor, new Object[] {});
+
+        List<Tuple> rows = queryFactory.select(esp.name, esp.value).from(esp).innerJoin(es).on(esp.externalServiceId.eq(es.id))
+                .where(es.name.eq(ExternalServicesConstants.SMTP_SERVICE_NAME)).fetch();
+
+        SMTPCredentialsData smtpCredentialsData = new SMTPCredentialsData().setPort("587");
+        for (Tuple t : rows) {
+            String name = t.get(esp.name);
+            String value = t.get(esp.value);
+            if (ExternalServicesConstants.SMTP_USERNAME.equalsIgnoreCase(name)) {
+                smtpCredentialsData.setUsername(value);
+            } else if (ExternalServicesConstants.SMTP_PASSWORD.equalsIgnoreCase(name)) {
+                smtpCredentialsData.setPassword(value);
+            } else if (ExternalServicesConstants.SMTP_HOST.equalsIgnoreCase(name)) {
+                smtpCredentialsData.setHost(value);
+            } else if (ExternalServicesConstants.SMTP_USE_TLS.equalsIgnoreCase(name)) {
+                smtpCredentialsData.setUseTLS(Boolean.parseBoolean(value));
+            } else if (ExternalServicesConstants.SMTP_FROM_EMAIL.equalsIgnoreCase(name)) {
+                smtpCredentialsData.setFromEmail(value);
+            } else if (ExternalServicesConstants.SMTP_FROM_NAME.equalsIgnoreCase(name)) {
+                smtpCredentialsData.setFromName(value);
+            } else if (ExternalServicesConstants.SMTP_PORT.equalsIgnoreCase(name)) {
+                smtpCredentialsData.setPort(value);
+            }
+        }
+
         return smtpCredentialsData;
     }
 

@@ -42,6 +42,18 @@ public class SchedulerStepDef extends AbstractStepDef {
     @Autowired
     private FineractFeignClient fineractClient;
 
+    @And("Admin runs the {string} job")
+    public void runPeriodicAccrualTransaction(String jobName) {
+        DefaultJob job = DefaultJob.valueOf(jobName);
+        jobService.executeAndWait(job);
+    }
+
+    @And("Admin successfully runs the {string} job")
+    public void runJobSuccessfully(final String jobName) {
+        final DefaultJob job = DefaultJob.valueOf(jobName);
+        jobService.executeAndWaitForSuccess(job);
+    }
+
     @And("Admin runs the Add Accrual Transactions job")
     public void runAccrualTransaction() {
         jobService.executeAndWait(DefaultJob.ADD_ACCRUAL_TRANSACTIONS);
@@ -85,6 +97,11 @@ public class SchedulerStepDef extends AbstractStepDef {
     @When("Admin runs WC COB job")
     public void runWorkingCapitalLoanCOB() {
         jobService.executeAndWait(DefaultJob.WORKING_CAPITAL_LOAN_COB);
+    }
+
+    @When("Admin runs the Retained Earning Job")
+    public void runRetainedEarning() {
+        jobService.executeAndWait(DefaultJob.RETAINED_EARNING);
     }
 
     @Then("Admin verifies scheduler job {string} has display name {string}")

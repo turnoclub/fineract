@@ -21,6 +21,7 @@ package org.apache.fineract.useradministration.service;
 import jakarta.persistence.PersistenceException;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -50,6 +51,9 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class RoleWritePlatformServiceJpaRepositoryImpl implements RoleWritePlatformService {
 
+    private static final String NAME_PARAM_NAME = "name";
+    private static final String DESCRIPTION_PARAM_NAME = "description";
+
     private final PlatformSecurityContext context;
     private final RoleRepository roleRepository;
     private final PermissionRepository permissionRepository;
@@ -65,7 +69,8 @@ public class RoleWritePlatformServiceJpaRepositoryImpl implements RoleWritePlatf
 
             this.roleCommandFromApiJsonDeserializer.validateForCreate(command.json());
 
-            final Role entity = Role.fromJson(command);
+            final Role entity = new Role(command.stringValueOfParameterNamed(NAME_PARAM_NAME),
+                    command.stringValueOfParameterNamed(DESCRIPTION_PARAM_NAME));
             this.roleRepository.saveAndFlush(entity);
 
             return new CommandProcessingResultBuilder() //
@@ -86,6 +91,24 @@ public class RoleWritePlatformServiceJpaRepositoryImpl implements RoleWritePlatf
         }
     }
 
+    private static Map<String, Object> applyChanges(final Role role, final JsonCommand command) {
+        final Map<String, Object> actualChanges = new LinkedHashMap<>(7);
+
+        if (command.isChangeInStringParameterNamed(NAME_PARAM_NAME, role.getName())) {
+            final String newValue = command.stringValueOfParameterNamed(NAME_PARAM_NAME);
+            actualChanges.put(NAME_PARAM_NAME, newValue);
+            role.updateName(newValue);
+        }
+
+        if (command.isChangeInStringParameterNamed(DESCRIPTION_PARAM_NAME, role.getDescription())) {
+            final String newValue = command.stringValueOfParameterNamed(DESCRIPTION_PARAM_NAME);
+            actualChanges.put(DESCRIPTION_PARAM_NAME, newValue);
+            role.updateDescription(newValue);
+        }
+
+        return actualChanges;
+    }
+
     /*
      * Guaranteed to throw an exception no matter what the data integrity issue is.
      */
@@ -96,7 +119,7 @@ public class RoleWritePlatformServiceJpaRepositoryImpl implements RoleWritePlatf
                     "name", name);
         }
 
-        log.error("Error occured.", dve);
+        log.error("Error occurred.", dve);
         throw ErrorHandler.getMappable(dve, "error.msg.role.unknown.data.integrity.issue", "Unknown data integrity issue with resource.");
     }
 
@@ -112,7 +135,7 @@ public class RoleWritePlatformServiceJpaRepositoryImpl implements RoleWritePlatf
             final Role role = this.roleRepository.findById(roleId).orElseThrow(() -> new RoleNotFoundException(roleId));
 
             String previousRoleName = role.getName();
-            final Map<String, Object> changes = role.update(command);
+            final Map<String, Object> changes = applyChanges(role, command);
             if (!changes.isEmpty()) {
                 this.roleRepository.saveAndFlush(role);
             }
@@ -175,12 +198,19 @@ public class RoleWritePlatformServiceJpaRepositoryImpl implements RoleWritePlatf
 
     private Permission findPermissionByCode(final Collection<Permission> allPermissions, final String permissionCode) {
 
+        Permission caseInsensitiveMatch = null;
         if (allPermissions != null) {
             for (final Permission permission : allPermissions) {
-                if (permission.hasCode(permissionCode)) {
+                if (permission.getCode().equals(permissionCode)) {
                     return permission;
                 }
+                if (caseInsensitiveMatch == null && permission.hasCode(permissionCode)) {
+                    caseInsensitiveMatch = permission;
+                }
             }
+        }
+        if (caseInsensitiveMatch != null) {
+            return caseInsensitiveMatch;
         }
         throw new PermissionNotFoundException(permissionCode);
     }
@@ -193,14 +223,10 @@ public class RoleWritePlatformServiceJpaRepositoryImpl implements RoleWritePlatf
     public CommandProcessingResult deleteRole(Long roleId) {
 
         try {
-            /**
-             * Checking the role present in DB or not using role_id
-             */
+            // Checking the role present in DB or not using role_id
             final Role role = this.roleRepository.findById(roleId).orElseThrow(() -> new RoleNotFoundException(roleId));
 
-            /**
-             * Roles associated with users can't be deleted
-             */
+            // Roles associated with users can't be deleted
             final Integer count = this.roleRepository.getCountOfRolesAssociatedWithUsers(roleId);
             if (count > 0) {
                 throw new RoleAssociatedException("error.msg.role.associated.with.users.deleted", roleId);
@@ -223,23 +249,17 @@ public class RoleWritePlatformServiceJpaRepositoryImpl implements RoleWritePlatf
     @Override
     public CommandProcessingResult disableRole(Long roleId) {
         try {
-            /**
-             * Checking the role present in DB or not using role_id
-             */
+            // Checking the role present in DB or not using role_id
             final Role role = this.roleRepository.findById(roleId).orElseThrow(() -> new RoleNotFoundException(roleId));
             // if(role.isDisabled()){throw new RoleNotFoundException(roleId);}
 
-            /**
-             * Roles associated with users can't be disable
-             */
+            // Roles associated with users can't be disable
             final Integer count = this.roleRepository.getCountOfRolesAssociatedWithUsers(roleId);
             if (count > 0) {
                 throw new RoleAssociatedException("error.msg.role.associated.with.users.disabled", roleId);
             }
 
-            /**
-             * Disabling the role
-             */
+            // Disabling the role
             role.disableRole();
             this.roleRepository.saveAndFlush(role);
             return new CommandProcessingResultBuilder() //
@@ -259,9 +279,7 @@ public class RoleWritePlatformServiceJpaRepositoryImpl implements RoleWritePlatf
     @Override
     public CommandProcessingResult enableRole(Long roleId) {
         try {
-            /**
-             * Checking the role present in DB or not using role_id
-             */
+            // Checking the role present in DB or not using role_id
             final Role role = this.roleRepository.findById(roleId).orElseThrow(() -> new RoleNotFoundException(roleId));
             // if(!role.isEnabled()){throw new RoleNotFoundException(roleId);}
 

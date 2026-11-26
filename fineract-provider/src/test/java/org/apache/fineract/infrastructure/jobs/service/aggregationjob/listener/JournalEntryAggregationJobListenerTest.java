@@ -39,9 +39,11 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.batch.core.JobExecution;
+import org.springframework.batch.core.job.JobExecution;
+import org.springframework.batch.core.job.JobInstance;
+import org.springframework.batch.core.job.parameters.JobParameters;
 import org.springframework.batch.core.scope.context.JobContext;
-import org.springframework.batch.item.ExecutionContext;
+import org.springframework.batch.infrastructure.item.ExecutionContext;
 
 @ExtendWith(MockitoExtension.class)
 public class JournalEntryAggregationJobListenerTest {
@@ -86,7 +88,7 @@ public class JournalEntryAggregationJobListenerTest {
 
         when(fineractProperties.getJob()).thenReturn(fineractJobProperties);
         when(fineractJobProperties.getJournalEntryAggregation()).thenReturn(fineractJournalEntryAggregationProperties);
-        when(fineractJobProperties.getJournalEntryAggregation().getExcludeRecentNDays()).thenReturn(lookBackDays);
+        when(fineractJournalEntryAggregationProperties.getExcludeRecentNDays()).thenReturn(lookBackDays);
         when(trackingRepository.findLatestAggregatedOnDate()).thenReturn(null);
 
         ExecutionContext executionContext = new ExecutionContext();
@@ -110,10 +112,10 @@ public class JournalEntryAggregationJobListenerTest {
 
         when(fineractProperties.getJob()).thenReturn(fineractJobProperties);
         when(fineractJobProperties.getJournalEntryAggregation()).thenReturn(fineractJournalEntryAggregationProperties);
-        when(fineractJobProperties.getJournalEntryAggregation().getExcludeRecentNDays()).thenReturn(lookBackDays);
+        when(fineractJournalEntryAggregationProperties.getExcludeRecentNDays()).thenReturn(lookBackDays);
         when(trackingRepository.findLatestAggregatedOnDate()).thenReturn(lastAggregatedOnDate);
 
-        JobExecution jobExecution = new JobExecution(1L);
+        JobExecution jobExecution = new JobExecution(1L, new JobInstance(1L, "test"), new JobParameters());
 
         // Act
         listener.beforeJob(jobExecution);

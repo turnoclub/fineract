@@ -22,6 +22,7 @@ import jakarta.persistence.LockModeType;
 import java.time.LocalDate;
 import java.util.Collection;
 import java.util.List;
+import org.apache.fineract.cob.data.COBIdAndExternalIdAndAccountNo;
 import org.apache.fineract.cob.data.COBIdAndLastClosedBusinessDate;
 import org.apache.fineract.infrastructure.core.domain.ExternalId;
 import org.apache.fineract.portfolio.savings.data.SavingsAccrualData;
@@ -42,6 +43,16 @@ public interface SavingsAccountRepository extends JpaRepository<SavingsAccount, 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select sa from SavingsAccount sa where sa.id = :savingsId")
     SavingsAccount findOneLocked(@Param("savingsId") Long id);
+
+    // the rows are locked in ascending id order, see SavingsAccountRepositoryWrapper#lockInIdOrder
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select sa from SavingsAccount sa where sa.id in :ids order by sa.id")
+    List<SavingsAccount> findAllLockedOrderedById(@Param("ids") Collection<Long> ids);
+
+    // a plain read, so it answers from the snapshot of the transaction, see
+    // SavingsAccountRepositoryWrapper#lockInIdOrder
+    @Query("select sa.id, sa.version from SavingsAccount sa where sa.id in :ids")
+    List<Object[]> findVersionsById(@Param("ids") Collection<Long> ids);
 
     @Query("select s_acc from SavingsAccount s_acc where s_acc.gsim.id = :gsimId")
     List<SavingsAccount> findSavingAccountByGsimId(@Param("gsimId") Long gsimId);
@@ -147,4 +158,10 @@ public interface SavingsAccountRepository extends JpaRepository<SavingsAccount, 
             ORDER BY sa.lastClosedBusinessDate ASC
             """)
     List<COBIdAndLastClosedBusinessDate> findAllSavingsIdsOldestCobProcessed();
+
+    @Query("select coalesce(co.id, go.id) from SavingsAccount sa left join sa.client c left join c.office co left join sa.group g left join g.office go where sa.id = :savingsAccountId")
+    Long findOfficeIdBySavingsAccountId(@Param("savingsAccountId") Long savingsAccountId);
+
+    @Query("select sa.id, sa.externalId, sa.accountNumber from SavingsAccountLock lock left join SavingsAccount sa on lock.loanId = sa.id where lock.lockPlacedOnCobBusinessDate = :cobBusinessDate")
+    List<COBIdAndExternalIdAndAccountNo> findAllStayedLockedByCobBusinessDate(@Param("cobBusinessDate") LocalDate cobBusinessDate);
 }

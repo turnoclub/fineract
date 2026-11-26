@@ -45,6 +45,8 @@ final class DatatablesApiResourceSwagger {
         public String applicationTableName;
         @Schema(example = "extra_client_details")
         public String registeredTableName;
+        @Schema(example = "Person", description = "The entity sub type the datatable is registered against, when the application table supports one (for example Person or Entity on m_client). Null when the registration is not scoped to a sub type.")
+        public String entitySubType;
         public List<ResultsetColumnHeaderData> columnHeaderData;
     }
 
@@ -57,9 +59,9 @@ final class DatatablesApiResourceSwagger {
 
             private PostColumnHeaderData() {}
 
-            @Schema(required = true, example = "DOB")
+            @Schema(requiredMode = Schema.RequiredMode.REQUIRED, example = "DOB")
             public String name;
-            @Schema(required = true, example = "String", description = "Any of them: Boolean | Date | DateTime | Decimal | Dropdown | Number | String | Text")
+            @Schema(requiredMode = Schema.RequiredMode.REQUIRED, example = "String", description = "Any of them: Boolean | Date | DateTime | Decimal | Dropdown | Number | String | Text")
             public String type;
             @Schema(example = "Gender", description = "Used in Code Value fields. Column name becomes: code_cd_name. Mandatory if using type Dropdown, otherwise an error is returned.")
             public String code;
@@ -73,15 +75,15 @@ final class DatatablesApiResourceSwagger {
             public Boolean indexed;
         }
 
-        @Schema(required = true, example = "m_client")
+        @Schema(requiredMode = Schema.RequiredMode.REQUIRED, example = "m_client")
         public String apptableName;
-        @Schema(required = true, example = "extra_client_details")
+        @Schema(requiredMode = Schema.RequiredMode.REQUIRED, example = "extra_client_details")
         public String datatableName;
         @Schema(example = "abc")
         public String entitySubType;
-        @Schema(required = false, description = "Allows to create multiple entries in the Data Table. Optional, defaults to false. If this property is not provided Data Table will allow only one entry.", example = "true")
+        @Schema(requiredMode = Schema.RequiredMode.NOT_REQUIRED, description = "Allows to create multiple entries in the Data Table. Optional, defaults to false. If this property is not provided Data Table will allow only one entry.", example = "true")
         public boolean multiRow;
-        @Schema(required = true)
+        @Schema(requiredMode = Schema.RequiredMode.REQUIRED)
         public List<PostColumnHeaderData> columns;
     }
 
@@ -137,6 +139,8 @@ final class DatatablesApiResourceSwagger {
             public String name;
             @Schema(example = "Question 2")
             public String newName;
+            @Schema(example = "100", description = "Only for String columns")
+            public Long length;
             @Schema(example = "Gender")
             public String code;
             @Schema(example = "Gender2")
@@ -151,6 +155,8 @@ final class DatatablesApiResourceSwagger {
 
         @Schema(example = "m_client")
         public String apptableName;
+        @Schema(example = "PERSON", description = "Mandatory when apptableName is m_client")
+        public String entitySubType;
         public List<PutDataTablesRequestDropColumns> dropColumns;
         public List<PutDataTablesRequestAddColumns> addColumns;
         public List<PutDataTablesRequestChangeColumns> changeColumns;
@@ -266,6 +272,12 @@ final class DatatablesApiResourceSwagger {
         public Long loanId;
         @Schema(example = "1")
         public Long resourceId;
+        /**
+         * Carried by the {@code CommandProcessingResult} whenever the datatable hangs off a transaction - a savings
+         * transaction datatable, for instance - but it was missing here, so generated clients could not read it.
+         */
+        @Schema(example = "1")
+        public String transactionId;
         public Map<String, Object> changes;
     }
 
@@ -278,6 +290,19 @@ final class DatatablesApiResourceSwagger {
 
         @Schema(example = "1")
         public Long resourceId;
+        @Schema(example = "1")
+        public Long groupId;
+        @Schema(example = "1")
+        public Long clientId;
+        @Schema(example = "1")
+        public Long loanId;
+        @Schema(example = "1")
+        public Long savingsId;
+        /**
+         * See {@link PutDataTablesAppTableIdDatatableIdResponse#transactionId}.
+         */
+        @Schema(example = "1")
+        public String transactionId;
     }
 
     @Schema(description = "DeleteDataTablesDatatableAppTableIdDatatableIdResponse ")

@@ -103,9 +103,10 @@ public class FixedDepositTransactionWorkbookPopulator extends AbstractWorkbookPo
             for (int col : textCols) {
                 Cell cell = row.getCell(col);
                 if (cell == null) {
-                    cell = row.createCell(col);
+                    cell = row.createCell(col, CellType.STRING);
+                } else if (cell.getCellType() == CellType.BLANK) {
+                    cell.setCellValue("");
                 }
-                cell.setCellType(CellType.STRING);
                 cell.setCellStyle(textCellStyle);
             }
         }
@@ -192,8 +193,12 @@ public class FixedDepositTransactionWorkbookPopulator extends AbstractWorkbookPo
                 startIndex = i + 2;
                 clientName = savingsAccounts.get(i).getClientName();
                 clientId = savingsAccounts.get(i).getClientId();
-                clientsWithActiveSavings.add(clientName);
-                clientIdsWithActiveSavings.add(clientId);
+                // Guard against a duplicate Account_<client>_<id>_ defined name when a client name recurs (e.g. a
+                // client with more than one account) — mirrors LoanRepaymentWorkbookPopulator.setNames.
+                if (!clientsWithActiveSavings.contains(clientName)) {
+                    clientsWithActiveSavings.add(clientName);
+                    clientIdsWithActiveSavings.add(clientId);
+                }
             }
             if (i == savingsAccounts.size() - 1) {
                 endIndex = i + 2;

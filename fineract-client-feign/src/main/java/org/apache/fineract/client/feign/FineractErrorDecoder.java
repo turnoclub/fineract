@@ -35,6 +35,9 @@ public class FineractErrorDecoder implements ErrorDecoder {
         try {
             if (response.body() != null) {
                 byte[] bodyData = readResponseBody(response);
+                // reading consumed the body stream, so fall back to the default decoder with a copy that still carries
+                // it
+                Response bufferedResponse = response.toBuilder().body(bodyData).build();
 
                 try {
                     JsonNode rootNode = objectMapper.readTree(bodyData);
@@ -50,11 +53,13 @@ public class FineractErrorDecoder implements ErrorDecoder {
                             enhancedDeveloperMessage = validationErrors;
                         }
                         return new FeignException(response.status(), userMessage != null ? userMessage : enhancedDeveloperMessage,
-                                response.request(), bodyData, enhancedDeveloperMessage, userMessage, userMessageGlobalisationCode);
+                                response.request(), bodyData, enhancedDeveloperMessage, userMessage, userMessageGlobalisationCode,
+                                response.headers());
                     }
                 } catch (IOException e) {
-                    return defaultDecoder.decode(methodKey, response);
+                    return defaultDecoder.decode(methodKey, bufferedResponse);
                 }
+                return defaultDecoder.decode(methodKey, bufferedResponse);
             }
         } catch (IOException e) {
             return defaultDecoder.decode(methodKey, response);

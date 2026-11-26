@@ -19,9 +19,6 @@
 
 package org.apache.fineract.infrastructure.jobs.filter;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.core.json.JsonReadFeature;
-import com.fasterxml.jackson.databind.JsonNode;
 import com.google.common.collect.Lists;
 import java.io.IOException;
 import java.math.BigDecimal;
@@ -49,19 +46,18 @@ import org.apache.fineract.infrastructure.core.service.ThreadLocalContextUtil;
 import org.apache.fineract.infrastructure.jobs.exception.LoanIdsHardLockedException;
 import org.apache.fineract.infrastructure.security.service.PlatformSecurityContext;
 import org.apache.fineract.portfolio.loanaccount.domain.GLIMAccountInfoRepository;
-import org.apache.fineract.portfolio.loanaccount.domain.GroupLoanIndividualMonitoringAccount;
-import org.apache.fineract.portfolio.loanaccount.domain.Loan;
 import org.apache.fineract.portfolio.loanaccount.domain.LoanRepository;
 import org.apache.fineract.portfolio.loanaccount.rescheduleloan.domain.LoanRescheduleRequestRepository;
-import org.springframework.beans.factory.InitializingBean;
 import org.springframework.context.annotation.Conditional;
 import org.springframework.http.HttpMethod;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
+import tools.jackson.databind.JsonNode;
 
 @RequiredArgsConstructor
 @Component
 @Conditional(LoanCOBEnabledCondition.class)
-public class LoanCOBFilterHelperImpl extends COBFilterApiMatcher implements LoanCOBFilterHelper, InitializingBean {
+public class LoanCOBFilterHelperImpl extends COBFilterApiMatcher implements LoanCOBFilterHelper {
 
     private final GLIMAccountInfoRepository glimAccountInfoRepository;
     private final LoanAccountLockService loanAccountLockService;
@@ -124,13 +120,7 @@ public class LoanCOBFilterHelperImpl extends COBFilterApiMatcher implements Loan
     }
 
     private List<Long> getGlimChildLoanIds(Long loanIdFromRequest) {
-        GroupLoanIndividualMonitoringAccount glimAccount = glimAccountInfoRepository.findOneByIsAcceptingChildAndApplicationId(true,
-                BigDecimal.valueOf(loanIdFromRequest));
-        if (glimAccount != null) {
-            return glimAccount.getChildLoan().stream().map(Loan::getId).toList();
-        } else {
-            return Collections.emptyList();
-        }
+        return glimAccountInfoRepository.findChildLoanIdsByIsAcceptingChildAndApplicationId(true, BigDecimal.valueOf(loanIdFromRequest));
     }
 
     private boolean isLoanHardLocked(Long... loanIds) {
@@ -138,7 +128,7 @@ public class LoanCOBFilterHelperImpl extends COBFilterApiMatcher implements Loan
     }
 
     private boolean isLoanHardLocked(List<Long> loanIds) {
-        return loanIds.stream().anyMatch(loanAccountLockService::isLoanHardLocked);
+        return loanAccountLockService.isAnyLoanHardLocked(loanIds);
     }
 
     private boolean isLockOverrulable(Long... loanIds) {
@@ -146,10 +136,11 @@ public class LoanCOBFilterHelperImpl extends COBFilterApiMatcher implements Loan
     }
 
     private boolean isLockOverrulable(List<Long> loanIds) {
-        return loanIds.stream().anyMatch(loanAccountLockService::isLockOverrulable);
+        return loanAccountLockService.isAnyLockOverrulable(loanIds);
     }
 
     @Override
+    @Transactional(readOnly = true)
     public boolean isLoanBehind(List<Long> loanIds) {
         List<COBIdAndLastClosedBusinessDate> loanIdAndLastClosedBusinessDates = new ArrayList<>();
         List<List<Long>> partitions = Lists.partition(loanIds, fineractProperties.getQuery().getInClauseParameterSizeLimit());
@@ -163,6 +154,7 @@ public class LoanCOBFilterHelperImpl extends COBFilterApiMatcher implements Loan
     }
 
     @Override
+    @Transactional(readOnly = true)
     public List<Long> calculateRelevantLoanIds(BodyCachingHttpServletRequestWrapper request) throws IOException {
         String pathInfo = request.getPathInfo();
         if (isBatchApi(pathInfo)) {
@@ -196,12 +188,14 @@ public class LoanCOBFilterHelperImpl extends COBFilterApiMatcher implements Loan
         return loanIds;
     }
 
-    private Long getTopLevelLoanIdFromBatchRequest(BatchRequest batchRequest) throws JsonProcessingException {
+    private Long getTopLevelLoanIdFromBatchRequest(BatchRequest batchRequest) {
         String body = batchRequest.getBody();
         if (StringUtils.isNotBlank(body)) {
             JsonNode jsonNode = objectMapper.readTree(body);
             if (jsonNode.has("loanId")) {
-                return jsonNode.get("loanId").asLong();
+                // the body may hold an unresolved batch reference like "$.loanId"; Jackson 3 asLong() throws on
+                // non-numeric values while Jackson 2 returned 0, so keep the lenient behavior explicitly
+                return jsonNode.get("loanId").asLong(0);
             }
         }
         return null;
@@ -232,11 +226,6 @@ public class LoanCOBFilterHelperImpl extends COBFilterApiMatcher implements Loan
     @Override
     public void executeInlineCob(List<Long> loanIds) {
         inlineLoanCOBExecutorService.execute(loanIds, LoanCOBConstant.INLINE_LOAN_COB_JOB_NAME);
-    }
-
-    @Override
-    public void afterPropertiesSet() throws Exception {
-        objectMapper.configure(JsonReadFeature.ALLOW_UNESCAPED_CONTROL_CHARS.mappedFeature(), true);
     }
 
 }

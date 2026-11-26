@@ -16,7 +16,7 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-
+ext['spring-modulith.version'] = '1.4.11'
 dependencies {
     modules {
         module("io.swagger.core.v3:swagger-annotations") {
@@ -33,9 +33,12 @@ dependencies {
     implementation(project(path: ':fineract-accounting'))
     implementation(project(path: ':fineract-investor'))
     implementation(project(path: ':fineract-rates'))
+    implementation(project(path: ':fineract-fund'))
     implementation(project(path: ':fineract-charge'))
     implementation(project(path: ':fineract-loan'))
     implementation(project(path: ':fineract-savings'))
+    implementation(project(path: ':fineract-shares'))
+    implementation(project(path: ':fineract-account-transfer'))
     implementation(project(path: ':fineract-branch'))
     implementation(project(path: ':fineract-document'))
     implementation(project(path: ':fineract-progressive-loan'))
@@ -44,9 +47,9 @@ dependencies {
     implementation(project(path: ':fineract-loan-origination'))
     implementation(project(path: ':fineract-security'))
     implementation(project(path: ':fineract-working-capital-loan'))
-    implementation(project(path: ':fineract-mix'))
+    implementation(project(path: ':fineract-querydsl'))
 
-    providedRuntime("org.springframework.boot:spring-boot-starter-tomcat")
+    providedRuntime("org.springframework.boot:spring-boot-starter-tomcat-runtime")
 
     // Never use "compile" scope, but make all dependencies either 'implementation', 'runtimeOnly' or 'testCompile'.
     // Note that we never use 'api', because Fineract at least currently is a simple monolithic application ("WAR"), not a library.
@@ -58,15 +61,17 @@ dependencies {
             project(path: ':fineract-avro-schemas')
             )
     implementation(
-            'org.springframework.boot:spring-boot-starter-web',
+            'org.springframework.boot:spring-boot-starter-webmvc',
             'org.springframework.boot:spring-boot-starter-validation',
             'org.springframework.boot:spring-boot-starter-security',
-            'org.springframework.boot:spring-boot-starter-oauth2-authorization-server',
+            'org.springframework.boot:spring-boot-starter-security-oauth2-authorization-server',
+            'org.springframework.boot:spring-boot-starter-security-oauth2-client',
             'org.springframework.boot:spring-boot-starter-cache',
-            'org.springframework.boot:spring-boot-starter-oauth2-resource-server',
+            'org.springframework.boot:spring-boot-starter-security-oauth2-resource-server',
             'org.springframework.boot:spring-boot-starter-actuator',
-            'org.springframework.boot:spring-boot-starter-batch',
-            'org.springframework.boot:spring-boot-starter-data-jdbc',
+            'org.springframework.boot:spring-boot-starter-batch-jdbc',
+            'org.springframework.boot:spring-boot-liquibase',
+            'org.springframework.boot:spring-boot-gson',
             'org.springframework.batch:spring-batch-integration',
             'org.springframework.boot:spring-boot-starter-integration',
             'org.springframework.integration:spring-integration-event',
@@ -104,6 +109,8 @@ dependencies {
             'org.apache.tika:tika-parser-microsoft-module',
             'org.apache.tika:tika-parser-miscoffice-module',
 
+            'io.github.openfeign.querydsl:querydsl-sql-spring',
+
             'org.liquibase:liquibase-core',
 
             'com.github.librepdf:openpdf',
@@ -120,7 +127,7 @@ dependencies {
             'org.springdoc:springdoc-openapi-starter-webmvc-ui',
             'org.mapstruct:mapstruct',
 
-            'io.github.resilience4j:resilience4j-spring-boot3',
+            'io.github.resilience4j:resilience4j-spring-boot4',
             'org.reflections:reflections',
             )
 
@@ -139,6 +146,8 @@ dependencies {
         exclude group: 'org.hibernate.validator', module: 'hibernate-validator'
         exclude group: 'jakarta.activation', module: 'jakarta.activation-api'
     }
+    // Spring Boot 4 defaults to Jackson 3; re-enable Jackson 2 so the Jersey REST layer (Jackson-2 island) keeps working
+    implementation 'org.springframework.boot:spring-boot-jackson2'
     implementation('org.dom4j:dom4j') {
         exclude group: 'javax.xml.bind'
     }
@@ -177,16 +186,6 @@ dependencies {
         exclude group: 'com.sun.activation'
     }
 
-    implementation('org.owasp.esapi:esapi') {
-        exclude group: 'org.slf4j'
-        exclude group: 'log4j'
-        exclude group: 'commons-logging'
-        exclude group: 'commons-collections'
-        exclude group: 'commons-lang'
-        exclude group: 'spotbugs-annotations'
-        exclude group: 'xml-apis'
-    }
-
     runtimeOnly('org.glassfish.jaxb:jaxb-runtime') {
         exclude group: 'com.sun.activation'
     }
@@ -195,6 +194,8 @@ dependencies {
 
     compileOnly 'com.github.spotbugs:spotbugs-annotations'
     testCompileOnly 'com.github.spotbugs:spotbugs-annotations'
+    // Only for the @ApplicationModule annotation in package-info.java; not needed at runtime
+    compileOnly 'org.springframework.modulith:spring-modulith-api'
     compileOnly 'org.projectlombok:lombok'
     annotationProcessor 'org.projectlombok:lombok'
     annotationProcessor 'org.mapstruct:mapstruct-processor'
@@ -225,7 +226,8 @@ dependencies {
         exclude group: 'javax.activation'
         exclude group: 'org.skyscreamer'
     }
-    testImplementation ('org.mockito:mockito-inline')
+    testImplementation 'org.springframework.modulith:spring-modulith-api'
+    testImplementation 'org.springframework.modulith:spring-modulith-core'
 
     testRuntimeOnly(
             'org.mariadb.jdbc:mariadb-java-client',

@@ -27,11 +27,13 @@ import io.swagger.v3.oas.annotations.parameters.RequestBody;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.ws.rs.Consumes;
+import jakarta.ws.rs.DefaultValue;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.POST;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
+import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.UriInfo;
@@ -42,14 +44,17 @@ import org.apache.fineract.commands.service.CommandWrapperBuilder;
 import org.apache.fineract.commands.service.PortfolioCommandSourceWritePlatformService;
 import org.apache.fineract.infrastructure.core.data.CommandProcessingResult;
 import org.apache.fineract.infrastructure.core.domain.ExternalId;
+import org.apache.fineract.infrastructure.core.exception.UnrecognizedQueryParamException;
 import org.apache.fineract.infrastructure.core.service.ExternalIdFactory;
 import org.apache.fineract.infrastructure.security.service.PlatformSecurityContext;
 import org.apache.fineract.portfolio.charge.data.ChargeData;
-import org.apache.fineract.portfolio.charge.service.ChargeReadPlatformService;
+import org.apache.fineract.portfolio.charge.service.ChargeReadService;
+import org.apache.fineract.portfolio.workingcapitalloan.WorkingCapitalLoanCommandParameterUtil;
 import org.apache.fineract.portfolio.workingcapitalloan.WorkingCapitalLoanConstants;
 import org.apache.fineract.portfolio.workingcapitalloan.data.WorkingCapitalLoanChargeData;
 import org.apache.fineract.portfolio.workingcapitalloan.repository.WorkingCapitalLoanChargeRepository;
 import org.apache.fineract.portfolio.workingcapitalloan.repository.WorkingCapitalLoanRepository;
+import org.apache.fineract.portfolio.workingcapitalloan.serialization.WorkingCapitalLoanChargeConstants;
 import org.apache.fineract.portfolio.workingcapitalloan.service.WorkingCapitalLoanChargeReadPlatformService;
 import org.springframework.stereotype.Component;
 
@@ -60,7 +65,7 @@ import org.springframework.stereotype.Component;
 public class WorkingCapitalLoanChargesApiResource {
 
     private final WorkingCapitalLoanRepository workingCapitalLoanRepository;
-    private final ChargeReadPlatformService chargeReadPlatformService;
+    private final ChargeReadService chargeReadService;
     private final PlatformSecurityContext securityContext;
     private final PortfolioCommandSourceWritePlatformService commandsSourceWritePlatformService;
     private final WorkingCapitalLoanChargeReadPlatformService loanChargeReadPlatformService;
@@ -113,6 +118,61 @@ public class WorkingCapitalLoanChargesApiResource {
             @Parameter(hidden = true) final String apiRequestBodyAsJson) {
 
         return handleExecuteLoanCharge(null, loanExternalId, "create", apiRequestBodyAsJson);
+    }
+
+    @POST
+    @Path("{loanId}/charges/{loanChargeId}")
+    @Consumes({ MediaType.APPLICATION_JSON })
+    @Produces({ MediaType.APPLICATION_JSON })
+    @Operation(summary = "Adjust or Waive a Working Capital Loan Charge", description = "Adjusts a working capital loan charge by creating a CHARGE_ADJUSTMENT transaction (command=adjustment), or waives its full outstanding amount by creating a WAIVE_CHARGES transaction (command=waive).")
+    @ApiResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = WorkingCapitalLoanChargesApiResourceSwagger.PostWorkingCapitalLoansLoanIdChargesChargeIdResponse.class)))
+    public CommandProcessingResult adjustLoanCharge(@PathParam("loanId") @Parameter(description = "loanId") final Long loanId,
+            @PathParam("loanChargeId") @Parameter(description = "loanChargeId") final Long loanChargeId,
+            @QueryParam("command") @DefaultValue("") @Parameter(description = "command") final String commandParam,
+            @RequestBody(required = true, content = @Content(schema = @Schema(implementation = WorkingCapitalLoanChargesApiResourceSwagger.PostWorkingCapitalLoansLoanIdChargesChargeIdRequest.class))) final String apiRequestBodyAsJson) {
+        return handleExecuteLoanChargeWithChargeId(loanId, null, loanChargeId, null, commandParam, apiRequestBodyAsJson);
+    }
+
+    @POST
+    @Path("{loanId}/charges/external-id/{loanChargeExternalId}")
+    @Consumes({ MediaType.APPLICATION_JSON })
+    @Produces({ MediaType.APPLICATION_JSON })
+    @Operation(summary = "Adjust or Waive a Working Capital Loan Charge by Charge External Id", description = "Adjusts a working capital loan charge by creating a CHARGE_ADJUSTMENT transaction (command=adjustment), or waives its full outstanding amount by creating a WAIVE_CHARGES transaction (command=waive).")
+    @ApiResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = WorkingCapitalLoanChargesApiResourceSwagger.PostWorkingCapitalLoansLoanIdChargesChargeIdResponse.class)))
+    public CommandProcessingResult adjustLoanChargeByChargeExternalId(
+            @PathParam("loanId") @Parameter(description = "loanId") final Long loanId,
+            @PathParam("loanChargeExternalId") @Parameter(description = "loanChargeExternalId") final String loanChargeExternalId,
+            @QueryParam("command") @DefaultValue("") @Parameter(description = "command") final String commandParam,
+            @RequestBody(required = true, content = @Content(schema = @Schema(implementation = WorkingCapitalLoanChargesApiResourceSwagger.PostWorkingCapitalLoansLoanIdChargesChargeIdRequest.class))) final String apiRequestBodyAsJson) {
+        return handleExecuteLoanChargeWithChargeId(loanId, null, null, loanChargeExternalId, commandParam, apiRequestBodyAsJson);
+    }
+
+    @POST
+    @Path("external-id/{loanExternalId}/charges/{loanChargeId}")
+    @Consumes({ MediaType.APPLICATION_JSON })
+    @Produces({ MediaType.APPLICATION_JSON })
+    @Operation(summary = "Adjust or Waive a Working Capital Loan Charge by Loan External Id", description = "Adjusts a working capital loan charge by creating a CHARGE_ADJUSTMENT transaction (command=adjustment), or waives its full outstanding amount by creating a WAIVE_CHARGES transaction (command=waive).")
+    @ApiResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = WorkingCapitalLoanChargesApiResourceSwagger.PostWorkingCapitalLoansLoanIdChargesChargeIdResponse.class)))
+    public CommandProcessingResult adjustLoanChargeByLoanExternalId(
+            @PathParam("loanExternalId") @Parameter(description = "loanExternalId") final String loanExternalId,
+            @PathParam("loanChargeId") @Parameter(description = "loanChargeId") final Long loanChargeId,
+            @QueryParam("command") @DefaultValue("") @Parameter(description = "command") final String commandParam,
+            @RequestBody(required = true, content = @Content(schema = @Schema(implementation = WorkingCapitalLoanChargesApiResourceSwagger.PostWorkingCapitalLoansLoanIdChargesChargeIdRequest.class))) final String apiRequestBodyAsJson) {
+        return handleExecuteLoanChargeWithChargeId(null, loanExternalId, loanChargeId, null, commandParam, apiRequestBodyAsJson);
+    }
+
+    @POST
+    @Path("external-id/{loanExternalId}/charges/external-id/{loanChargeExternalId}")
+    @Consumes({ MediaType.APPLICATION_JSON })
+    @Produces({ MediaType.APPLICATION_JSON })
+    @Operation(summary = "Adjust or Waive a Working Capital Loan Charge by Loan and Charge External Ids", description = "Adjusts a working capital loan charge by creating a CHARGE_ADJUSTMENT transaction (command=adjustment), or waives its full outstanding amount by creating a WAIVE_CHARGES transaction (command=waive).")
+    @ApiResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = WorkingCapitalLoanChargesApiResourceSwagger.PostWorkingCapitalLoansLoanIdChargesChargeIdResponse.class)))
+    public CommandProcessingResult adjustLoanChargeByLoanAndChargeExternalId(
+            @PathParam("loanExternalId") @Parameter(description = "loanExternalId") final String loanExternalId,
+            @PathParam("loanChargeExternalId") @Parameter(description = "loanChargeExternalId") final String loanChargeExternalId,
+            @QueryParam("command") @DefaultValue("") @Parameter(description = "command") final String commandParam,
+            @RequestBody(required = true, content = @Content(schema = @Schema(implementation = WorkingCapitalLoanChargesApiResourceSwagger.PostWorkingCapitalLoansLoanIdChargesChargeIdRequest.class))) final String apiRequestBodyAsJson) {
+        return handleExecuteLoanChargeWithChargeId(null, loanExternalId, null, loanChargeExternalId, commandParam, apiRequestBodyAsJson);
     }
 
     @GET
@@ -214,7 +274,7 @@ public class WorkingCapitalLoanChargesApiResource {
         ExternalId loanExternalId = ExternalIdFactory.produce(loanExternalIdStr);
         Long resolvedLoanId = loanId == null ? workingCapitalLoanRepository.findIdByExternalId(loanExternalId) : loanId;
 
-        final List<ChargeData> chargeOptions = chargeReadPlatformService.retrieveWorkingCapitalLoanAccountApplicableCharges(resolvedLoanId);
+        final List<ChargeData> chargeOptions = chargeReadService.retrieveWorkingCapitalLoanAccountApplicableCharges(resolvedLoanId);
         return WorkingCapitalLoanChargeData.template(chargeOptions);
     }
 
@@ -236,6 +296,29 @@ public class WorkingCapitalLoanChargesApiResource {
 
         final CommandWrapper commandRequest = new CommandWrapperBuilder().createWorkingCapitalLoanCharge(resolvedLoanId)
                 .withJson(apiRequestBodyAsJson).build();
+        return commandsSourceWritePlatformService.logCommandSource(commandRequest);
+    }
+
+    private CommandProcessingResult handleExecuteLoanChargeWithChargeId(final Long loanId, final String loanExternalIdStr,
+            final Long loanChargeId, final String loanChargeExternalIdStr, final String commandParam, final String apiRequestBodyAsJson) {
+
+        final ExternalId loanExternalId = ExternalIdFactory.produce(loanExternalIdStr);
+        final ExternalId loanChargeExternalId = ExternalIdFactory.produce(loanChargeExternalIdStr);
+
+        final Long resolvedLoanId = loanId == null ? workingCapitalLoanRepository.findIdByExternalId(loanExternalId) : loanId;
+        final Long resolvedLoanChargeId = loanChargeId == null ? loanChargeRepository.findIdByExternalId(loanChargeExternalId)
+                : loanChargeId;
+
+        final CommandWrapperBuilder builder;
+        if (WorkingCapitalLoanCommandParameterUtil.is(commandParam, WorkingCapitalLoanChargeConstants.ADJUSTMENT_LOAN_CHARGE_COMMAND)) {
+            builder = new CommandWrapperBuilder().adjustmentForWorkingCapitalLoanCharge(resolvedLoanId, resolvedLoanChargeId);
+        } else if (WorkingCapitalLoanCommandParameterUtil.is(commandParam, WorkingCapitalLoanChargeConstants.WAIVE_LOAN_CHARGE_COMMAND)) {
+            builder = new CommandWrapperBuilder().waiveWorkingCapitalLoanCharge(resolvedLoanId, resolvedLoanChargeId);
+        } else {
+            throw new UnrecognizedQueryParamException("command", commandParam);
+        }
+
+        final CommandWrapper commandRequest = builder.withJson(apiRequestBodyAsJson).build();
         return commandsSourceWritePlatformService.logCommandSource(commandRequest);
     }
 }

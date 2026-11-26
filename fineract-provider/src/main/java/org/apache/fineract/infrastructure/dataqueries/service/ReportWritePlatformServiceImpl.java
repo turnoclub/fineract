@@ -21,7 +21,10 @@ package org.apache.fineract.infrastructure.dataqueries.service;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import jakarta.persistence.PersistenceException;
+import java.util.Collection;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import org.apache.commons.lang3.StringUtils;
@@ -44,7 +47,8 @@ import org.apache.fineract.infrastructure.report.provider.ReportingProcessServic
 import org.apache.fineract.infrastructure.security.service.PlatformSecurityContext;
 import org.apache.fineract.useradministration.domain.Permission;
 import org.apache.fineract.useradministration.domain.PermissionRepository;
-import org.apache.fineract.useradministration.exception.PermissionNotFoundException;
+import org.apache.fineract.useradministration.domain.Role;
+import org.apache.fineract.useradministration.domain.RoleRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -64,19 +68,22 @@ public class ReportWritePlatformServiceImpl implements ReportWritePlatformServic
     private final ReportParameterUsageRepository reportParameterUsageRepository;
     private final ReportParameterRepository reportParameterRepository;
     private final PermissionRepository permissionRepository;
+    private final RoleRepository roleRepository;
     private final ReportingProcessServiceProvider reportingProcessServiceProvider;
 
     @Autowired
     public ReportWritePlatformServiceImpl(final PlatformSecurityContext context,
             final ReportCommandFromApiJsonDeserializer fromApiJsonDeserializer, final ReportRepository reportRepository,
             final ReportParameterRepository reportParameterRepository, final ReportParameterUsageRepository reportParameterUsageRepository,
-            final PermissionRepository permissionRepository, final ReportingProcessServiceProvider reportingProcessServiceProvider) {
+            final PermissionRepository permissionRepository, final RoleRepository roleRepository,
+            final ReportingProcessServiceProvider reportingProcessServiceProvider) {
         this.context = context;
         this.fromApiJsonDeserializer = fromApiJsonDeserializer;
         this.reportRepository = reportRepository;
         this.reportParameterRepository = reportParameterRepository;
         this.reportParameterUsageRepository = reportParameterUsageRepository;
         this.permissionRepository = permissionRepository;
+        this.roleRepository = roleRepository;
         this.reportingProcessServiceProvider = reportingProcessServiceProvider;
     }
 
@@ -89,7 +96,7 @@ public class ReportWritePlatformServiceImpl implements ReportWritePlatformServic
 
             this.fromApiJsonDeserializer.validate(command.json());
 
-            final Report report = Report.fromJson(command, this.reportingProcessServiceProvider.findAllReportingTypes());
+            final Report report = newReport(command, this.reportingProcessServiceProvider.findAllReportingTypes());
             final Set<ReportParameterUsage> reportParameterUsages = assembleSetOfReportParameterUsages(report, command);
             report.update(reportParameterUsages);
 
@@ -122,8 +129,20 @@ public class ReportWritePlatformServiceImpl implements ReportWritePlatformServic
             this.fromApiJsonDeserializer.validate(command.json());
 
             final Report report = this.reportRepository.findById(reportId).orElseThrow(() -> new ReportNotFoundException(reportId));
+            final String previousReportName = report.getReportName();
 
-            final Map<String, Object> changes = report.update(command, this.reportingProcessServiceProvider.findAllReportingTypes());
+            final Map<String, Object> changes = applyChanges(report, command, this.reportingProcessServiceProvider.findAllReportingTypes());
+
+            if (changes.containsKey("reportName")) {
+                final Permission permission = this.permissionRepository.findOneByCode("READ" + "_" + previousReportName);
+                if (permission != null) {
+                    permission.updateEntityName(report.getReportName());
+                    this.permissionRepository.save(permission);
+                } else {
+                    LOG.warn("No READ permission found for report '{}' (id {}) while renaming to '{}' - nothing to keep in sync",
+                            previousReportName, reportId, report.getReportName());
+                }
+            }
 
             if (changes.containsKey("reportParameters")) {
                 final Set<ReportParameterUsage> reportParameterUsages = assembleSetOfReportParameterUsages(report, command);
@@ -165,15 +184,113 @@ public class ReportWritePlatformServiceImpl implements ReportWritePlatformServic
 
         final Permission permission = this.permissionRepository.findOneByCode("READ" + "_" + report.getReportName());
         if (permission == null) {
-            throw new PermissionNotFoundException("READ" + "_" + report.getReportName());
+            // A report renamed before its permission was kept in sync on rename has no permission matching its
+            // current name; that must not block deleting the report itself.
+            LOG.warn("No READ permission found for report '{}' (id {}) - deleting the report without a companion permission",
+                    report.getReportName(), reportId);
         }
 
         this.reportRepository.delete(report);
-        this.permissionRepository.delete(permission);
+        if (permission != null) {
+            // m_role_permission references m_permission: unassign the permission from every role granted it
+            // before deleting it, otherwise the delete violates that foreign key.
+            final List<Role> rolesWithPermission = this.roleRepository.findByPermissionId(permission.getId());
+            if (!rolesWithPermission.isEmpty()) {
+                for (final Role role : rolesWithPermission) {
+                    role.updatePermission(permission, false);
+                }
+                this.roleRepository.saveAll(rolesWithPermission);
+            }
+            this.permissionRepository.delete(permission);
+        }
 
         return new CommandProcessingResultBuilder() //
                 .withEntityId(reportId) //
                 .build();
+    }
+
+    private static Report newReport(final JsonCommand command, final Collection<String> reportTypes) {
+        final String reportName = optionalString(command, "reportName");
+        final String reportType = optionalString(command, "reportType");
+        final String reportSubType = optionalString(command, "reportSubType");
+        final String reportCategory = optionalString(command, "reportCategory");
+        final String description = optionalString(command, "description");
+        final boolean useReport = command.parameterExists("useReport") && command.booleanPrimitiveValueOfParameterNamed("useReport");
+        final String reportSql = optionalString(command, "reportSql");
+
+        return new Report(reportName, reportType, reportSubType, reportCategory, description, useReport, reportSql, reportTypes);
+    }
+
+    private static String optionalString(final JsonCommand command, final String paramName) {
+        return command.parameterExists(paramName) ? command.stringValueOfParameterNamed(paramName) : null;
+    }
+
+    private static Map<String, Object> applyChanges(final Report report, final JsonCommand command, final Collection<String> reportTypes) {
+        final Map<String, Object> changes = new LinkedHashMap<>(8);
+
+        String paramName = "reportName";
+        if (command.isChangeInStringParameterNamed(paramName, report.getReportName())) {
+            final String newValue = command.stringValueOfParameterNamed(paramName);
+            changes.put(paramName, newValue);
+            report.updateReportName(newValue);
+        }
+        paramName = "reportType";
+        if (command.isChangeInStringParameterNamed(paramName, report.getReportType())) {
+            final String newValue = command.stringValueOfParameterNamed(paramName);
+            changes.put(paramName, newValue);
+            report.updateReportType(newValue);
+        }
+        paramName = "reportSubType";
+        if (command.isChangeInStringParameterNamed(paramName, report.getReportSubType())) {
+            final String newValue = command.stringValueOfParameterNamed(paramName);
+            changes.put(paramName, newValue);
+            report.updateReportSubType(newValue);
+        }
+        paramName = "reportCategory";
+        if (command.isChangeInStringParameterNamed(paramName, report.getReportCategory())) {
+            final String newValue = command.stringValueOfParameterNamed(paramName);
+            changes.put(paramName, newValue);
+            report.updateReportCategory(newValue);
+        }
+        paramName = "description";
+        if (command.isChangeInStringParameterNamed(paramName, report.getDescription())) {
+            final String newValue = command.stringValueOfParameterNamed(paramName);
+            changes.put(paramName, newValue);
+            report.updateDescription(newValue);
+        }
+        paramName = "useReport";
+        if (command.isChangeInBooleanParameterNamed(paramName, report.isUseReport())) {
+            final boolean newValue = command.booleanPrimitiveValueOfParameterNamed(paramName);
+            changes.put(paramName, newValue);
+            report.updateUseReport(newValue);
+        }
+        paramName = "reportSql";
+        if (command.isChangeInStringParameterNamed(paramName, report.getReportSql())) {
+            final String newValue = command.stringValueOfParameterNamed(paramName);
+            changes.put(paramName, newValue);
+            report.updateReportSql(newValue);
+        }
+
+        final String reportParametersParamName = "reportParameters";
+        if (command.hasParameter(reportParametersParamName)) {
+            final JsonArray jsonArray = command.arrayOfParameterNamed(reportParametersParamName);
+            if (jsonArray != null) {
+                changes.put(reportParametersParamName, command.jsonFragment(reportParametersParamName));
+            }
+        }
+
+        report.validate(reportTypes);
+
+        if (!changes.isEmpty() && report.isCoreReport()) {
+            for (final String key : changes.keySet()) {
+                if (!key.equals("useReport")) {
+                    throw new PlatformDataIntegrityException("error.msg.only.use.report.can.be.updated.for.core.report",
+                            "Only the Use Report field can be updated for Core Reports", key);
+                }
+            }
+        }
+
+        return changes;
     }
 
     /*
@@ -186,7 +303,7 @@ public class ReportWritePlatformServiceImpl implements ReportWritePlatformServic
                     "name", name);
         }
 
-        LOG.error("Error occured.", dve);
+        LOG.error("Error occurred.", dve);
         throw ErrorHandler.getMappable(dve, "error.msg.report.unknown.data.integrity.issue",
                 "Unknown data integrity issue with resource: " + realCause.getMessage());
     }
@@ -210,7 +327,7 @@ public class ReportWritePlatformServiceImpl implements ReportWritePlatformServic
                     ReportParameter reportParameter = null;
                     String reportParameterName = null;
 
-                    if (jsonObject.has("id")) {
+                    if (jsonObject.has("id") && !jsonObject.get("id").isJsonNull()) {
                         final String idStr = jsonObject.get("id").getAsString();
                         if (StringUtils.isNotBlank(idStr)) {
                             id = Long.parseLong(idStr);
@@ -225,7 +342,7 @@ public class ReportWritePlatformServiceImpl implements ReportWritePlatformServic
                         }
 
                         // check parameter
-                        if (jsonObject.has("parameterId")) {
+                        if (jsonObject.has("parameterId") && !jsonObject.get("parameterId").isJsonNull()) {
                             final Long parameterId = jsonObject.get("parameterId").getAsLong();
                             reportParameter = this.reportParameterRepository.findById(parameterId)
                                     .orElseThrow(() -> new ReportParameterNotFoundException(parameterId));
@@ -235,13 +352,13 @@ public class ReportWritePlatformServiceImpl implements ReportWritePlatformServic
                             }
                         }
 
-                        if (jsonObject.has("reportParameterName")) {
+                        if (jsonObject.has("reportParameterName") && !jsonObject.get("reportParameterName").isJsonNull()) {
                             reportParameterName = jsonObject.get("reportParameterName").getAsString();
                             reportParameterUsageItem.updateParameterName(reportParameterName);
                         }
                     } else {
                         // new report parameter usage
-                        if (jsonObject.has("parameterId")) {
+                        if (jsonObject.has("parameterId") && !jsonObject.get("parameterId").isJsonNull()) {
                             final Long parameterId = jsonObject.get("parameterId").getAsLong();
                             reportParameter = this.reportParameterRepository.findById(parameterId)
                                     .orElseThrow(() -> new ReportParameterNotFoundException(parameterId));
@@ -250,7 +367,7 @@ public class ReportWritePlatformServiceImpl implements ReportWritePlatformServic
                                     "parameterId column is mandatory in Report Parameter Entry");
                         }
 
-                        if (jsonObject.has("reportParameterName")) {
+                        if (jsonObject.has("reportParameterName") && !jsonObject.get("reportParameterName").isJsonNull()) {
                             reportParameterName = jsonObject.get("reportParameterName").getAsString();
                         }
 

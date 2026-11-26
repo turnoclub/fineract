@@ -23,8 +23,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.fail;
 
 import io.cucumber.datatable.DataTable;
+import io.cucumber.java.After;
 import io.cucumber.java.en.And;
 import io.cucumber.java.en.Then;
+import io.cucumber.java.en.When;
 import java.math.BigDecimal;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -32,6 +34,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 import org.apache.fineract.client.feign.FineractFeignClient;
+import org.apache.fineract.client.feign.util.CallFailedRuntimeException;
+import org.apache.fineract.client.feign.util.FeignCalls;
+import org.apache.fineract.client.models.GetSavingsProductsResponse;
 import org.apache.fineract.client.models.PostClientsResponse;
 import org.apache.fineract.client.models.PostSavingsAccountTransactionsRequest;
 import org.apache.fineract.client.models.PostSavingsAccountTransactionsResponse;
@@ -43,10 +48,12 @@ import org.apache.fineract.client.models.PostSavingsProductsRequest;
 import org.apache.fineract.client.models.PostSavingsProductsResponse;
 import org.apache.fineract.client.models.SavingsAccountData;
 import org.apache.fineract.client.models.SavingsAccountTransactionData;
+import org.apache.fineract.test.api.FineractClientConfiguration;
 import org.apache.fineract.test.factory.SavingsAccountRequestFactory;
 import org.apache.fineract.test.factory.SavingsProductRequestFactory;
 import org.apache.fineract.test.helper.ErrorMessageHelper;
 import org.apache.fineract.test.helper.ErrorResponse;
+import org.apache.fineract.test.helper.GlobalConfigurationHelper;
 import org.apache.fineract.test.helper.Utils;
 import org.apache.fineract.test.stepdef.AbstractStepDef;
 import org.apache.fineract.test.support.TestContextKey;
@@ -56,6 +63,12 @@ public class SavingsAccountStepDef extends AbstractStepDef {
 
     @Autowired
     private FineractFeignClient fineractClient;
+
+    @Autowired
+    private GlobalConfigurationHelper globalConfigurationHelper;
+
+    @Autowired
+    private FineractClientConfiguration fineractClientConfiguration;
 
     public static final String DATE_FORMAT = "dd MMMM yyyy";
     private static final DateTimeFormatter FORMATTER = DateTimeFormatter.ofPattern(DATE_FORMAT);
@@ -67,6 +80,18 @@ public class SavingsAccountStepDef extends AbstractStepDef {
         PostSavingsProductsResponse savingsProductResponse = ok(
                 () -> fineractClient.savingsProduct().createSavingsProduct(savingsProductRequest));
         testContext().set(TestContextKey.DEFAULT_SAVINGS_PRODUCT_CREATE_RESPONSE_EUR, savingsProductResponse);
+    }
+
+    @After("@SavingsProductOfficeRestrictionFeature")
+    public void restoreOfficeSpecificProductRestrictionConfig() {
+        globalConfigurationHelper.disableGlobalConfiguration("restrict-products-to-user-office", 0L);
+        globalConfigurationHelper.disableGlobalConfiguration("office-specific-products-enabled", 0L);
+    }
+
+    @When("Savings products are retrieved successfully")
+    public void retrieveSavingsProductsSuccessfully() {
+        List<GetSavingsProductsResponse> savingsProducts = ok(() -> fineractClient.savingsProduct().retrieveAllSavingsProducts());
+        assertThat(savingsProducts).isNotNull();
     }
 
     @And("Client creates a new EUR savings account with {string} submitted on date")
@@ -198,6 +223,20 @@ public class SavingsAccountStepDef extends AbstractStepDef {
         testContext().set(TestContextKey.EUR_SAVINGS_ACCOUNT_DEPOSIT_RESPONSE, depositResponse);
     }
 
+    @Then("Created user cannot deposit {double} EUR to the savings account on {string} date")
+    public void createdUserCannotDeposit(double depositAmount, String depositDate) {
+        PostSavingsAccountsResponse savingsAccountResponse = testContext().get(TestContextKey.EUR_SAVINGS_ACCOUNT_CREATE_RESPONSE);
+        PostSavingsAccountTransactionsRequest depositRequest = SavingsAccountRequestFactory.defaultDepositRequest()
+                .transactionDate(depositDate).transactionAmount(BigDecimal.valueOf(depositAmount));
+        String username = testContext().get(TestContextKey.CREATED_SIMPLE_USER_USERNAME);
+        String password = testContext().get(TestContextKey.CREATED_SIMPLE_USER_PASSWORD);
+        FineractFeignClient userClient = fineractClientConfiguration.fineractFeignClientForUser(username, password);
+
+        CallFailedRuntimeException exception = FeignCalls.fail(() -> userClient.savingsAccountTransactions()
+                .createSavingsAccountTransaction(savingsAccountResponse.getSavingsId(), depositRequest, Map.of("command", "deposit")));
+        assertThat(exception.getStatus()).isEqualTo(403);
+    }
+
     @And("Client successfully deposits {double} USD to the savings account on {string} date")
     public void createUsdDeposit(double depositAmount, String depositDate) {
         PostSavingsAccountsResponse savingsAccountResponse = testContext().get(TestContextKey.USD_SAVINGS_ACCOUNT_CREATE_RESPONSE);
@@ -222,19 +261,6 @@ public class SavingsAccountStepDef extends AbstractStepDef {
         PostSavingsAccountTransactionsResponse withdrawalResponse = ok(() -> fineractClient.savingsAccountTransactions()
                 .createSavingsAccountTransaction(savingsAccountID, withdrawRequest, Map.of("command", "withdrawal")));
         testContext().set(TestContextKey.EUR_SAVINGS_ACCOUNT_WITHDRAW_RESPONSE, withdrawalResponse);
-    }
-
-    @And("Client successfully withdraw {double} USD from the savings account on {string} date")
-    public void createUsdWithdraw(double withdrawAmount, String transcationDate) {
-        PostSavingsAccountsResponse savingsAccountResponse = testContext().get(TestContextKey.USD_SAVINGS_ACCOUNT_CREATE_RESPONSE);
-        long savingsAccountID = savingsAccountResponse.getSavingsId();
-
-        PostSavingsAccountTransactionsRequest withdrawRequest = SavingsAccountRequestFactory.defaultWithdrawRequest()
-                .transactionDate(transcationDate).transactionAmount(BigDecimal.valueOf(withdrawAmount));
-
-        PostSavingsAccountTransactionsResponse withdrawalResponse = ok(() -> fineractClient.savingsAccountTransactions()
-                .createSavingsAccountTransaction(savingsAccountID, withdrawRequest, Map.of("command", "withdrawal")));
-        testContext().set(TestContextKey.USD_SAVINGS_ACCOUNT_WITHDRAW_RESPONSE, withdrawalResponse);
     }
 
     @And("Client successfully deposits {double} EUR to the {string} savings account on {string} date")

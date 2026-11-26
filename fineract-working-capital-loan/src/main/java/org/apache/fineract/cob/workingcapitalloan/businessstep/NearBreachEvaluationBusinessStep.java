@@ -18,37 +18,26 @@
  */
 package org.apache.fineract.cob.workingcapitalloan.businessstep;
 
-import java.time.LocalDate;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import org.apache.fineract.infrastructure.core.service.DateUtils;
+import org.apache.fineract.infrastructure.event.business.domain.workingcapitalloan.loan.WorkingCapitalLoanNearBreachChangeBusinessEvent;
+import org.apache.fineract.infrastructure.event.business.service.BusinessEventNotifierService;
 import org.apache.fineract.portfolio.workingcapitalloan.domain.WorkingCapitalLoan;
 import org.apache.fineract.portfolio.workingcapitalloan.service.WorkingCapitalLoanNearBreachEvaluationService;
-import org.apache.fineract.portfolio.workingcapitalloanproduct.domain.WorkingCapitalLoanProductRelatedDetails;
 import org.springframework.stereotype.Component;
 
-@Slf4j
 @RequiredArgsConstructor
 @Component
 public class NearBreachEvaluationBusinessStep extends WorkingCapitalLoanCOBBusinessStep {
 
     private final WorkingCapitalLoanNearBreachEvaluationService nearBreachEvaluationService;
+    private final BusinessEventNotifierService businessEventNotifierService;
 
     @Override
     public WorkingCapitalLoan execute(final WorkingCapitalLoan loan) {
-        if (!loan.getLoanStatus().isActive()) {
-            log.debug("Skipping near breach evaluation for WC loan {} - loan status is {}", loan.getId(), loan.getLoanStatus());
-            return loan;
+        if (nearBreachEvaluationService.evaluateNearBreachOnCob(loan, DateUtils.getBusinessLocalDate())) {
+            businessEventNotifierService.notifyPostBusinessEvent(new WorkingCapitalLoanNearBreachChangeBusinessEvent(loan));
         }
-
-        final WorkingCapitalLoanProductRelatedDetails details = loan.getLoanProductRelatedDetails();
-        if (details == null || details.getNearBreach() == null) {
-            log.debug("Skipping near breach evaluation for WC loan {} - no near breach configuration", loan.getId());
-            return loan;
-        }
-
-        final LocalDate businessDate = DateUtils.getBusinessLocalDate();
-        nearBreachEvaluationService.evaluateNearBreach(loan, businessDate);
         return loan;
     }
 

@@ -28,7 +28,9 @@ import org.apache.fineract.infrastructure.codes.service.CodeValueReadPlatformSer
 import org.apache.fineract.infrastructure.core.domain.JdbcSupport;
 import org.apache.fineract.infrastructure.security.service.PlatformSecurityContext;
 import org.apache.fineract.portfolio.client.data.ClientFamilyMembersData;
+import org.apache.fineract.portfolio.client.exception.FamilyMemberNotFoundException;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Service;
@@ -51,7 +53,7 @@ public class ClientFamilyMembersReadPlatformServiceImpl implements ClientFamilyM
 
     private static final class ClientFamilyMembersMapper implements RowMapper<ClientFamilyMembersData> {
 
-        public String schema() {
+        private String schema() {
             return "fmb.id AS id, fmb.client_id AS clientId, fmb.firstname AS firstName, fmb.middlename AS middleName,"
                     + "fmb.lastname AS lastName,fmb.qualification AS qualification,fmb.mobile_number as mobileNumber,fmb.age as age,fmb.is_dependent as isDependent,cv.code_value AS relationship,fmb.relationship_cv_id AS relationshipId,"
                     + "c.code_value AS maritalStatus,fmb.marital_status_cv_id AS maritalStatusId,"
@@ -101,14 +103,18 @@ public class ClientFamilyMembersReadPlatformServiceImpl implements ClientFamilyM
     }
 
     @Override
-    public ClientFamilyMembersData getClientFamilyMember(long id) {
+    public ClientFamilyMembersData getClientFamilyMember(long clientId, long familyMemberId) {
 
         this.context.authenticatedUser();
 
         final ClientFamilyMembersMapper rm = new ClientFamilyMembersMapper();
-        final String sql = "select " + rm.schema() + " where fmb.id=? ";
+        final String sql = "select " + rm.schema() + " where fmb.client_id=? and fmb.id=? ";
 
-        return this.jdbcTemplate.queryForObject(sql, rm, id); // NOSONAR
+        try {
+            return this.jdbcTemplate.queryForObject(sql, rm, clientId, familyMemberId); // NOSONAR
+        } catch (final EmptyResultDataAccessException e) {
+            throw new FamilyMemberNotFoundException(familyMemberId, clientId, e);
+        }
     }
 
     @Override

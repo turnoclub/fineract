@@ -21,11 +21,13 @@ package org.apache.fineract.portfolio.group.api;
 import com.google.gson.JsonElement;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.ArraySchema;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.parameters.RequestBody;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.DELETE;
 import jakarta.ws.rs.DefaultValue;
@@ -49,23 +51,21 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import lombok.RequiredArgsConstructor;
-import org.apache.commons.lang3.StringUtils;
-import org.apache.fineract.commands.domain.CommandWrapper;
-import org.apache.fineract.commands.service.CommandWrapperBuilder;
-import org.apache.fineract.commands.service.PortfolioCommandSourceWritePlatformService;
+import org.apache.fineract.command.core.Command;
+import org.apache.fineract.command.core.CommandDispatcher;
 import org.apache.fineract.infrastructure.bulkimport.data.GlobalEntityType;
 import org.apache.fineract.infrastructure.bulkimport.service.BulkImportWorkbookPopulatorService;
 import org.apache.fineract.infrastructure.bulkimport.service.BulkImportWorkbookService;
+import org.apache.fineract.infrastructure.core.annotation.AlternativeOperationId;
 import org.apache.fineract.infrastructure.core.api.ApiParameterHelper;
 import org.apache.fineract.infrastructure.core.api.ApiRequestParameterHelper;
 import org.apache.fineract.infrastructure.core.api.JsonQuery;
-import org.apache.fineract.infrastructure.core.data.CommandProcessingResult;
 import org.apache.fineract.infrastructure.core.data.PaginationParameters;
 import org.apache.fineract.infrastructure.core.data.UploadRequest;
-import org.apache.fineract.infrastructure.core.exception.UnrecognizedQueryParamException;
 import org.apache.fineract.infrastructure.core.serialization.ApiRequestJsonSerializationSettings;
 import org.apache.fineract.infrastructure.core.serialization.FromJsonHelper;
 import org.apache.fineract.infrastructure.core.serialization.ToApiJsonSerializer;
+import org.apache.fineract.infrastructure.core.service.CommandParameterUtil;
 import org.apache.fineract.infrastructure.core.service.Page;
 import org.apache.fineract.infrastructure.core.service.SearchParameters;
 import org.apache.fineract.infrastructure.dataqueries.data.DatatableData;
@@ -84,8 +84,41 @@ import org.apache.fineract.portfolio.client.data.ClientData;
 import org.apache.fineract.portfolio.client.service.ClientReadPlatformService;
 import org.apache.fineract.portfolio.collectionsheet.data.JLGCollectionSheetData;
 import org.apache.fineract.portfolio.collectionsheet.service.CollectionSheetReadPlatformService;
+import org.apache.fineract.portfolio.group.command.GroupActivateCommand;
+import org.apache.fineract.portfolio.group.command.GroupAssignRoleCommand;
+import org.apache.fineract.portfolio.group.command.GroupAssignStaffCommand;
+import org.apache.fineract.portfolio.group.command.GroupAssociateClientsCommand;
+import org.apache.fineract.portfolio.group.command.GroupCloseCommand;
+import org.apache.fineract.portfolio.group.command.GroupCreateCommand;
+import org.apache.fineract.portfolio.group.command.GroupDeleteCommand;
+import org.apache.fineract.portfolio.group.command.GroupDisassociateClientsCommand;
+import org.apache.fineract.portfolio.group.command.GroupSaveCollectionSheetCommand;
+import org.apache.fineract.portfolio.group.command.GroupTransferClientsCommand;
+import org.apache.fineract.portfolio.group.command.GroupUnassignRoleCommand;
+import org.apache.fineract.portfolio.group.command.GroupUnassignStaffCommand;
+import org.apache.fineract.portfolio.group.command.GroupUpdateCommand;
+import org.apache.fineract.portfolio.group.command.GroupUpdateRoleCommand;
+import org.apache.fineract.portfolio.group.data.GroupActivateRequest;
+import org.apache.fineract.portfolio.group.data.GroupAssignRoleRequest;
+import org.apache.fineract.portfolio.group.data.GroupAssignStaffRequest;
+import org.apache.fineract.portfolio.group.data.GroupAssociateClientsRequest;
+import org.apache.fineract.portfolio.group.data.GroupCloseRequest;
+import org.apache.fineract.portfolio.group.data.GroupCreateRequest;
+import org.apache.fineract.portfolio.group.data.GroupCreateResponse;
+import org.apache.fineract.portfolio.group.data.GroupDeleteRequest;
+import org.apache.fineract.portfolio.group.data.GroupDeleteResponse;
+import org.apache.fineract.portfolio.group.data.GroupDisassociateClientsRequest;
 import org.apache.fineract.portfolio.group.data.GroupGeneralData;
 import org.apache.fineract.portfolio.group.data.GroupRoleData;
+import org.apache.fineract.portfolio.group.data.GroupSaveCollectionSheetRequest;
+import org.apache.fineract.portfolio.group.data.GroupTransferClientsRequest;
+import org.apache.fineract.portfolio.group.data.GroupUnassignRoleRequest;
+import org.apache.fineract.portfolio.group.data.GroupUnassignStaffRequest;
+import org.apache.fineract.portfolio.group.data.GroupUnassignStaffResponse;
+import org.apache.fineract.portfolio.group.data.GroupUpdateRequest;
+import org.apache.fineract.portfolio.group.data.GroupUpdateResponse;
+import org.apache.fineract.portfolio.group.data.GroupUpdateRoleRequest;
+import org.apache.fineract.portfolio.group.domain.GroupTypes;
 import org.apache.fineract.portfolio.group.service.CenterReadPlatformService;
 import org.apache.fineract.portfolio.group.service.GroupReadPlatformService;
 import org.apache.fineract.portfolio.group.service.GroupRolesReadPlatformService;
@@ -118,7 +151,6 @@ public class GroupsApiResource {
     private final ToApiJsonSerializer<GLIMContainer> glimContainerToApiJsonSerializer;
     private final ToApiJsonSerializer<GSIMContainer> gsimContainerToApiJsonSerializer;
     private final ApiRequestParameterHelper apiRequestParameterHelper;
-    private final PortfolioCommandSourceWritePlatformService commandsSourceWritePlatformService;
     private final CollectionSheetReadPlatformService collectionSheetReadPlatformService;
     private final FromJsonHelper fromJsonHelper;
     private final GroupRolesReadPlatformService groupRolesReadPlatformService;
@@ -131,6 +163,8 @@ public class GroupsApiResource {
     private final GLIMAccountInfoReadPlatformService glimAccountInfoReadPlatformService;
     private final GSIMReadPlatformService gsimReadPlatformService;
     private final SqlValidator sqlValidator;
+    private final CommandDispatcher dispatcher;
+    private final GroupingTypesRequestParser requestParser;
 
     @GET
     @Path("template")
@@ -139,6 +173,7 @@ public class GroupsApiResource {
             + "\n\n" + "Field Defaults\n\n" + "Allowed Value Lists\n\n" + "Example Requests:\n\n" + "\n\n" + "groups/template\n\n" + "\n\n"
             + "groups/template?officeId=2\n\n" + "\n\n" + "groups/template?centerId=1\n\n" + "\n\n"
             + "groups/template?centerId=1&staffInSelectedOfficeOnly=true")
+    @AlternativeOperationId("retrieveTemplate_7")
     @ApiResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = GroupsApiResourceSwagger.GetGroupsTemplateResponse.class)))
     public String retrieveTemplate(@Context final UriInfo uriInfo,
             @QueryParam("officeId") @Parameter(description = "officeId") final Long officeId,
@@ -149,7 +184,7 @@ public class GroupsApiResource {
 
         context.authenticatedUser().validateHasReadPermission(GroupingTypesApiConstants.GROUP_RESOURCE_NAME);
 
-        if (is(commandParam, "close")) {
+        if (CommandParameterUtil.is(commandParam, "close")) {
             final GroupGeneralData groupClosureTemplate = groupReadPlatformService.retrieveGroupWithClosureReasons();
             final ApiRequestJsonSerializationSettings settings = apiRequestParameterHelper.process(uriInfo.getQueryParameters());
             return groupGeneralApiJsonSerializer.serialize(settings, groupClosureTemplate,
@@ -179,6 +214,7 @@ public class GroupsApiResource {
     @Operation(summary = "List Groups", operationId = "retrieveAllGroups", description = "The default implementation of listing Groups returns 200 entries with support for pagination and sorting. Using the parameter limit with description -1 returns all entries.\n\n"
             + "Example Requests:\n\n" + "\n\n" + "groups\n\n" + "\n\n" + "groups?fields=name,officeName,joinedDate\n\n" + "\n\n"
             + "groups?offset=10&limit=50\n\n" + "\n\n" + "groups?orderBy=name&sortOrder=DESC")
+    @AlternativeOperationId("retrieveAll_24")
     @ApiResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = GroupsApiResourceSwagger.GetGroupsResponse.class)))
     public String retrieveAll(@Context final UriInfo uriInfo,
             @QueryParam("officeId") @Parameter(description = "officeId") final Long officeId,
@@ -219,6 +255,7 @@ public class GroupsApiResource {
     @Produces({ MediaType.APPLICATION_JSON })
     @Operation(summary = "Retrieve a Group", operationId = "retrieveOneGroup", description = "Retrieve group information.\n\n"
             + "Example Requests:\n\n" + "\n\n" + "groups/1\n\n" + "\n\n" + "groups/1?associations=clientMembers")
+    @AlternativeOperationId("retrieveOne_15")
     @ApiResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = GroupsApiResourceSwagger.GetGroupsGroupIdResponse.class)))
     public String retrieveOne(@Context final UriInfo uriInfo, @PathParam("groupId") @Parameter(description = "groupId") final Long groupId,
             @DefaultValue("false") @QueryParam("staffInSelectedOfficeOnly") @Parameter(description = "staffInSelectedOfficeOnly") final boolean staffInSelectedOfficeOnly,
@@ -286,8 +323,9 @@ public class GroupsApiResource {
                             .generateNextTenRecurringDates(collectionMeetingCalendar);
                     final MeetingData lastMeeting = meetingReadPlatformService
                             .retrieveLastMeeting(collectionMeetingCalendar.getCalendarInstanceId());
+                    final LocalDate lastMeetingDate = lastMeeting == null ? null : lastMeeting.getMeetingDate();
                     final LocalDate recentEligibleMeetingDate = calendarReadPlatformService
-                            .generateNextEligibleMeetingDateForCollection(collectionMeetingCalendar, lastMeeting);
+                            .generateNextEligibleMeetingDateForCollection(collectionMeetingCalendar, lastMeetingDate);
                     collectionMeetingCalendar = CalendarData.withRecurringDates(collectionMeetingCalendar, recurringDates,
                             nextTenRecurringDates, recentEligibleMeetingDate);
                 }
@@ -320,16 +358,11 @@ public class GroupsApiResource {
     @Operation(summary = "Create a Group", operationId = "createGroup", description = "Creates a Group\n\n"
             + "Mandatory Fields: name, officeId, active, activationDate (if active=true)\n\n"
             + "Optional Fields: externalId, staffId, clientMembers")
-    @RequestBody(required = true, content = @Content(schema = @Schema(implementation = GroupsApiResourceSwagger.PostGroupsRequest.class)))
-    @ApiResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = GroupsApiResourceSwagger.PostGroupsResponse.class)))
-    public String create(@Parameter(hidden = true) final String apiRequestBodyAsJson) {
-
-        final CommandWrapper commandRequest = new CommandWrapperBuilder() //
-                .createGroup() //
-                .withJson(apiRequestBodyAsJson) //
-                .build(); //
-        final CommandProcessingResult result = commandsSourceWritePlatformService.logCommandSource(commandRequest);
-        return toApiJsonSerializer.serialize(result);
+    @AlternativeOperationId("create_8")
+    public GroupCreateResponse create(@RequestBody(required = true) @Valid GroupCreateRequest request) {
+        var command = new GroupCreateCommand();
+        command.setPayload(request);
+        return dispatcher.<GroupCreateRequest, GroupCreateResponse>dispatch(command).get();
     }
 
     @POST
@@ -338,18 +371,15 @@ public class GroupsApiResource {
     @Produces({ MediaType.APPLICATION_JSON })
     @Operation(summary = "Unassign a Staff", operationId = "unassignLoanOfficerGroup", description = "Allows you to unassign the Staff.\n\n"
             + "Mandatory Fields: staffId")
+    @AlternativeOperationId("unassignLoanOfficer")
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = GroupsApiResourceSwagger.PostGroupsGroupIdCommandUnassignStaffRequest.class)))
     @ApiResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = GroupsApiResourceSwagger.PostGroupsGroupIdCommandUnassignStaffResponse.class)))
-    public String unassignLoanOfficer(@PathParam("groupId") @Parameter(description = "groupId") final Long groupId,
-            @Parameter(hidden = true) final String apiRequestBodyAsJson) {
-
-        final CommandWrapper commandRequest = new CommandWrapperBuilder() //
-                .unassignGroupStaff(groupId) //
-                .withJson(apiRequestBodyAsJson) //
-                .build(); //
-        final CommandProcessingResult result = commandsSourceWritePlatformService.logCommandSource(commandRequest);
-        return toApiJsonSerializer.serialize(result);
-
+    public GroupUnassignStaffResponse unassignLoanOfficer(@PathParam("groupId") @Parameter(description = "groupId") final Long groupId,
+            @Valid final GroupUnassignStaffRequest request) {
+        request.setGroupId(groupId);
+        final GroupUnassignStaffCommand command = new GroupUnassignStaffCommand();
+        command.setPayload(request);
+        return dispatcher.<GroupUnassignStaffRequest, GroupUnassignStaffResponse>dispatch(command).get();
     }
 
     @PUT
@@ -357,31 +387,25 @@ public class GroupsApiResource {
     @Consumes({ MediaType.APPLICATION_JSON })
     @Produces({ MediaType.APPLICATION_JSON })
     @Operation(summary = "Update a Group", operationId = "updateGroup", description = "Updates a Group")
-    @RequestBody(required = true, content = @Content(schema = @Schema(implementation = GroupsApiResourceSwagger.PutGroupsGroupIdRequest.class)))
-    @ApiResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = GroupsApiResourceSwagger.PutGroupsGroupIdResponse.class)))
-    public String update(@PathParam("groupId") @Parameter(description = "groupId") final Long groupId,
-            @Parameter(hidden = true) final String apiRequestBodyAsJson) {
-
-        final CommandWrapper commandRequest = new CommandWrapperBuilder() //
-                .updateGroup(groupId) //
-                .withJson(apiRequestBodyAsJson) //
-                .build(); //
-        final CommandProcessingResult result = commandsSourceWritePlatformService.logCommandSource(commandRequest);
-        return toApiJsonSerializer.serialize(result);
+    @AlternativeOperationId("update_13")
+    public GroupUpdateResponse update(@PathParam("groupId") final Long groupId,
+            @RequestBody(required = true) @Valid GroupUpdateRequest request) {
+        request.setGroupId(groupId);
+        var command = new GroupUpdateCommand();
+        command.setPayload(request);
+        return dispatcher.<GroupUpdateRequest, GroupUpdateResponse>dispatch(command).get();
     }
 
     @DELETE
     @Path("{groupId}")
     @Produces({ MediaType.APPLICATION_JSON })
     @Operation(summary = "Delete a Group", operationId = "deleteGroup", description = "A group can be deleted if it is in pending state and has no associations - clients, loans or savings")
-    @ApiResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = GroupsApiResourceSwagger.DeleteGroupsGroupIdResponse.class)))
-    public String delete(@PathParam("groupId") @Parameter(description = "groupId") final Long groupId) {
-
-        final CommandWrapper commandRequest = new CommandWrapperBuilder() //
-                .deleteGroup(groupId) //
-                .build(); //
-        final CommandProcessingResult result = commandsSourceWritePlatformService.logCommandSource(commandRequest);
-        return toApiJsonSerializer.serialize(result);
+    @AlternativeOperationId("delete_11")
+    public GroupDeleteResponse delete(@PathParam("groupId") final Long groupId) {
+        final GroupDeleteRequest request = GroupDeleteRequest.builder().groupId(groupId).build();
+        var command = new GroupDeleteCommand();
+        command.setPayload(request);
+        return dispatcher.<GroupDeleteRequest, GroupDeleteResponse>dispatch(command).get();
     }
 
     @POST
@@ -419,74 +443,94 @@ public class GroupsApiResource {
             + "Allows you to unassign Roles associated tp Group members.\n\n" + "Update a Role:\n\n"
             + "Allows you to update the member Role.\n\n" + "Mandatory Fields: role\n\n"
             + "Showing request/response for Transfer Clients across groups")
+    @AlternativeOperationId("activateOrGenerateCollectionSheet")
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = GroupsApiResourceSwagger.PostGroupsGroupIdRequest.class)))
     @ApiResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = GroupsApiResourceSwagger.PostGroupsGroupIdResponse.class)))
     public String activateOrGenerateCollectionSheet(@PathParam("groupId") @Parameter(description = "groupId") final Long groupId,
             @QueryParam("command") @Parameter(description = "command") final String commandParam,
             @QueryParam("roleId") @Parameter(description = "roleId") final Long roleId,
             @Parameter(hidden = true) final String apiRequestBodyAsJson, @Context final UriInfo uriInfo) {
-        final CommandWrapperBuilder builder = new CommandWrapperBuilder().withJson(apiRequestBodyAsJson);
-
-        CommandProcessingResult result = null;
-        if (is(commandParam, "activate")) {
-            final CommandWrapper commandRequest = builder.activateGroup(groupId).build();
-            result = commandsSourceWritePlatformService.logCommandSource(commandRequest);
-            return toApiJsonSerializer.serialize(result);
-        } else if (is(commandParam, "associateClients")) {
-            final CommandWrapper commandRequest = builder.associateClientsToGroup(groupId).build();
-            result = commandsSourceWritePlatformService.logCommandSource(commandRequest);
-            return toApiJsonSerializer.serialize(result);
-        } else if (is(commandParam, "disassociateClients")) {
-            final CommandWrapper commandRequest = builder.disassociateClientsFromGroup(groupId).build();
-            result = commandsSourceWritePlatformService.logCommandSource(commandRequest);
-            return toApiJsonSerializer.serialize(result);
-        } else if (is(commandParam, "generateCollectionSheet")) {
-            final JsonElement parsedQuery = fromJsonHelper.parse(apiRequestBodyAsJson);
-            final JsonQuery query = JsonQuery.from(apiRequestBodyAsJson, parsedQuery, fromJsonHelper);
-            final JLGCollectionSheetData collectionSheet = collectionSheetReadPlatformService.generateGroupCollectionSheet(groupId, query);
-            final ApiRequestJsonSerializationSettings settings = apiRequestParameterHelper.process(uriInfo.getQueryParameters());
-            return toApiJsonSerializer.serialize(settings, collectionSheet, GroupingTypesApiConstants.COLLECTIONSHEET_DATA_PARAMETERS);
-        } else if (is(commandParam, "saveCollectionSheet")) {
-            final CommandWrapper commandRequest = builder.saveGroupCollectionSheet(groupId).build();
-            result = commandsSourceWritePlatformService.logCommandSource(commandRequest);
-            return toApiJsonSerializer.serialize(result);
-        } else if (is(commandParam, "unassignStaff")) {
-            final CommandWrapper commandRequest = builder.unassignGroupStaff(groupId).build();
-            result = commandsSourceWritePlatformService.logCommandSource(commandRequest);
-            return toApiJsonSerializer.serialize(result);
-        } else if (is(commandParam, "assignStaff")) {
-            final CommandWrapper commandRequest = builder.assignGroupStaff(groupId).build();
-            result = commandsSourceWritePlatformService.logCommandSource(commandRequest);
-            return toApiJsonSerializer.serialize(result);
-        } else if (is(commandParam, "assignRole")) {
-            final CommandWrapper commandRequest = builder.assignRole(groupId).build();
-            result = commandsSourceWritePlatformService.logCommandSource(commandRequest);
-            return toApiJsonSerializer.serialize(result);
-        } else if (is(commandParam, "unassignRole")) {
-            final CommandWrapper commandRequest = builder.unassignRole(groupId, roleId).build();
-            result = commandsSourceWritePlatformService.logCommandSource(commandRequest);
-            return toApiJsonSerializer.serialize(result);
-        } else if (is(commandParam, "updateRole")) {
-            final CommandWrapper commandRequest = builder.updateRole(groupId, roleId).build();
-            result = commandsSourceWritePlatformService.logCommandSource(commandRequest);
-            return toApiJsonSerializer.serialize(result);
-        } else if (is(commandParam, "transferClients")) {
-            final CommandWrapper commandRequest = builder.transferClientsBetweenGroups(groupId).build();
-            result = commandsSourceWritePlatformService.logCommandSource(commandRequest);
-            return toApiJsonSerializer.serialize(result);
-        } else if (is(commandParam, "close")) {
-            final CommandWrapper commandRequest = builder.closeGroup(groupId).build();
-            result = commandsSourceWritePlatformService.logCommandSource(commandRequest);
-            return toApiJsonSerializer.serialize(result);
-        } else {
-            throw new UnrecognizedQueryParamException("command", commandParam, new Object[] { "activate", "generateCollectionSheet",
-                    "saveCollectionSheet", "unassignStaff", "assignRole", "unassignRole", "updateassignRole" });
-        }
-
+        return switch (GroupCommand.from(commandParam)) {
+            case ACTIVATE -> {
+                final GroupActivateRequest request = requestParser.parseAndValidate(apiRequestBodyAsJson, GroupActivateRequest.class);
+                request.setGroupId(groupId);
+                yield dispatch(new GroupActivateCommand(), request);
+            }
+            case ASSIGN_STAFF -> {
+                final GroupAssignStaffRequest request = requestParser.parseAndValidate(apiRequestBodyAsJson, GroupAssignStaffRequest.class);
+                request.setGroupId(groupId);
+                yield dispatch(new GroupAssignStaffCommand(), request);
+            }
+            case UNASSIGN_STAFF -> {
+                final GroupUnassignStaffRequest request = requestParser.parseAndValidate(apiRequestBodyAsJson,
+                        GroupUnassignStaffRequest.class);
+                request.setGroupId(groupId);
+                yield dispatch(new GroupUnassignStaffCommand(), request);
+            }
+            case ASSOCIATE_CLIENTS -> {
+                final GroupAssociateClientsRequest request = requestParser.parseAndValidate(apiRequestBodyAsJson,
+                        GroupAssociateClientsRequest.class);
+                request.setGroupId(groupId);
+                yield dispatch(new GroupAssociateClientsCommand(), request);
+            }
+            case DISASSOCIATE_CLIENTS -> {
+                final GroupDisassociateClientsRequest request = requestParser.parseAndValidate(apiRequestBodyAsJson,
+                        GroupDisassociateClientsRequest.class);
+                request.setGroupId(groupId);
+                yield dispatch(new GroupDisassociateClientsCommand(), request);
+            }
+            case GENERATE_COLLECTION_SHEET -> {
+                final JsonElement parsedQuery = fromJsonHelper.parse(apiRequestBodyAsJson);
+                final JsonQuery query = JsonQuery.from(apiRequestBodyAsJson, parsedQuery, fromJsonHelper);
+                final JLGCollectionSheetData collectionSheet = collectionSheetReadPlatformService.generateGroupCollectionSheet(groupId,
+                        query);
+                final ApiRequestJsonSerializationSettings settings = apiRequestParameterHelper.process(uriInfo.getQueryParameters());
+                yield toApiJsonSerializer.serialize(settings, collectionSheet, GroupingTypesApiConstants.COLLECTIONSHEET_DATA_PARAMETERS);
+            }
+            case SAVE_COLLECTION_SHEET -> {
+                final GroupSaveCollectionSheetRequest request = requestParser.parseAndValidate(apiRequestBodyAsJson,
+                        GroupSaveCollectionSheetRequest.class);
+                request.setGroupId(groupId);
+                request.setGroupingType(GroupTypes.GROUP);
+                yield dispatch(new GroupSaveCollectionSheetCommand(), request);
+            }
+            case ASSIGN_ROLE -> {
+                final GroupAssignRoleRequest request = requestParser.parseAndValidate(apiRequestBodyAsJson, GroupAssignRoleRequest.class);
+                request.setGroupId(groupId);
+                yield dispatch(new GroupAssignRoleCommand(), request);
+            }
+            case UNASSIGN_ROLE -> {
+                // the role to unassign is identified by the path and query, so no request body is needed
+                final GroupUnassignRoleRequest request = GroupUnassignRoleRequest.builder().groupId(groupId).roleId(roleId).build();
+                requestParser.validate(request);
+                yield dispatch(new GroupUnassignRoleCommand(), request);
+            }
+            case UPDATE_ROLE -> {
+                final GroupUpdateRoleRequest request = requestParser.parse(apiRequestBodyAsJson, GroupUpdateRoleRequest.class);
+                request.setGroupId(groupId);
+                request.setRoleId(roleId);
+                requestParser.validate(request);
+                yield dispatch(new GroupUpdateRoleCommand(), request);
+            }
+            case TRANSFER_CLIENTS -> {
+                final GroupTransferClientsRequest request = requestParser.parseAndValidate(apiRequestBodyAsJson,
+                        GroupTransferClientsRequest.class);
+                request.setGroupId(groupId);
+                yield dispatch(new GroupTransferClientsCommand(), request);
+            }
+            case CLOSE -> {
+                final GroupCloseRequest request = requestParser.parseAndValidate(apiRequestBodyAsJson, GroupCloseRequest.class);
+                request.setGroupId(groupId);
+                request.setGroupingType(GroupTypes.GROUP);
+                yield dispatch(new GroupCloseCommand(), request);
+            }
+        };
     }
 
-    private boolean is(final String commandParam, final String commandValue) {
-        return StringUtils.isNotBlank(commandParam) && commandParam.trim().equalsIgnoreCase(commandValue);
+    private <T, R> String dispatch(final Command<T> command, final T request) {
+        command.setPayload(request);
+        final R response = dispatcher.<T, R>dispatch(command).get();
+        return toApiJsonSerializer.serialize(response);
     }
 
     @GET
@@ -495,6 +539,7 @@ public class GroupsApiResource {
     @Operation(summary = "Retrieve Group accounts overview", operationId = "retrieveAccountsGroup", description = "Retrieves details of all Loan and Savings accounts associated with this group.\n\n"
             + "\n\n" + "Example Requests:\n\n" + "\n\n" + "groups/1/accounts\n\n" + "\n\n" + "\n\n"
             + "groups/1/accounts?fields=loanAccounts,savingsAccounts,memberLoanAccounts,\n\n" + "memberSavingsAccounts")
+    @AlternativeOperationId("retrieveAccounts")
     @ApiResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = GroupsApiResourceSwagger.GetGroupsGroupIdAccountsResponse.class)))
     public String retrieveAccounts(@PathParam("groupId") @Parameter(description = "groupId") final Long groupId,
             @Context final UriInfo uriInfo) {
@@ -514,6 +559,7 @@ public class GroupsApiResource {
     @Path("downloadtemplate")
     @Produces("application/vnd.ms-excel")
     @Operation(summary = "Download Groups Bulk Template", operationId = "getBulkTemplateGroup")
+    @AlternativeOperationId("getGroupsTemplate")
     public Response getGroupsTemplate(@QueryParam("officeId") final Long officeId, @QueryParam("staffId") final Long staffId,
             @QueryParam("dateFormat") final String dateFormat) {
         return bulkImportWorkbookPopulatorService.getTemplate(GlobalEntityType.GROUPS.toString(), officeId, staffId, dateFormat);
@@ -523,6 +569,7 @@ public class GroupsApiResource {
     @Path("uploadtemplate")
     @Consumes(MediaType.MULTIPART_FORM_DATA)
     @Operation(summary = "Upload Groups Bulk Template", operationId = "postBulkTemplateGroup")
+    @AlternativeOperationId("postGroupTemplate")
     @RequestBody(description = "Upload group template", content = {
             @Content(mediaType = MediaType.MULTIPART_FORM_DATA, schema = @Schema(implementation = UploadRequest.class)) })
     public String postGroupTemplate(@FormDataParam("file") InputStream uploadedInputStream,
@@ -537,6 +584,7 @@ public class GroupsApiResource {
     @Path("{groupId}/glimaccounts")
     @Produces({ MediaType.APPLICATION_JSON })
     @Operation(summary = "Retrieve GLIM Accounts for Group", operationId = "retrieveGlimAccountsGroup")
+    @AlternativeOperationId("retrieveglimAccounts")
     public String retrieveglimAccounts(@PathParam("groupId") final Long groupId,
             @QueryParam("parentLoanAccountNo") final String parentLoanAccountNo, @Context final UriInfo uriInfo) {
         context.authenticatedUser().validateHasReadPermission("GROUP");
@@ -560,6 +608,8 @@ public class GroupsApiResource {
     @Path("{groupId}/gsimaccounts")
     @Produces({ MediaType.APPLICATION_JSON })
     @Operation(summary = "Retrieve GSIM Accounts for Group", operationId = "retrieveGsimAccountsGroup")
+    @AlternativeOperationId("retrieveGsimAccounts")
+    @ApiResponse(responseCode = "200", description = "OK", content = @Content(array = @ArraySchema(schema = @Schema(implementation = GroupsApiResourceSwagger.GetGroupsGroupIdGsimAccountsResponse.class))))
     public String retrieveGsimAccounts(@PathParam("groupId") final Long groupId,
             @QueryParam("parentGSIMAccountNo") final String parentGSIMAccountNo, @QueryParam("parentGSIMId") final Long parentGSIMId,
             @Context final UriInfo uriInfo) {

@@ -24,11 +24,13 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.OneToMany;
 import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.fineract.infrastructure.core.api.JsonCommand;
@@ -37,7 +39,7 @@ import org.apache.fineract.portfolio.tax.api.TaxApiConstants;
 import org.apache.fineract.portfolio.tax.exception.TaxMappingNotFoundException;
 
 @Entity
-@Table(name = "m_tax_group")
+@Table(name = "m_tax_group", uniqueConstraints = { @UniqueConstraint(columnNames = { "name" }, name = "uq_m_tax_group_name") })
 public class TaxGroup extends AbstractAuditableCustom {
 
     @Column(name = "name", length = 100)
@@ -75,10 +77,11 @@ public class TaxGroup extends AbstractAuditableCustom {
         for (TaxGroupMappings groupMappings : taxGroupMappings) {
             TaxGroupMappings mappings = findOneBy(groupMappings);
             if (mappings == null) {
+                groupMappings.setTaxGroup(this);
                 this.taxGroupMappings.add(groupMappings);
                 taxComponentList.add(groupMappings.getTaxComponent().getId());
             } else {
-                mappings.update(groupMappings.getEndDate(), modifications);
+                mappings.update(groupMappings.getStartDate(), groupMappings.getEndDate(), modifications);
             }
         }
 
@@ -93,15 +96,17 @@ public class TaxGroup extends AbstractAuditableCustom {
     }
 
     public TaxGroupMappings findOneBy(final TaxGroupMappings groupMapping) {
-        if (groupMapping.getId() != null) {
-            for (TaxGroupMappings groupMappings : this.taxGroupMappings) {
-                if (groupMappings.getId().equals(groupMapping.getId())) {
-                    return groupMappings;
-                }
-            }
-            throw new TaxMappingNotFoundException(groupMapping.getId());
+        if (groupMapping.getId() == null) {
+            return null;
         }
-        return null;
+
+        for (TaxGroupMappings existing : this.taxGroupMappings) {
+            if (Objects.equals(existing.getId(), groupMapping.getId())) {
+                return existing;
+            }
+        }
+
+        throw new TaxMappingNotFoundException(groupMapping.getId());
     }
 
     public Set<TaxGroupMappings> getTaxGroupMappings() {

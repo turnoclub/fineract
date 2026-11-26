@@ -24,6 +24,9 @@ import java.math.BigDecimal;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.LocalDate;
+import java.time.LocalTime;
+import java.time.OffsetTime;
+import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -55,7 +58,7 @@ import org.apache.fineract.portfolio.calendar.domain.CalendarFrequencyType;
 import org.apache.fineract.portfolio.calendar.domain.CalendarType;
 import org.apache.fineract.portfolio.calendar.service.CalendarReadPlatformService;
 import org.apache.fineract.portfolio.charge.data.ChargeData;
-import org.apache.fineract.portfolio.charge.service.ChargeReadPlatformService;
+import org.apache.fineract.portfolio.charge.service.ChargeReadService;
 import org.apache.fineract.portfolio.charge.util.ConvertChargeDataToSpecificChargeData;
 import org.apache.fineract.portfolio.client.data.ClientData;
 import org.apache.fineract.portfolio.client.service.ClientReadPlatformService;
@@ -120,7 +123,7 @@ public class DepositAccountReadPlatformServiceImpl implements DepositAccountRead
     private final GroupReadPlatformService groupReadPlatformService;
     private final DepositProductReadPlatformService depositProductReadPlatformService;
     private final SavingsDropdownReadPlatformService savingsDropdownReadPlatformService;
-    private final ChargeReadPlatformService chargeReadPlatformService;
+    private final ChargeReadService chargeReadService;
     private final StaffReadService staffReadPlatformService;
     private final DepositsDropdownReadPlatformService depositsDropdownReadPlatformService;
     private final SavingsAccountReadPlatformService savingsAccountReadPlatformService;
@@ -343,13 +346,13 @@ public class DepositAccountReadPlatformServiceImpl implements DepositAccountRead
                     .retrievewithdrawalFeeTypeOptions();
 
             final Collection<SavingsAccountTransactionData> transactions = null;
-            final Collection<ChargeData> productCharges = this.chargeReadPlatformService.retrieveSavingsProductCharges(productId);
+            final Collection<ChargeData> productCharges = this.chargeReadService.retrieveSavingsProductCharges(productId, officeId);
             // update charges from Product charges
             final Collection<SavingsAccountChargeData> charges = fromChargesToSavingsCharges(productCharges);
 
             final boolean feeChargesOnly = false;
-            final Collection<ChargeData> chargeOptions = this.chargeReadPlatformService
-                    .retrieveSavingsProductApplicableCharges(feeChargesOnly);
+            final Collection<ChargeData> chargeOptions = this.chargeReadService.retrieveSavingsProductApplicableCharges(feeChargesOnly,
+                    officeId);
 
             final Collection<EnumOptionData> maturityInstructionOptions = this.depositsDropdownReadPlatformService
                     .maturityInstructionOptions();
@@ -429,8 +432,8 @@ public class DepositAccountReadPlatformServiceImpl implements DepositAccountRead
             final Collection<EnumOptionData> maturityInstructionOptions = null;
 
             final boolean feeChargesOnly = true;
-            final Collection<ChargeData> chargeOptions = this.chargeReadPlatformService
-                    .retrieveSavingsProductApplicableCharges(feeChargesOnly);
+            final Collection<ChargeData> chargeOptions = this.chargeReadService.retrieveSavingsProductApplicableCharges(feeChargesOnly,
+                    officeId);
 
             if (depositAccountType == DepositAccountType.FIXED_DEPOSIT) {
 
@@ -537,77 +540,77 @@ public class DepositAccountReadPlatformServiceImpl implements DepositAccountRead
 
     private abstract static class DepositAccountMapper implements RowMapper<DepositAccountData> {
 
-        public static final String ACCOUNT_NO = "accountNo";
-        public static final String ID = "id";
-        public static final String EXTERNAL_ID = "externalId";
-        public static final String GROUP_ID = "groupId";
-        public static final String GROUP_NAME = "groupName";
-        public static final String CLIENT_ID = "clientId";
-        public static final String CLIENT_NAME = "clientName";
-        public static final String PRODUCT_ID = "productId";
-        public static final String PRODUCT_NAME = "productName";
-        public static final String FIELD_OFFICER_ID = "fieldOfficerId";
-        public static final String FIELD_OFFICER_NAME = "fieldOfficerName";
-        public static final String STATUS_ENUM = "statusEnum";
-        public static final String SUBMITTED_ON_DATE = "submittedOnDate";
-        public static final String SUBMITTED_BY_USERNAME = "submittedByUsername";
-        public static final String SUBMITTED_BY_LASTNAME = "submittedByLastname";
-        public static final String SUBMITTED_BY_FIRSTNAME = "submittedByFirstname";
-        public static final String REJECTED_ON_DATE = "rejectedOnDate";
-        public static final String REJECTED_BY_USERNAME = "rejectedByUsername";
-        public static final String REJECTED_BY_FIRSTNAME = "rejectedByFirstname";
-        public static final String REJECTED_BY_LASTNAME = "rejectedByLastname";
-        public static final String WITHDRAWN_ON_DATE = "withdrawnOnDate";
-        public static final String WITHDRAWN_BY_USERNAME = "withdrawnByUsername";
-        public static final String WITHDRAWN_BY_FIRSTNAME = "withdrawnByFirstname";
-        public static final String WITHDRAWN_BY_LASTNAME = "withdrawnByLastname";
-        public static final String APPROVED_ON_DATE = "approvedOnDate";
-        public static final String APPROVED_BY_USERNAME = "approvedByUsername";
-        public static final String APPROVED_BY_FIRSTNAME = "approvedByFirstname";
-        public static final String APPROVED_BY_LASTNAME = "approvedByLastname";
-        public static final String ACTIVATED_ON_DATE = "activatedOnDate";
-        public static final String ACTIVATED_BY_USERNAME = "activatedByUsername";
-        public static final String ACTIVATED_BY_FIRSTNAME = "activatedByFirstname";
-        public static final String ACTIVATED_BY_LASTNAME = "activatedByLastname";
-        public static final String CLOSED_ON_DATE = "closedOnDate";
-        public static final String CLOSED_BY_USERNAME = "closedByUsername";
-        public static final String CLOSED_BY_FIRSTNAME = "closedByFirstname";
-        public static final String CLOSED_BY_LASTNAME = "closedByLastname";
-        public static final String DEPOSIT_TYPE_ID = "depositTypeId";
-        public static final String CURRENCY_CODE = "currencyCode";
-        public static final String CURRENCY_NAME = "currencyName";
-        public static final String CURRENCY_NAME_CODE = "currencyNameCode";
-        public static final String CURRENCY_DISPLAY_SYMBOL = "currencyDisplaySymbol";
-        public static final String CURRENCY_DIGITS = "currencyDigits";
-        public static final String IN_MULTIPLES_OF = "inMultiplesOf";
-        public static final String NOMINAL_ANNUAL_INTEREST_RATE = "nominalAnnualInterestRate";
-        public static final String INTEREST_COMPOUNDING_PERIOD_TYPE = "interestCompoundingPeriodType";
-        public static final String INTEREST_POSTING_PERIOD_TYPE = "interestPostingPeriodType";
-        public static final String INTEREST_CALCULATION_TYPE = "interestCalculationType";
-        public static final String INTEREST_CALCULATION_DAYS_IN_YEAR_TYPE = "interestCalculationDaysInYearType";
-        public static final String MIN_REQUIRED_OPENING_BALANCE = "minRequiredOpeningBalance";
-        public static final String LOCKIN_PERIOD_FREQUENCY = "lockinPeriodFrequency";
-        public static final String LOCKIN_PERIOD_FREQUENCY_TYPE = "lockinPeriodFrequencyType";
-        public static final String WITHDRAWAL_FEE_FOR_TRANSFERS = "withdrawalFeeForTransfers";
-        public static final String MIN_BALANCE_FOR_INTEREST_CALCULATION = "minBalanceForInterestCalculation";
-        public static final String TOTAL_DEPOSITS = "totalDeposits";
-        public static final String TOTAL_WITHDRAWALS = "totalWithdrawals";
-        public static final String TOTAL_WITHDRAWAL_FEES = "totalWithdrawalFees";
-        public static final String TOTAL_ANNUAL_FEES = "totalAnnualFees";
-        public static final String TOTAL_INTEREST_EARNED = "totalInterestEarned";
-        public static final String TOTAL_INTEREST_POSTED = "totalInterestPosted";
-        public static final String ACCOUNT_BALANCE = "accountBalance";
-        public static final String TOTAL_FEE_CHARGE = "totalFeeCharge";
-        public static final String TOTAL_PENALTY_CHARGE = "totalPenaltyCharge";
-        public static final String TOTAL_WITHHOLD_TAX = "totalWithholdTax";
-        public static final String INTEREST_POSTED_TILL_DATE = "interestPostedTillDate";
-        public static final String WITH_HOLD_TAX = "withHoldTax";
-        public static final String TAX_GROUP_ID = "taxGroupId";
-        public static final String TAX_GROUP_NAME = "taxGroupName";
+        private static final String ACCOUNT_NO = "accountNo";
+        private static final String ID = "id";
+        private static final String EXTERNAL_ID = "externalId";
+        private static final String GROUP_ID = "groupId";
+        private static final String GROUP_NAME = "groupName";
+        private static final String CLIENT_ID = "clientId";
+        private static final String CLIENT_NAME = "clientName";
+        private static final String PRODUCT_ID = "productId";
+        private static final String PRODUCT_NAME = "productName";
+        private static final String FIELD_OFFICER_ID = "fieldOfficerId";
+        private static final String FIELD_OFFICER_NAME = "fieldOfficerName";
+        private static final String STATUS_ENUM = "statusEnum";
+        private static final String SUBMITTED_ON_DATE = "submittedOnDate";
+        private static final String SUBMITTED_BY_USERNAME = "submittedByUsername";
+        private static final String SUBMITTED_BY_LASTNAME = "submittedByLastname";
+        private static final String SUBMITTED_BY_FIRSTNAME = "submittedByFirstname";
+        private static final String REJECTED_ON_DATE = "rejectedOnDate";
+        private static final String REJECTED_BY_USERNAME = "rejectedByUsername";
+        private static final String REJECTED_BY_FIRSTNAME = "rejectedByFirstname";
+        private static final String REJECTED_BY_LASTNAME = "rejectedByLastname";
+        private static final String WITHDRAWN_ON_DATE = "withdrawnOnDate";
+        private static final String WITHDRAWN_BY_USERNAME = "withdrawnByUsername";
+        private static final String WITHDRAWN_BY_FIRSTNAME = "withdrawnByFirstname";
+        private static final String WITHDRAWN_BY_LASTNAME = "withdrawnByLastname";
+        private static final String APPROVED_ON_DATE = "approvedOnDate";
+        private static final String APPROVED_BY_USERNAME = "approvedByUsername";
+        private static final String APPROVED_BY_FIRSTNAME = "approvedByFirstname";
+        private static final String APPROVED_BY_LASTNAME = "approvedByLastname";
+        private static final String ACTIVATED_ON_DATE = "activatedOnDate";
+        private static final String ACTIVATED_BY_USERNAME = "activatedByUsername";
+        private static final String ACTIVATED_BY_FIRSTNAME = "activatedByFirstname";
+        private static final String ACTIVATED_BY_LASTNAME = "activatedByLastname";
+        private static final String CLOSED_ON_DATE = "closedOnDate";
+        private static final String CLOSED_BY_USERNAME = "closedByUsername";
+        private static final String CLOSED_BY_FIRSTNAME = "closedByFirstname";
+        private static final String CLOSED_BY_LASTNAME = "closedByLastname";
+        private static final String DEPOSIT_TYPE_ID = "depositTypeId";
+        private static final String CURRENCY_CODE = "currencyCode";
+        private static final String CURRENCY_NAME = "currencyName";
+        private static final String CURRENCY_NAME_CODE = "currencyNameCode";
+        private static final String CURRENCY_DISPLAY_SYMBOL = "currencyDisplaySymbol";
+        private static final String CURRENCY_DIGITS = "currencyDigits";
+        private static final String IN_MULTIPLES_OF = "inMultiplesOf";
+        private static final String NOMINAL_ANNUAL_INTEREST_RATE = "nominalAnnualInterestRate";
+        private static final String INTEREST_COMPOUNDING_PERIOD_TYPE = "interestCompoundingPeriodType";
+        private static final String INTEREST_POSTING_PERIOD_TYPE = "interestPostingPeriodType";
+        private static final String INTEREST_CALCULATION_TYPE = "interestCalculationType";
+        private static final String INTEREST_CALCULATION_DAYS_IN_YEAR_TYPE = "interestCalculationDaysInYearType";
+        private static final String MIN_REQUIRED_OPENING_BALANCE = "minRequiredOpeningBalance";
+        private static final String LOCKIN_PERIOD_FREQUENCY = "lockinPeriodFrequency";
+        private static final String LOCKIN_PERIOD_FREQUENCY_TYPE = "lockinPeriodFrequencyType";
+        private static final String WITHDRAWAL_FEE_FOR_TRANSFERS = "withdrawalFeeForTransfers";
+        private static final String MIN_BALANCE_FOR_INTEREST_CALCULATION = "minBalanceForInterestCalculation";
+        private static final String TOTAL_DEPOSITS = "totalDeposits";
+        private static final String TOTAL_WITHDRAWALS = "totalWithdrawals";
+        private static final String TOTAL_WITHDRAWAL_FEES = "totalWithdrawalFees";
+        private static final String TOTAL_ANNUAL_FEES = "totalAnnualFees";
+        private static final String TOTAL_INTEREST_EARNED = "totalInterestEarned";
+        private static final String TOTAL_INTEREST_POSTED = "totalInterestPosted";
+        private static final String ACCOUNT_BALANCE = "accountBalance";
+        private static final String TOTAL_FEE_CHARGE = "totalFeeCharge";
+        private static final String TOTAL_PENALTY_CHARGE = "totalPenaltyCharge";
+        private static final String TOTAL_WITHHOLD_TAX = "totalWithholdTax";
+        private static final String INTEREST_POSTED_TILL_DATE = "interestPostedTillDate";
+        private static final String WITH_HOLD_TAX = "withHoldTax";
+        private static final String TAX_GROUP_ID = "taxGroupId";
+        private static final String TAX_GROUP_NAME = "taxGroupName";
         private final String selectFieldsSql;
         private final String selectTablesSql;
 
-        protected DepositAccountMapper() {
+        DepositAccountMapper() {
             final StringBuilder selectFieldsSqlBuilder = new StringBuilder(400);
             selectFieldsSqlBuilder.append("sa.id as id, sa.account_no as accountNo, sa.external_id as externalId, ");
             selectFieldsSqlBuilder.append("c.id as clientId, c.display_name as clientName, ");
@@ -683,17 +686,17 @@ public class DepositAccountReadPlatformServiceImpl implements DepositAccountRead
             this.selectTablesSql = selectTablesSqlBuilder.toString();
         }
 
-        public String selectFieldsSql() {
+        String selectFieldsSql() {
             return this.selectFieldsSql;
         }
 
-        public String selectTablesSql() {
+        String selectTablesSql() {
             return this.selectTablesSql;
         }
 
-        public abstract String schema();
+        abstract String schema();
 
-        public DepositAccountData mapRow(final ResultSet rs) throws SQLException {
+        DepositAccountData mapRow(final ResultSet rs) throws SQLException {
 
             final Long id = rs.getLong(ID);
             final String accountNo = rs.getString(ACCOUNT_NO);
@@ -827,23 +830,24 @@ public class DepositAccountReadPlatformServiceImpl implements DepositAccountRead
 
     private static class FixedDepositAccountMapper extends DepositAccountMapper {
 
-        public static final String PRE_CLOSURE_PENAL_APPLICABLE = "preClosurePenalApplicable";
-        public static final String PRE_CLOSURE_PENAL_INTEREST = "preClosurePenalInterest";
-        public static final String PRE_CLOSURE_PENAL_INTEREST_ON_ID = "preClosurePenalInterestOnId";
-        public static final String MIN_DEPOSIT_TERM = "minDepositTerm";
-        public static final String MAX_DEPOSIT_TERM = "maxDepositTerm";
-        public static final String MIN_DEPOSIT_TERM_TYPE_ID = "minDepositTermTypeId";
-        public static final String MAX_DEPOSIT_TERM_TYPE_ID = "maxDepositTermTypeId";
-        public static final String IN_MULTIPLES_OF_DEPOSIT_TERM = "inMultiplesOfDepositTerm";
-        public static final String IN_MULTIPLES_OF_DEPOSIT_TERM_TYPE_ID = "inMultiplesOfDepositTermTypeId";
-        public static final String DEPOSIT_AMOUNT = "depositAmount";
-        public static final String MATURITY_AMOUNT = "maturityAmount";
-        public static final String MATURITY_DATE = "maturityDate";
-        public static final String DEPOSIT_PERIOD = "depositPeriod";
-        public static final String DEPOSIT_PERIOD_FREQUENCY_TYPE_ID = "depositPeriodFrequencyTypeId";
-        public static final String ON_ACCOUNT_CLOSURE_ID = "onAccountClosureId";
-        public static final String TRANSFER_INTEREST_TO_SAVINGS = "transferInterestToSavings";
-        public static final String TRANSFER_TO_SAVINGS_ID = "transferToSavingsId";
+        private static final String PRE_CLOSURE_PENAL_APPLICABLE = "preClosurePenalApplicable";
+        private static final String PRE_CLOSURE_PENAL_INTEREST = "preClosurePenalInterest";
+        private static final String PRE_CLOSURE_PENAL_INTEREST_ON_ID = "preClosurePenalInterestOnId";
+        private static final String MIN_DEPOSIT_TERM = "minDepositTerm";
+        private static final String MAX_DEPOSIT_TERM = "maxDepositTerm";
+        private static final String MIN_DEPOSIT_TERM_TYPE_ID = "minDepositTermTypeId";
+        private static final String MAX_DEPOSIT_TERM_TYPE_ID = "maxDepositTermTypeId";
+        private static final String IN_MULTIPLES_OF_DEPOSIT_TERM = "inMultiplesOfDepositTerm";
+        private static final String IN_MULTIPLES_OF_DEPOSIT_TERM_TYPE_ID = "inMultiplesOfDepositTermTypeId";
+        private static final String DEPOSIT_AMOUNT = "depositAmount";
+        private static final String MATURITY_AMOUNT = "maturityAmount";
+        private static final String MATURITY_DATE = "maturityDate";
+        private static final String DEPOSIT_PERIOD = "depositPeriod";
+        private static final String DEPOSIT_PERIOD_FREQUENCY_TYPE_ID = "depositPeriodFrequencyTypeId";
+        private static final String ON_ACCOUNT_CLOSURE_ID = "onAccountClosureId";
+        private static final String TRANSFER_INTEREST_TO_SAVINGS = "transferInterestToSavings";
+        private static final String TRANSFER_TO_SAVINGS_ID = "transferToSavingsId";
+        private static final String IS_RATE_CHART_OVERRIDDEN = "isRateChartOverridden";
         private final String schemaSql;
 
         FixedDepositAccountMapper() {
@@ -866,7 +870,8 @@ public class DepositAccountReadPlatformServiceImpl implements DepositAccountRead
             sqlBuilder.append("datp.deposit_period_frequency_enum as depositPeriodFrequencyTypeId, ");
             sqlBuilder.append("datp.on_account_closure_enum as onAccountClosureId, ");
             sqlBuilder.append("datp.transfer_interest_to_linked_account as transferInterestToSavings, ");
-            sqlBuilder.append("datp.transfer_to_savings_account_id as transferToSavingsId ");
+            sqlBuilder.append("datp.transfer_to_savings_account_id as transferToSavingsId, ");
+            sqlBuilder.append("datp.is_rate_chart_overridden as isRateChartOverridden ");
 
             sqlBuilder.append(super.selectTablesSql());
 
@@ -916,38 +921,42 @@ public class DepositAccountReadPlatformServiceImpl implements DepositAccountRead
 
             final Long transferToSavingsId = JdbcSupport.getLong(rs, TRANSFER_TO_SAVINGS_ID);
 
+            final boolean isRateChartOverridden = rs.getBoolean(IS_RATE_CHART_OVERRIDDEN);
+
             return FixedDepositAccountData.instance(depositAccountData, preClosurePenalApplicable, preClosurePenalInterest,
                     preClosurePenalInterestOnType, minDepositTerm, maxDepositTerm, minDepositTermType, maxDepositTermType,
                     inMultiplesOfDepositTerm, inMultiplesOfDepositTermType, depositAmount, maturityAmount, maturityDate, depositPeriod,
-                    depositPeriodFrequencyType, onAccountClosureType, transferInterestToSavings, transferToSavingsId);
+                    depositPeriodFrequencyType, onAccountClosureType, transferInterestToSavings, transferToSavingsId,
+                    isRateChartOverridden);
         }
     }
 
     private static class RecurringDepositAccountMapper extends DepositAccountMapper {
 
-        public static final String PRE_CLOSURE_PENAL_APPLICABLE = "preClosurePenalApplicable";
-        public static final String PRE_CLOSURE_PENAL_INTEREST = "preClosurePenalInterest";
-        public static final String PRE_CLOSURE_PENAL_INTEREST_ON_ID = "preClosurePenalInterestOnId";
-        public static final String MIN_DEPOSIT_TERM = "minDepositTerm";
-        public static final String MAX_DEPOSIT_TERM = "maxDepositTerm";
-        public static final String MIN_DEPOSIT_TERM_TYPE_ID = "minDepositTermTypeId";
-        public static final String MAX_DEPOSIT_TERM_TYPE_ID = "maxDepositTermTypeId";
-        public static final String IN_MULTIPLES_OF_DEPOSIT_TERM = "inMultiplesOfDepositTerm";
-        public static final String IN_MULTIPLES_OF_DEPOSIT_TERM_TYPE_ID = "inMultiplesOfDepositTermTypeId";
-        public static final String DEPOSIT_AMOUNT = "depositAmount";
-        public static final String MATURITY_AMOUNT = "maturityAmount";
-        public static final String MATURITY_DATE = "maturityDate";
-        public static final String DEPOSIT_PERIOD = "depositPeriod";
-        public static final String DEPOSIT_PERIOD_FREQUENCY_TYPE_ID = "depositPeriodFrequencyTypeId";
-        public static final String MANDATORY_RECOMMENDED_DEPOSIT_AMOUNT = "mandatoryRecommendedDepositAmount";
-        public static final String TOTAL_OVERDUE_AMOUNT = "totalOverdueAmount";
-        public static final String NO_OF_OVERDUE_INSTALLMENTS = "noOfOverdueInstallments";
-        public static final String IS_MANDATORY_DEPOSIT = "isMandatoryDeposit";
-        public static final String ALLOW_WITHDRAWAL = "allowWithdrawal";
-        public static final String ADJUST_ADVANCE_TOWARDS_FUTURE_PAYMENTS = "adjustAdvanceTowardsFuturePayments";
-        public static final String IS_CALENDAR_INHERITED = "isCalendarInherited";
-        public static final String ON_ACCOUNT_CLOSURE_ID = "onAccountClosureId";
-        public static final String EXPECTED_FIRST_DEPOSIT_ON_DATE = "expectedFirstDepositOnDate";
+        private static final String PRE_CLOSURE_PENAL_APPLICABLE = "preClosurePenalApplicable";
+        private static final String PRE_CLOSURE_PENAL_INTEREST = "preClosurePenalInterest";
+        private static final String PRE_CLOSURE_PENAL_INTEREST_ON_ID = "preClosurePenalInterestOnId";
+        private static final String MIN_DEPOSIT_TERM = "minDepositTerm";
+        private static final String MAX_DEPOSIT_TERM = "maxDepositTerm";
+        private static final String MIN_DEPOSIT_TERM_TYPE_ID = "minDepositTermTypeId";
+        private static final String MAX_DEPOSIT_TERM_TYPE_ID = "maxDepositTermTypeId";
+        private static final String IN_MULTIPLES_OF_DEPOSIT_TERM = "inMultiplesOfDepositTerm";
+        private static final String IN_MULTIPLES_OF_DEPOSIT_TERM_TYPE_ID = "inMultiplesOfDepositTermTypeId";
+        private static final String DEPOSIT_AMOUNT = "depositAmount";
+        private static final String MATURITY_AMOUNT = "maturityAmount";
+        private static final String MATURITY_DATE = "maturityDate";
+        private static final String DEPOSIT_PERIOD = "depositPeriod";
+        private static final String DEPOSIT_PERIOD_FREQUENCY_TYPE_ID = "depositPeriodFrequencyTypeId";
+        private static final String MANDATORY_RECOMMENDED_DEPOSIT_AMOUNT = "mandatoryRecommendedDepositAmount";
+        private static final String TOTAL_OVERDUE_AMOUNT = "totalOverdueAmount";
+        private static final String NO_OF_OVERDUE_INSTALLMENTS = "noOfOverdueInstallments";
+        private static final String IS_MANDATORY_DEPOSIT = "isMandatoryDeposit";
+        private static final String ALLOW_WITHDRAWAL = "allowWithdrawal";
+        private static final String ADJUST_ADVANCE_TOWARDS_FUTURE_PAYMENTS = "adjustAdvanceTowardsFuturePayments";
+        private static final String IS_CALENDAR_INHERITED = "isCalendarInherited";
+        private static final String ON_ACCOUNT_CLOSURE_ID = "onAccountClosureId";
+        private static final String EXPECTED_FIRST_DEPOSIT_ON_DATE = "expectedFirstDepositOnDate";
+        private static final String IS_RATE_CHART_OVERRIDDEN = "isRateChartOverridden";
         private final String schemaSql;
 
         RecurringDepositAccountMapper() {
@@ -976,7 +985,8 @@ public class DepositAccountReadPlatformServiceImpl implements DepositAccountRead
             sqlBuilder.append("datp.maturity_date as maturityDate, ");
             sqlBuilder.append("datp.deposit_period as depositPeriod, ");
             sqlBuilder.append("datp.deposit_period_frequency_enum as depositPeriodFrequencyTypeId, ");
-            sqlBuilder.append("datp.on_account_closure_enum as onAccountClosureId ");
+            sqlBuilder.append("datp.on_account_closure_enum as onAccountClosureId, ");
+            sqlBuilder.append("datp.is_rate_chart_overridden as isRateChartOverridden ");
 
             sqlBuilder.append(this.selectTablesSql());
             sqlBuilder.append("left join m_deposit_account_recurring_detail dard on sa.id = dard.savings_account_id ");
@@ -1033,23 +1043,25 @@ public class DepositAccountReadPlatformServiceImpl implements DepositAccountRead
                     : SavingsEnumerations.depositAccountOnClosureType(onAccountClosureId);
             final LocalDate expectedFirstDepositOnDate = JdbcSupport.getLocalDate(rs, EXPECTED_FIRST_DEPOSIT_ON_DATE);
 
+            final boolean isRateChartOverridden = rs.getBoolean(IS_RATE_CHART_OVERRIDDEN);
+
             return RecurringDepositAccountData.instance(depositAccountData, preClosurePenalApplicable, preClosurePenalInterest,
                     preClosurePenalInterestOnType, minDepositTerm, maxDepositTerm, minDepositTermType, maxDepositTermType,
                     inMultiplesOfDepositTerm, inMultiplesOfDepositTermType, depositAmount, maturityAmount, maturityDate, depositPeriod,
                     depositPeriodFrequencyType, mandatoryRecommendedDepositAmount, onAccountClosureType, expectedFirstDepositOnDate,
                     totalOverdueAmount, noOfOverdueInstallments, isMandatoryDeposit, allowWithdrawal, adjustAdvanceTowardsFuturePayments,
-                    isCalendarInherited);
+                    isCalendarInherited, isRateChartOverridden);
 
         }
     }
 
     private static final class DepositAccountLookupMapper implements RowMapper<DepositAccountData> {
 
-        public static final String ID = "id";
-        public static final String ACCOUNT_NUMBER = "accountNumber";
-        public static final String DEPOSIT_TYPE_ID = "depositTypeId";
+        private static final String ID = "id";
+        private static final String ACCOUNT_NUMBER = "accountNumber";
+        private static final String DEPOSIT_TYPE_ID = "depositTypeId";
 
-        public String schema() {
+        private String schema() {
             return " sa.id as id, sa.account_no as accountNumber, sa.deposit_type_enum as depositTypeId from m_savings_account sa ";
         }
 
@@ -1067,53 +1079,65 @@ public class DepositAccountReadPlatformServiceImpl implements DepositAccountRead
 
     private static final class SavingsAccountTransactionsMapper implements RowMapper<SavingsAccountTransactionData> {
 
-        public static final String TRANSACTION_ID = "transactionId";
-        public static final String TRANSACTION_TYPE = "transactionType";
-        public static final String TRANSACTION_DATE = "transactionDate";
-        public static final String TRANSACTION_AMOUNT = "transactionAmount";
-        public static final String RUNNING_BALANCE = "runningBalance";
-        public static final String REVERSED = "reversed";
-        public static final String SAVINGS_ID = "savingsId";
-        public static final String ACCOUNT_NO = "accountNo";
-        public static final String PAYMENT_TYPE = "paymentType";
-        public static final String PAYMENT_TYPE_NAME = "paymentTypeName";
-        public static final String ACCOUNT_NUMBER = "accountNumber";
-        public static final String CHECK_NUMBER = "checkNumber";
-        public static final String ROUTING_CODE = "routingCode";
-        public static final String RECEIPT_NUMBER = "receiptNumber";
-        public static final String BANK_NUMBER = "bankNumber";
-        public static final String CURRENCY_CODE = "currencyCode";
-        public static final String CURRENCY_NAME = "currencyName";
-        public static final String CURRENCY_NAME_CODE = "currencyNameCode";
-        public static final String CURRENCY_DISPLAY_SYMBOL = "currencyDisplaySymbol";
-        public static final String CURRENCY_DIGITS = "currencyDigits";
-        public static final String IN_MULTIPLES_OF = "inMultiplesOf";
-        public static final String FROM_TRANSFER_ID = "fromTransferId";
-        public static final String TO_TRANSFER_ID = "toTransferId";
-        public static final String FROM_TRANSFER_DATE = "fromTransferDate";
-        public static final String FROM_TRANSFER_AMOUNT = "fromTransferAmount";
-        public static final String FROM_TRANSFER_REVERSED = "fromTransferReversed";
-        public static final String FROM_TRANSFER_DESCRIPTION = "fromTransferDescription";
-        public static final String TO_TRANSFER_DATE = "toTransferDate";
-        public static final String TO_TRANSFER_AMOUNT = "toTransferAmount";
-        public static final String TO_TRANSFER_REVERSED = "toTransferReversed";
-        public static final String TO_TRANSFER_DESCRIPTION = "toTransferDescription";
-        public static final String SUBMITTED_BY_USERNAME = "submittedByUsername";
-        public static final String SUBMITTED_ON_DATE = "submittedOnDate";
+        private static final String TRANSACTION_ID = "transactionId";
+        private static final String TRANSACTION_TYPE = "transactionType";
+        private static final String TRANSACTION_DATE = "transactionDate";
+        private static final String TRANSACTION_TIME = "transactionTime";
+        private static final String TRANSACTION_TIME_OFFSET = "transactionTimeOffset";
+        private static final String TRANSACTION_AMOUNT = "transactionAmount";
+        private static final String RUNNING_BALANCE = "runningBalance";
+        private static final String REVERSED = "reversed";
+        private static final String SAVINGS_ID = "savingsId";
+        private static final String ACCOUNT_NO = "accountNo";
+        private static final String PAYMENT_TYPE = "paymentType";
+        private static final String PAYMENT_TYPE_NAME = "paymentTypeName";
+        private static final String ACCOUNT_NUMBER = "accountNumber";
+        private static final String CHECK_NUMBER = "checkNumber";
+        private static final String ROUTING_CODE = "routingCode";
+        private static final String RECEIPT_NUMBER = "receiptNumber";
+        private static final String BANK_NUMBER = "bankNumber";
+        private static final String CURRENCY_CODE = "currencyCode";
+        private static final String CURRENCY_NAME = "currencyName";
+        private static final String CURRENCY_NAME_CODE = "currencyNameCode";
+        private static final String CURRENCY_DISPLAY_SYMBOL = "currencyDisplaySymbol";
+        private static final String CURRENCY_DIGITS = "currencyDigits";
+        private static final String IN_MULTIPLES_OF = "inMultiplesOf";
+        private static final String FROM_TRANSFER_ID = "fromTransferId";
+        private static final String TO_TRANSFER_ID = "toTransferId";
+        private static final String FROM_TRANSFER_DATE = "fromTransferDate";
+        private static final String FROM_TRANSFER_TIME = "fromTransferTime";
+        private static final String FROM_TRANSFER_TIME_OFFSET = "fromTransferTimeOffset";
+        private static final String FROM_TRANSFER_AMOUNT = "fromTransferAmount";
+        private static final String FROM_TRANSFER_REVERSED = "fromTransferReversed";
+        private static final String FROM_TRANSFER_DESCRIPTION = "fromTransferDescription";
+        private static final String TO_TRANSFER_DATE = "toTransferDate";
+        private static final String TO_TRANSFER_TIME = "toTransferTime";
+        private static final String TO_TRANSFER_TIME_OFFSET = "toTransferTimeOffset";
+        private static final String TO_TRANSFER_AMOUNT = "toTransferAmount";
+        private static final String TO_TRANSFER_REVERSED = "toTransferReversed";
+        private static final String TO_TRANSFER_DESCRIPTION = "toTransferDescription";
+        private static final String SUBMITTED_BY_USERNAME = "submittedByUsername";
+        private static final String SUBMITTED_ON_DATE = "submittedOnDate";
         private final String schemaSql;
 
         SavingsAccountTransactionsMapper() {
 
             final StringBuilder sqlBuilder = new StringBuilder(400);
             sqlBuilder.append("tr.id as transactionId, tr.transaction_type_enum as transactionType, ");
-            sqlBuilder.append("tr.transaction_date as transactionDate, tr.amount as transactionAmount,");
+            sqlBuilder.append(
+                    "tr.transaction_date as transactionDate, tr.transaction_time as transactionTime, tr.transaction_time_offset as transactionTimeOffset, ");
+            sqlBuilder.append("tr.amount as transactionAmount,");
             sqlBuilder.append("tr.running_balance_derived as runningBalance, tr.is_reversed as reversed,");
             sqlBuilder.append("tr.submitted_on_date as submittedOnDate,");
             sqlBuilder.append("fromtran.id as fromTransferId, fromtran.is_reversed as fromTransferReversed,");
-            sqlBuilder.append("fromtran.transaction_date as fromTransferDate, fromtran.amount as fromTransferAmount,");
+            sqlBuilder.append(
+                    "fromtran.transaction_date as fromTransferDate, fromtran.transaction_time as fromTransferTime, fromtran.transaction_time_offset as fromTransferTimeOffset, ");
+            sqlBuilder.append("fromtran.amount as fromTransferAmount,");
             sqlBuilder.append("fromtran.description as fromTransferDescription,");
             sqlBuilder.append("totran.id as toTransferId, totran.is_reversed as toTransferReversed,");
-            sqlBuilder.append("totran.transaction_date as toTransferDate, totran.amount as toTransferAmount,");
+            sqlBuilder.append(
+                    "totran.transaction_date as toTransferDate, totran.transaction_time as toTransferTime, totran.transaction_time_offset as toTransferTimeOffset, ");
+            sqlBuilder.append("totran.amount as toTransferAmount,");
             sqlBuilder.append("totran.description as toTransferDescription,");
             sqlBuilder.append("sa.id as savingsId, sa.account_no as accountNo,");
             sqlBuilder.append(" au.username as submittedByUsername, ");
@@ -1135,7 +1159,7 @@ public class DepositAccountReadPlatformServiceImpl implements DepositAccountRead
             this.schemaSql = sqlBuilder.toString();
         }
 
-        public String schema() {
+        private String schema() {
             return this.schemaSql;
         }
 
@@ -1146,6 +1170,7 @@ public class DepositAccountReadPlatformServiceImpl implements DepositAccountRead
             final SavingsAccountTransactionEnumData transactionType = SavingsEnumerations.transactionType(transactionTypeInt);
 
             final LocalDate date = JdbcSupport.getLocalDate(rs, TRANSACTION_DATE);
+            final OffsetTime transactionTime = getOffsetTime(rs, TRANSACTION_TIME, TRANSACTION_TIME_OFFSET);
             final LocalDate submittedOnDate = JdbcSupport.getLocalDate(rs, SUBMITTED_ON_DATE);
             final BigDecimal amount = JdbcSupport.getBigDecimalDefaultToZeroIfNull(rs, TRANSACTION_AMOUNT);
             final BigDecimal outstandingChargeAmount = null;
@@ -1185,61 +1210,71 @@ public class DepositAccountReadPlatformServiceImpl implements DepositAccountRead
             final Long toTransferId = JdbcSupport.getLong(rs, TO_TRANSFER_ID);
             if (fromTransferId != null) {
                 final LocalDate fromTransferDate = JdbcSupport.getLocalDate(rs, FROM_TRANSFER_DATE);
+                final OffsetTime fromTransferTime = getOffsetTime(rs, FROM_TRANSFER_TIME, FROM_TRANSFER_TIME_OFFSET);
                 final BigDecimal fromTransferAmount = JdbcSupport.getBigDecimalDefaultToZeroIfNull(rs, FROM_TRANSFER_AMOUNT);
                 final boolean fromTransferReversed = rs.getBoolean(FROM_TRANSFER_REVERSED);
                 final String fromTransferDescription = rs.getString(FROM_TRANSFER_DESCRIPTION);
 
                 transfer = AccountTransferData.transferBasicDetails(fromTransferId, currency, fromTransferAmount, fromTransferDate,
-                        fromTransferDescription, fromTransferReversed);
+                        fromTransferTime, fromTransferDescription, fromTransferReversed);
             } else if (toTransferId != null) {
                 final LocalDate toTransferDate = JdbcSupport.getLocalDate(rs, TO_TRANSFER_DATE);
+                final OffsetTime toTransferTime = getOffsetTime(rs, TO_TRANSFER_TIME, TO_TRANSFER_TIME_OFFSET);
                 final BigDecimal toTransferAmount = JdbcSupport.getBigDecimalDefaultToZeroIfNull(rs, TO_TRANSFER_AMOUNT);
                 final boolean toTransferReversed = rs.getBoolean(TO_TRANSFER_REVERSED);
                 final String toTransferDescription = rs.getString(TO_TRANSFER_DESCRIPTION);
 
                 transfer = AccountTransferData.transferBasicDetails(toTransferId, currency, toTransferAmount, toTransferDate,
-                        toTransferDescription, toTransferReversed);
+                        toTransferTime, toTransferDescription, toTransferReversed);
             }
             final boolean postInterestAsOn = false;
             final String submittedByUsername = rs.getString(SUBMITTED_BY_USERNAME);
             final String note = null;
-            return SavingsAccountTransactionData.create(id, transactionType, paymentDetailData, savingsId, accountNo, date, currency,
-                    amount, outstandingChargeAmount, runningBalance, reversed, transfer, postInterestAsOn, submittedByUsername, note,
-                    submittedOnDate);
+            return SavingsAccountTransactionData
+                    .create(id, transactionType, paymentDetailData, savingsId, accountNo, date, currency, amount, outstandingChargeAmount,
+                            runningBalance, reversed, transfer, postInterestAsOn, submittedByUsername, note, submittedOnDate)
+                    .withTransactionTime(transactionTime);
+        }
+
+        private static OffsetTime getOffsetTime(final ResultSet rs, final String timeColumn, final String offsetColumn)
+                throws SQLException {
+            final LocalTime time = JdbcSupport.getLocalTime(rs, timeColumn);
+            final Integer offset = JdbcSupport.getInteger(rs, offsetColumn);
+            return time == null ? null : OffsetTime.of(time, ZoneOffset.ofTotalSeconds(offset));
         }
     }
 
     private abstract static class DepositAccountTemplateMapper implements RowMapper<DepositAccountData> {
 
-        public static final String DEPOSIT_TYPE_ID = "depositTypeId";
-        public static final String PRODUCT_ID = "productId";
-        public static final String PRODUCT_NAME = "productName";
-        public static final String CURRENCY_CODE = "currencyCode";
-        public static final String CURRENCY_NAME = "currencyName";
-        public static final String CURRENCY_NAME_CODE = "currencyNameCode";
-        public static final String CURRENCY_DISPLAY_SYMBOL = "currencyDisplaySymbol";
-        public static final String CURRENCY_DIGITS = "currencyDigits";
-        public static final String IN_MULTIPLES_OF = "inMultiplesOf";
-        public static final String NOMINAL_ANNUAL_ITEREST_RATE = "nominalAnnualIterestRate";
-        public static final String INTEREST_COMPOUNDING_PERIOD_TYPE = "interestCompoundingPeriodType";
-        public static final String INTEREST_POSTING_PERIOD_TYPE = "interestPostingPeriodType";
-        public static final String INTEREST_CALCULATION_TYPE = "interestCalculationType";
-        public static final String INTEREST_CALCULATION_DAYS_IN_YEAR_TYPE = "interestCalculationDaysInYearType";
-        public static final String MIN_REQUIRED_OPENING_BALANCE = "minRequiredOpeningBalance";
-        public static final String LOCKIN_PERIOD_FREQUENCY = "lockinPeriodFrequency";
-        public static final String LOCKIN_PERIOD_FREQUENCY_TYPE = "lockinPeriodFrequencyType";
-        public static final String WITHDRAWAL_FEE_FOR_TRANSFERS = "withdrawalFeeForTransfers";
-        public static final String MIN_BALANCE_FOR_INTEREST_CALCULATION = "minBalanceForInterestCalculation";
-        public static final String WITH_HOLD_TAX = "withHoldTax";
-        public static final String TAX_GROUP_ID = "taxGroupId";
-        public static final String TAX_GROUP_NAME = "taxGroupName";
+        private static final String DEPOSIT_TYPE_ID = "depositTypeId";
+        private static final String PRODUCT_ID = "productId";
+        private static final String PRODUCT_NAME = "productName";
+        private static final String CURRENCY_CODE = "currencyCode";
+        private static final String CURRENCY_NAME = "currencyName";
+        private static final String CURRENCY_NAME_CODE = "currencyNameCode";
+        private static final String CURRENCY_DISPLAY_SYMBOL = "currencyDisplaySymbol";
+        private static final String CURRENCY_DIGITS = "currencyDigits";
+        private static final String IN_MULTIPLES_OF = "inMultiplesOf";
+        private static final String NOMINAL_ANNUAL_ITEREST_RATE = "nominalAnnualIterestRate";
+        private static final String INTEREST_COMPOUNDING_PERIOD_TYPE = "interestCompoundingPeriodType";
+        private static final String INTEREST_POSTING_PERIOD_TYPE = "interestPostingPeriodType";
+        private static final String INTEREST_CALCULATION_TYPE = "interestCalculationType";
+        private static final String INTEREST_CALCULATION_DAYS_IN_YEAR_TYPE = "interestCalculationDaysInYearType";
+        private static final String MIN_REQUIRED_OPENING_BALANCE = "minRequiredOpeningBalance";
+        private static final String LOCKIN_PERIOD_FREQUENCY = "lockinPeriodFrequency";
+        private static final String LOCKIN_PERIOD_FREQUENCY_TYPE = "lockinPeriodFrequencyType";
+        private static final String WITHDRAWAL_FEE_FOR_TRANSFERS = "withdrawalFeeForTransfers";
+        private static final String MIN_BALANCE_FOR_INTEREST_CALCULATION = "minBalanceForInterestCalculation";
+        private static final String WITH_HOLD_TAX = "withHoldTax";
+        private static final String TAX_GROUP_ID = "taxGroupId";
+        private static final String TAX_GROUP_NAME = "taxGroupName";
         private final String selectFieldsSql;
         private final String selectTablesSql;
 
         private final ClientData client;
         private final GroupGeneralData group;
 
-        protected DepositAccountTemplateMapper(final ClientData client, final GroupGeneralData group) {
+        DepositAccountTemplateMapper(final ClientData client, final GroupGeneralData group) {
             this.client = client;
             this.group = group;
 
@@ -1274,17 +1309,17 @@ public class DepositAccountReadPlatformServiceImpl implements DepositAccountRead
             this.selectTablesSql = selectTablesSqlBuilder.toString();
         }
 
-        public String selectFieldsSql() {
+        String selectFieldsSql() {
             return this.selectFieldsSql;
         }
 
-        public String selectTablesSql() {
+        String selectTablesSql() {
             return this.selectTablesSql;
         }
 
-        public abstract String schema();
+        abstract String schema();
 
-        public DepositAccountData mapRow(final ResultSet rs) throws SQLException {
+        DepositAccountData mapRow(final ResultSet rs) throws SQLException {
 
             final Integer depositTypeId = JdbcSupport.getInteger(rs, DEPOSIT_TYPE_ID);
             final EnumOptionData depositType = (depositTypeId == null) ? null : SavingsEnumerations.depositType(depositTypeId);
@@ -1366,15 +1401,15 @@ public class DepositAccountReadPlatformServiceImpl implements DepositAccountRead
 
     private static class FixedDepositAccountTemplateMapper extends DepositAccountTemplateMapper {
 
-        public static final String PRE_CLOSURE_PENAL_APPLICABLE = "preClosurePenalApplicable";
-        public static final String PRE_CLOSURE_PENAL_INTEREST = "preClosurePenalInterest";
-        public static final String PRE_CLOSURE_PENAL_INTEREST_ON_ID = "preClosurePenalInterestOnId";
-        public static final String MIN_DEPOSIT_TERM = "minDepositTerm";
-        public static final String MAX_DEPOSIT_TERM = "maxDepositTerm";
-        public static final String MIN_DEPOSIT_TERM_TYPE_ID = "minDepositTermTypeId";
-        public static final String MAX_DEPOSIT_TERM_TYPE_ID = "maxDepositTermTypeId";
-        public static final String IN_MULTIPLES_OF_DEPOSIT_TERM = "inMultiplesOfDepositTerm";
-        public static final String IN_MULTIPLES_OF_DEPOSIT_TERM_TYPE_ID = "inMultiplesOfDepositTermTypeId";
+        private static final String PRE_CLOSURE_PENAL_APPLICABLE = "preClosurePenalApplicable";
+        private static final String PRE_CLOSURE_PENAL_INTEREST = "preClosurePenalInterest";
+        private static final String PRE_CLOSURE_PENAL_INTEREST_ON_ID = "preClosurePenalInterestOnId";
+        private static final String MIN_DEPOSIT_TERM = "minDepositTerm";
+        private static final String MAX_DEPOSIT_TERM = "maxDepositTerm";
+        private static final String MIN_DEPOSIT_TERM_TYPE_ID = "minDepositTermTypeId";
+        private static final String MAX_DEPOSIT_TERM_TYPE_ID = "maxDepositTermTypeId";
+        private static final String IN_MULTIPLES_OF_DEPOSIT_TERM = "inMultiplesOfDepositTerm";
+        private static final String IN_MULTIPLES_OF_DEPOSIT_TERM_TYPE_ID = "inMultiplesOfDepositTermTypeId";
         private final String schemaSql;
 
         FixedDepositAccountTemplateMapper(final ClientData client, final GroupGeneralData group) {
@@ -1433,28 +1468,29 @@ public class DepositAccountReadPlatformServiceImpl implements DepositAccountRead
             final EnumOptionData depositPeriodFrequencyType = null;
             final EnumOptionData onAccountClosureType = null;
             final Boolean transferInterestToSavings = false;
+            final boolean isRateChartOverridden = false;
 
             return FixedDepositAccountData.instance(depositAccountData, preClosurePenalApplicable, preClosurePenalInterest,
                     preClosurePenalInterestOnType, minDepositTerm, maxDepositTerm, minDepositTermType, maxDepositTermType,
                     inMultiplesOfDepositTerm, inMultiplesOfDepositTermType, depositAmount, maturityAmount, maturityDate, depositPeriod,
-                    depositPeriodFrequencyType, onAccountClosureType, transferInterestToSavings, null);
+                    depositPeriodFrequencyType, onAccountClosureType, transferInterestToSavings, null, isRateChartOverridden);
         }
     }
 
     private static class RecurringDepositAccountTemplateMapper extends DepositAccountTemplateMapper {
 
-        public static final String PRE_CLOSURE_PENAL_APPLICABLE = "preClosurePenalApplicable";
-        public static final String PRE_CLOSURE_PENAL_INTEREST = "preClosurePenalInterest";
-        public static final String PRE_CLOSURE_PENAL_INTEREST_ON_ID = "preClosurePenalInterestOnId";
-        public static final String MIN_DEPOSIT_TERM = "minDepositTerm";
-        public static final String MAX_DEPOSIT_TERM = "maxDepositTerm";
-        public static final String MIN_DEPOSIT_TERM_TYPE_ID = "minDepositTermTypeId";
-        public static final String MAX_DEPOSIT_TERM_TYPE_ID = "maxDepositTermTypeId";
-        public static final String IN_MULTIPLES_OF_DEPOSIT_TERM = "inMultiplesOfDepositTerm";
-        public static final String IN_MULTIPLES_OF_DEPOSIT_TERM_TYPE_ID = "inMultiplesOfDepositTermTypeId";
-        public static final String IS_MANDATORY_DEPOSIT = "isMandatoryDeposit";
-        public static final String ALLOW_WITHDRAWAL = "allowWithdrawal";
-        public static final String ADJUST_ADVANCE_TOWARDS_FUTURE_PAYMENTS = "adjustAdvanceTowardsFuturePayments";
+        private static final String PRE_CLOSURE_PENAL_APPLICABLE = "preClosurePenalApplicable";
+        private static final String PRE_CLOSURE_PENAL_INTEREST = "preClosurePenalInterest";
+        private static final String PRE_CLOSURE_PENAL_INTEREST_ON_ID = "preClosurePenalInterestOnId";
+        private static final String MIN_DEPOSIT_TERM = "minDepositTerm";
+        private static final String MAX_DEPOSIT_TERM = "maxDepositTerm";
+        private static final String MIN_DEPOSIT_TERM_TYPE_ID = "minDepositTermTypeId";
+        private static final String MAX_DEPOSIT_TERM_TYPE_ID = "maxDepositTermTypeId";
+        private static final String IN_MULTIPLES_OF_DEPOSIT_TERM = "inMultiplesOfDepositTerm";
+        private static final String IN_MULTIPLES_OF_DEPOSIT_TERM_TYPE_ID = "inMultiplesOfDepositTermTypeId";
+        private static final String IS_MANDATORY_DEPOSIT = "isMandatoryDeposit";
+        private static final String ALLOW_WITHDRAWAL = "allowWithdrawal";
+        private static final String ADJUST_ADVANCE_TOWARDS_FUTURE_PAYMENTS = "adjustAdvanceTowardsFuturePayments";
         private final String schemaSql;
 
         RecurringDepositAccountTemplateMapper(final ClientData client, final GroupGeneralData group) {
@@ -1513,6 +1549,7 @@ public class DepositAccountReadPlatformServiceImpl implements DepositAccountRead
             final boolean allowWithdrawal = rs.getBoolean(ALLOW_WITHDRAWAL);
             final boolean adjustAdvanceTowardsFuturePayments = rs.getBoolean(ADJUST_ADVANCE_TOWARDS_FUTURE_PAYMENTS);
             final boolean isCalendarInherited = false;
+            final boolean isRateChartOverridden = false;
 
             final BigDecimal depositAmount = null;
             final BigDecimal maturityAmount = null;
@@ -1530,17 +1567,17 @@ public class DepositAccountReadPlatformServiceImpl implements DepositAccountRead
                     inMultiplesOfDepositTerm, inMultiplesOfDepositTermType, depositAmount, maturityAmount, maturityDate, depositPeriod,
                     depositPeriodFrequencyType, mandatoryRecommendedDepositAmount, onAccountClosureType, expectedFirstDepositOnDate,
                     totalOverdueAmount, noOfOverdueInstallments, isMandatoryDeposit, allowWithdrawal, adjustAdvanceTowardsFuturePayments,
-                    isCalendarInherited);
+                    isCalendarInherited, isRateChartOverridden);
         }
     }
 
     private static final class DepositAccountForMaturityMapper implements RowMapper<DepositAccountData> {
 
-        public static final String ID = "id";
-        public static final String ACCOUNT_NUMBER = "accountNumber";
-        public static final String DEPOSIT_TYPE_ID = "depositTypeId";
+        private static final String ID = "id";
+        private static final String ACCOUNT_NUMBER = "accountNumber";
+        private static final String DEPOSIT_TYPE_ID = "depositTypeId";
 
-        public String schema() {
+        private String schema() {
             LocalDate today = DateUtils.getBusinessLocalDate();
             String formattedToday = DATE_TIME_FORMATTER.format(today);
             final StringBuilder sqlBuilder = new StringBuilder(200);
@@ -1568,18 +1605,18 @@ public class DepositAccountReadPlatformServiceImpl implements DepositAccountRead
 
     private static final class RecurringAccountDepositTransactionTemplateMapper implements RowMapper<SavingsAccountTransactionData> {
 
-        public static final String ID = "id";
-        public static final String ACCOUNT_NO = "accountNo";
-        public static final String DUEAMOUNT = "dueamount";
-        public static final String OUTSTANDING_CHARGE_AMOUNT = "outstandingChargeAmount";
-        public static final String DUEDATE = "duedate";
-        public static final String CURRENCY_CODE = "currencyCode";
-        public static final String CURRENCY_NAME = "currencyName";
-        public static final String CURRENCY_NAME_CODE = "currencyNameCode";
-        public static final String CURRENCY_DISPLAY_SYMBOL = "currencyDisplaySymbol";
-        public static final String CURRENCY_DIGITS = "currencyDigits";
-        public static final String IN_MULTIPLES_OF = "inMultiplesOf";
-        public static final String RUNNING_BALANCE = "runningBalance";
+        private static final String ID = "id";
+        private static final String ACCOUNT_NO = "accountNo";
+        private static final String DUEAMOUNT = "dueamount";
+        private static final String OUTSTANDING_CHARGE_AMOUNT = "outstandingChargeAmount";
+        private static final String DUEDATE = "duedate";
+        private static final String CURRENCY_CODE = "currencyCode";
+        private static final String CURRENCY_NAME = "currencyName";
+        private static final String CURRENCY_NAME_CODE = "currencyNameCode";
+        private static final String CURRENCY_DISPLAY_SYMBOL = "currencyDisplaySymbol";
+        private static final String CURRENCY_DIGITS = "currencyDigits";
+        private static final String IN_MULTIPLES_OF = "inMultiplesOf";
+        private static final String RUNNING_BALANCE = "runningBalance";
         private final String schemaSql;
 
         RecurringAccountDepositTransactionTemplateMapper() {
@@ -1606,7 +1643,7 @@ public class DepositAccountReadPlatformServiceImpl implements DepositAccountRead
             this.schemaSql = sqlBuilder.toString();
         }
 
-        public String schema() {
+        private String schema() {
             return this.schemaSql;
         }
 
@@ -1643,11 +1680,11 @@ public class DepositAccountReadPlatformServiceImpl implements DepositAccountRead
 
     private static class AccountTransferMapper implements RowMapper<AccountTransferDTO> {
 
-        public static final String FROM_ACC = "fromAcc";
-        public static final String TO_ACC = "toAcc";
-        public static final String AMOUNT = "amount";
-        public static final String TRANSACTION_DATE = "transactionDate";
-        public static final String TRANSFER_INTEREST_TO_SAVINGS = "transfer interest to savings";
+        private static final String FROM_ACC = "fromAcc";
+        private static final String TO_ACC = "toAcc";
+        private static final String AMOUNT = "amount";
+        private static final String TRANSACTION_DATE = "transactionDate";
+        private static final String TRANSFER_INTEREST_TO_SAVINGS = "transfer interest to savings";
         private final String schemaSql;
 
         AccountTransferMapper() {
@@ -1661,7 +1698,7 @@ public class DepositAccountReadPlatformServiceImpl implements DepositAccountRead
             schemaSql = sqlBuilder.toString();
         }
 
-        public String schema() {
+        private String schema() {
             return this.schemaSql;
         }
 
@@ -1675,8 +1712,8 @@ public class DepositAccountReadPlatformServiceImpl implements DepositAccountRead
             final LocalDate transactionDate = JdbcSupport.getLocalDate(rs, TRANSACTION_DATE);
             return new AccountTransferDTO(transactionDate, transactionAmount, PortfolioAccountType.SAVINGS, PortfolioAccountType.SAVINGS,
                     fromAccountId, toAccountId, TRANSFER_INTEREST_TO_SAVINGS, null, null, null, null, null, null, null,
-                    AccountTransferType.INTEREST_TRANSFER.getValue(), null, null, ExternalId.empty(), null, null, null,
-                    isRegularTransaction, isExceptionForBalanceCheck);
+                    AccountTransferType.INTEREST_TRANSFER.getValue(), null, ExternalId.empty(), null, null, null, isRegularTransaction,
+                    isExceptionForBalanceCheck);
         }
 
     }

@@ -18,128 +18,121 @@
  */
 package org.apache.fineract.integrationtests;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import io.restassured.builder.RequestSpecBuilder;
-import io.restassured.builder.ResponseSpecBuilder;
-import io.restassured.http.ContentType;
-import io.restassured.specification.RequestSpecification;
-import io.restassured.specification.ResponseSpecification;
-import java.util.HashMap;
-import java.util.List;
-import org.apache.fineract.integrationtests.common.ClientHelper;
-import org.apache.fineract.integrationtests.common.CommonConstants;
-import org.apache.fineract.integrationtests.common.SchedulerJobHelper;
-import org.apache.fineract.integrationtests.common.Utils;
-import org.apache.fineract.integrationtests.common.savings.SavingsAccountHelper;
-import org.apache.fineract.integrationtests.common.savings.SavingsProductHelper;
-import org.apache.fineract.integrationtests.common.savings.SavingsStatusChecker;
-import org.apache.fineract.integrationtests.common.savings.SavingsTestLifecycleExtension;
-import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.BeforeEach;
+import java.math.BigDecimal;
+import org.apache.fineract.client.feign.util.CallFailedRuntimeException;
+import org.apache.fineract.client.models.PostSavingsProductsRequest;
+import org.apache.fineract.client.models.SavingsAccountSummaryData;
+import org.apache.fineract.client.models.SavingsAccountTransactionData;
+import org.apache.fineract.integrationtests.client.feign.FeignSavingsTestBase;
+import org.apache.fineract.integrationtests.client.feign.modules.SavingsRequestBuilders;
+import org.apache.fineract.integrationtests.client.feign.modules.SavingsTestData;
+import org.apache.fineract.integrationtests.client.feign.modules.SavingsTestValidators;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
 
-@ExtendWith({ SavingsTestLifecycleExtension.class })
-public class SavingsAccountBalanceCheckAfterReversalTest {
+public class SavingsAccountBalanceCheckAfterReversalTest extends FeignSavingsTestBase {
 
-    public static final String ACCOUNT_TYPE_INDIVIDUAL = "INDIVIDUAL";
-    public static final String START_DATE = "10 April 2022";
-    private ResponseSpecification responseSpec;
-    private RequestSpecification requestSpec;
-    private SavingsProductHelper savingsProductHelper;
-    private SavingsAccountHelper savingsAccountHelper;
-    private SchedulerJobHelper scheduleJobHelper;
+    private static final String START_DATE = "10 April 2022";
+    private static final BigDecimal OVERDRAFT_LIMIT = new BigDecimal("10000");
+    private static final String INSUFFICIENT_BALANCE_ERROR = "error.msg.savingsaccount.transaction.insufficient.account.balance";
+    private static final String POST_INTEREST_JOB_NAME = "Post Interest For Savings";
 
-    @BeforeEach
-    public void setup() {
-        Utils.initializeRESTAssured();
-        this.requestSpec = new RequestSpecBuilder().setContentType(ContentType.JSON).build();
-        this.requestSpec.header("Authorization", "Basic " + Utils.loginIntoServerAndGetBase64EncodedAuthenticationKey());
-        this.responseSpec = new ResponseSpecBuilder().expectStatusCode(200).build();
-        this.savingsAccountHelper = new SavingsAccountHelper(this.requestSpec, this.responseSpec);
-        this.savingsProductHelper = new SavingsProductHelper();
-        this.scheduleJobHelper = new SchedulerJobHelper(requestSpec);
-    }
-
-    @SuppressWarnings("unchecked")
     @Test
     public void testSavingsBalanceAfterWithdrawal() {
-        SavingsAccountHelper savingsAccountHelperValidationError = new SavingsAccountHelper(this.requestSpec,
-                new ResponseSpecBuilder().build());
-        final Integer clientID = ClientHelper.createClient(this.requestSpec, this.responseSpec, START_DATE);
-        Assertions.assertNotNull(clientID);
-        final Integer savingsId = createSavingsAccountDailyPosting(clientID);
-        Integer depositTransactionId = (Integer) this.savingsAccountHelper.depositToSavingsAccount(savingsId, "10000", START_DATE,
-                CommonConstants.RESPONSE_RESOURCE_ID);
-        this.savingsAccountHelper.reverseSavingsAccountTransaction(savingsId, depositTransactionId);
-        HashMap reversedDepositTransaction = this.savingsAccountHelper.getSavingsTransaction(savingsId, depositTransactionId);
-        Assertions.assertTrue((Boolean) reversedDepositTransaction.get("reversed"));
-        HashMap summary = this.savingsAccountHelper.getSavingsSummary(savingsId);
-        Float balance = Float.parseFloat("0.0");
-        assertEquals(balance, summary.get("accountBalance"), "Verifying opening Balance is 0");
-        List<HashMap> error = (List<HashMap>) savingsAccountHelperValidationError.withdrawalFromSavingsAccount(savingsId, "100", START_DATE,
-                CommonConstants.RESPONSE_ERROR);
-        assertEquals("error.msg.savingsaccount.transaction.insufficient.account.balance",
-                error.get(0).get(CommonConstants.RESPONSE_ERROR_MESSAGE_CODE));
+        Long clientId = createClient(START_DATE);
+        assertNotNull(clientId);
+
+        Long savingsId = createSavingsAccountDailyPosting(clientId);
+
+        Long depositTransactionId = deposit(savingsId, "10000", START_DATE).getResourceId();
+        savingsTransactionHelper.reverseTransaction(savingsId, depositTransactionId);
+
+        SavingsAccountTransactionData reversedDeposit = savingsTransactionHelper.getTransaction(savingsId, depositTransactionId);
+        assertTrue(reversedDeposit.getReversed(), "Deposit transaction was not reversed");
+
+        SavingsTestValidators.verifyAmount(BigDecimal.ZERO, savingsHelper.getSavingsSummary(savingsId).getAccountBalance(),
+                "Verifying opening Balance is 0");
+
+        CallFailedRuntimeException error = savingsTransactionHelper.withdrawExpectingError(savingsId, "100", START_DATE);
+        SavingsTestValidators.verifyFirstErrorCode(INSUFFICIENT_BALANCE_ERROR, error);
     }
 
     @Test
     public void testSavingsBalanceWithOverDraftAfterWithdrawal() {
-        final Integer clientID = ClientHelper.createClient(this.requestSpec, this.responseSpec, START_DATE);
-        Assertions.assertNotNull(clientID);
-        final Integer savingsId = createSavingsAccountDailyPostingWithOverDraft(clientID);
-        Integer withdrawalTransactionId = (Integer) this.savingsAccountHelper.withdrawalFromSavingsAccount(savingsId, "1000", START_DATE,
-                CommonConstants.RESPONSE_RESOURCE_ID);
-        this.savingsAccountHelper.reverseSavingsAccountTransaction(savingsId, withdrawalTransactionId);
-        HashMap reversedWithdrawalTransaction = this.savingsAccountHelper.getSavingsTransaction(savingsId, withdrawalTransactionId);
-        Assertions.assertTrue((Boolean) reversedWithdrawalTransaction.get("reversed"));
-        HashMap summary = this.savingsAccountHelper.getSavingsSummary(savingsId);
-        Float balance = Float.parseFloat("0.0");
-        assertEquals(balance, summary.get("accountBalance"), "Verifying Balance is 0");
-        Integer withdrawalAfterReversalTransactionId = (Integer) savingsAccountHelper.withdrawalFromSavingsAccount(savingsId, "500",
-                START_DATE, CommonConstants.RESPONSE_RESOURCE_ID);
-        summary = this.savingsAccountHelper.getSavingsSummary(savingsId);
-        balance = Float.parseFloat("-500.0");
-        assertEquals(balance, summary.get("accountBalance"), "Verifying Balance is -500");
+        Long clientId = createClient(START_DATE);
+        assertNotNull(clientId);
+
+        Long savingsId = createSavingsAccountDailyPostingWithOverDraft(clientId);
+
+        Long withdrawalTransactionId = withdraw(savingsId, "1000", START_DATE).getResourceId();
+        savingsTransactionHelper.reverseTransaction(savingsId, withdrawalTransactionId);
+
+        SavingsAccountTransactionData reversedWithdrawal = savingsTransactionHelper.getTransaction(savingsId, withdrawalTransactionId);
+        assertTrue(reversedWithdrawal.getReversed(), "Withdrawal transaction was not reversed");
+
+        SavingsTestValidators.verifyAmount(BigDecimal.ZERO, savingsHelper.getSavingsSummary(savingsId).getAccountBalance(),
+                "Verifying Balance is 0");
+
+        withdraw(savingsId, "500", START_DATE);
+        SavingsTestValidators.verifyAmount(new BigDecimal("-500"), savingsHelper.getSavingsSummary(savingsId).getAccountBalance(),
+                "Verifying Balance is -500");
     }
 
-    private Integer createSavingsAccountDailyPosting(final Integer clientID) {
-        final Integer savingsProductID = createSavingsProductDailyPosting();
-        Assertions.assertNotNull(savingsProductID);
-        final Integer savingsId = this.savingsAccountHelper.applyForSavingsApplicationOnDate(clientID, savingsProductID,
-                ACCOUNT_TYPE_INDIVIDUAL, START_DATE);
-        Assertions.assertNotNull(savingsId);
-        HashMap savingsStatusHashMap = this.savingsAccountHelper.approveSavingsOnDate(savingsId, START_DATE);
-        SavingsStatusChecker.verifySavingsIsApproved(savingsStatusHashMap);
-        savingsStatusHashMap = this.savingsAccountHelper.activateSavingsAccount(savingsId, START_DATE);
-        SavingsStatusChecker.verifySavingsIsActive(savingsStatusHashMap);
+    @Test
+    public void testPostInterestJobKeepsReversedDepositReversed() {
+        final Long clientId = createClient("01 March 2019");
+        final Long productId = createSavingsProduct(
+                SavingsRequestBuilders
+                        .savingsProduct(SavingsTestData.InterestCompoundingPeriodType.MONTHLY,
+                                SavingsTestData.InterestPostingPeriodType.MONTHLY, SavingsTestData.InterestCalculationType.DAILY_BALANCE)
+                        .nominalAnnualInterestRate(11.0))
+                .getResourceId();
+        final Long savingsId = createApproveActivateSavings(clientId, productId, "01 March 2019");
+        deposit(savingsId, "20013", "01 March 2019");
+        final Long reversedDepositId = deposit(savingsId, "1000", "10 March 2019").getResourceId();
+        runAt("12 March 2019", () -> savingsTransactionHelper.reverseTransaction(savingsId, reversedDepositId));
+
+        runAt("01 April 2019", () -> schedulerHelper.executeAndAwaitJob(POST_INTEREST_JOB_NAME));
+
+        final SavingsAccountSummaryData summary = savingsHelper.getSavingsSummary(savingsId);
+        // 20013 x 11% x 31 / 365: the reversed deposit earns no interest
+        SavingsTestValidators.verifyAmount(new BigDecimal("186.9708"), summary.getTotalInterestPosted(), "Interest posted by the job");
+        SavingsTestValidators.verifyAmount(new BigDecimal("20013"), summary.getTotalDeposits(), "The reversed deposit must not count");
+        SavingsTestValidators.verifyAmount(new BigDecimal("20199.9708"), summary.getAccountBalance(), "Balance after the job");
+        final SavingsAccountTransactionData reversal = savingsTransactionHelper.getTransactions(savingsId).stream()
+                .filter(transaction -> reversedDepositId.equals(transaction.getOriginalTransactionId())).findFirst().orElseThrow();
+        assertTrue(Boolean.TRUE.equals(reversal.getIsReversal()), "The job must keep the reversal transaction of the deposit");
+    }
+
+    private Long createSavingsAccountDailyPosting(final Long clientId) {
+        Long productId = createSavingsProduct(dailyPostingProduct()).getResourceId();
+        assertNotNull(productId);
+        return approveAndActivate(clientId, productId);
+    }
+
+    private Long createSavingsAccountDailyPostingWithOverDraft(final Long clientId) {
+        Long productId = savingsProductHelper
+                .createSavingsProduct(dailyPostingProduct().allowOverdraft(true).overdraftLimit(OVERDRAFT_LIMIT)).getResourceId();
+        assertNotNull(productId);
+        return approveAndActivate(clientId, productId);
+    }
+
+    private PostSavingsProductsRequest dailyPostingProduct() {
+        return SavingsRequestBuilders.savingsProduct(SavingsTestData.InterestCompoundingPeriodType.DAILY,
+                SavingsTestData.InterestPostingPeriodType.DAILY, SavingsTestData.InterestCalculationType.DAILY_BALANCE);
+    }
+
+    private Long approveAndActivate(final Long clientId, final Long productId) {
+        Long savingsId = submitSavingsApplication(clientId, productId, START_DATE).getSavingsId();
+        assertNotNull(savingsId);
+
+        approveSavings(savingsId, START_DATE);
+        SavingsTestValidators.verifySavingsIsApproved(savingsHelper.getSavingsStatus(savingsId));
+
+        activateSavings(savingsId, START_DATE);
+        SavingsTestValidators.verifySavingsIsActive(savingsHelper.getSavingsStatus(savingsId));
         return savingsId;
     }
-
-    private Integer createSavingsAccountDailyPostingWithOverDraft(final Integer clientID) {
-        final Integer savingsProductID = createSavingsProductDailyPostingWithOverDraft();
-        Assertions.assertNotNull(savingsProductID);
-        final Integer savingsId = this.savingsAccountHelper.applyForSavingsApplicationOnDate(clientID, savingsProductID,
-                ACCOUNT_TYPE_INDIVIDUAL, START_DATE);
-        Assertions.assertNotNull(savingsId);
-        HashMap savingsStatusHashMap = this.savingsAccountHelper.approveSavingsOnDate(savingsId, START_DATE);
-        SavingsStatusChecker.verifySavingsIsApproved(savingsStatusHashMap);
-        savingsStatusHashMap = this.savingsAccountHelper.activateSavingsAccount(savingsId, START_DATE);
-        SavingsStatusChecker.verifySavingsIsActive(savingsStatusHashMap);
-        return savingsId;
-    }
-
-    private Integer createSavingsProductDailyPosting() {
-        final String savingsProductJSON = this.savingsProductHelper.withInterestCompoundingPeriodTypeAsDaily()
-                .withInterestPostingPeriodTypeAsDaily().withInterestCalculationPeriodTypeAsDailyBalance().build();
-        return SavingsProductHelper.createSavingsProduct(savingsProductJSON, requestSpec, responseSpec);
-    }
-
-    private Integer createSavingsProductDailyPostingWithOverDraft() {
-        final String savingsProductJSON = this.savingsProductHelper.withInterestCompoundingPeriodTypeAsDaily()
-                .withInterestPostingPeriodTypeAsDaily().withInterestCalculationPeriodTypeAsDailyBalance().withOverDraft("10000").build();
-        return SavingsProductHelper.createSavingsProduct(savingsProductJSON, requestSpec, responseSpec);
-    }
-
 }

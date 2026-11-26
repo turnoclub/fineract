@@ -45,8 +45,6 @@ import org.apache.fineract.organisation.teller.data.CashierTransactionData;
 import org.apache.fineract.organisation.teller.data.CashierTransactionTypeTotalsData;
 import org.apache.fineract.organisation.teller.data.CashierTransactionsWithSummaryData;
 import org.apache.fineract.organisation.teller.data.TellerData;
-import org.apache.fineract.organisation.teller.data.TellerJournalData;
-import org.apache.fineract.organisation.teller.data.TellerTransactionData;
 import org.apache.fineract.organisation.teller.domain.CashierTxnType;
 import org.apache.fineract.organisation.teller.domain.TellerStatus;
 import org.apache.fineract.useradministration.domain.AppUser;
@@ -70,7 +68,7 @@ public class TellerManagementReadPlatformServiceImpl implements TellerManagement
 
     private static final class TellerMapper implements RowMapper<TellerData> {
 
-        public String schema() {
+        private String schema() {
 
             final StringBuilder sqlBuilder = new StringBuilder(400);
 
@@ -155,36 +153,6 @@ public class TellerManagementReadPlatformServiceImpl implements TellerManagement
         } catch (final EmptyResultDataAccessException e) {
             throw new StaffNotFoundException(cashierId, e);
         }
-    }
-
-    @Override
-    public Collection<CashierData> getCashierData(Long officeId, Long tellerId, Long staffId, LocalDate date) {
-        // TODO Auto-generated method stub
-        return null;
-    }
-
-    @Override
-    public TellerTransactionData findTellerTransaction(Long transactionId) {
-        // TODO Auto-generated method stub
-        return null;
-    }
-
-    @Override
-    public Collection<TellerTransactionData> fetchTellerTransactionsByTellerId(Long tellerId, LocalDate fromDate, LocalDate toDate) {
-        // TODO Auto-generated method stub
-        return null;
-    }
-
-    @Override
-    public Collection<TellerJournalData> getJournals(Long officeId, Long tellerId, Long cashierId, LocalDate dateFrom, LocalDate dateTo) {
-        // TODO Auto-generated method stub
-        return null;
-    }
-
-    @Override
-    public Collection<TellerJournalData> fetchTellerJournals(Long tellerId, Long cashierId, LocalDate fromDate, LocalDate toDate) {
-        // TODO Auto-generated method stub
-        return null;
     }
 
     @Cacheable(value = "tellers", key = "T(org.apache.fineract.infrastructure.core.service.ThreadLocalContextUtil).getTenant().getTenantIdentifier().concat(#root.target.context.authenticatedUser().getOffice().getHierarchy()+'of')")
@@ -356,7 +324,7 @@ public class TellerManagementReadPlatformServiceImpl implements TellerManagement
 
     private static final class CashierMapper implements RowMapper<CashierData> {
 
-        public String schema() {
+        private String schema() {
 
             final StringBuilder sqlBuilder = new StringBuilder(400);
 
@@ -394,7 +362,7 @@ public class TellerManagementReadPlatformServiceImpl implements TellerManagement
 
     private static final class CashierTransactionMapper implements RowMapper<CashierTransactionData> {
 
-        public String cashierTxnSchema() {
+        private String cashierTxnSchema() {
 
             final StringBuilder sqlBuilder = new StringBuilder(400);
 
@@ -413,7 +381,7 @@ public class TellerManagementReadPlatformServiceImpl implements TellerManagement
             return sqlBuilder.toString();
         }
 
-        public String savingsTxnSchema() {
+        private String savingsTxnSchema() {
 
             final StringBuilder sqlBuilder = new StringBuilder(400);
 
@@ -451,7 +419,7 @@ public class TellerManagementReadPlatformServiceImpl implements TellerManagement
             return sqlBuilder.toString();
         }
 
-        public String loansTxnSchema() {
+        private String loansTxnSchema() {
 
             final StringBuilder sqlBuilder = new StringBuilder(400);
 
@@ -489,7 +457,7 @@ public class TellerManagementReadPlatformServiceImpl implements TellerManagement
             return sqlBuilder.toString();
         }
 
-        public String clientTxnSchema() {
+        private String clientTxnSchema() {
 
             final StringBuilder sqlBuilder = new StringBuilder(400);
 
@@ -558,7 +526,7 @@ public class TellerManagementReadPlatformServiceImpl implements TellerManagement
 
     private static final class CashierTransactionSummaryMapper implements RowMapper<CashierTransactionTypeTotalsData> {
 
-        public String cashierTxnSummarySchema(String nextDay) {
+        private String cashierTxnSummarySchema(String nextDay) {
 
             final StringBuilder sqlBuilder = new StringBuilder(400);
 

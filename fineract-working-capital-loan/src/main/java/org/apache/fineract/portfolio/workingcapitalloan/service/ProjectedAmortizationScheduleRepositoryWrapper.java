@@ -23,12 +23,17 @@ import java.util.Optional;
 import org.apache.fineract.organisation.monetary.data.CurrencyData;
 import org.apache.fineract.portfolio.workingcapitalloan.calc.ProjectedAmortizationScheduleModel;
 import org.apache.fineract.portfolio.workingcapitalloan.domain.WorkingCapitalLoan;
-import org.springframework.lang.NonNull;
+import org.jspecify.annotations.NonNull;
 
 public interface ProjectedAmortizationScheduleRepositoryWrapper {
 
     Optional<ProjectedAmortizationScheduleModel> readModel(Long loanId, @NonNull MathContext mc, @NonNull CurrencyData currency);
 
     void writeModel(@NonNull WorkingCapitalLoan loan, @NonNull ProjectedAmortizationScheduleModel model);
+
+    /**
+     * Removes the loan's persisted model, if any, so the loan is left without a projection like a never approved one.
+     */
+    void deleteModel(@NonNull WorkingCapitalLoan loan);
 
 }

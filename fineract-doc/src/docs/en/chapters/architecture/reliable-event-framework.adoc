@@ -316,11 +316,22 @@ When you stop recording using the method above, all the recorded events will be 
 
 From then on, the bulk event works just like any of the event. It'll be picked up by the processor to send it to a message channel.
 
+=== Bulk events on reverse-replay
+When a backdated transaction, a reversal or another change makes Fineract re-process the later transactions of a loan or a working capital loan, the adjustments it causes reach the consumer together, also when one command both reverses a transaction and books its replacement with a new amount. If there is nothing to report, nothing is sent. A single adjustment is sent as a regular `LoanAdjustTransactionBusinessEvent` or `WorkingCapitalLoanAdjustTransactionBusinessEvent`. Two or more are sent as one `BulkBusinessEvent` with one adjust event per transaction, in replay order. If a bulk event is already being recorded higher up, for example by a COB run with bulk events enabled, the adjustments join it.
+
+A charge-off that the re-processing reverses because nothing is left to charge off is one of the replayed transactions: its reversal is reported inside the bulk event like any other replayed transaction, and the lifted charge-off is additionally announced by a separate `WorkingCapitalLoanUndoChargeOffBusinessEvent`. The event of the operation that triggered the re-processing, such as the reversal of the transaction the user reversed, the event of the new backdated transaction or the adjust event that pairs an adjusted transaction with its replacement, is posted separately, and so are the discount fee amortization adjustments of a working capital loan.
+
+A charge added to an overpaid loan is paid out of the overpayment of earlier repayments. A loan re-processes its transactions for that; a working capital loan moves the amount from the overpayment portion of those repayments to their fee or penalty portion in place, oldest repayment first. Either way, every repayment whose split changes is reported under the same rules, and the event of the added charge is posted separately.
+
+The payload differs between the two loan types. A loan replaces each replayed transaction: `transactionToAdjust` is the reversed original and `newTransactionDetail` is the new transaction, with a new id, or empty when the replay only reverses the transaction. A working capital loan updates the allocation in place and reports only the transactions whose split changed: `transactionToAdjust` and `newTransactionDetail` hold the state of the same transaction id before and after the re-processing. A working capital transaction that the re-processing reverses is reported like any other working capital reversal: `transactionToAdjust` is the reversed transaction and `newTransactionDetail` is empty.
+
 === Event categories [[event-categories]]
 TBD
 
 === Selective event producing
-TBD
+Every event type has a row in the `m_external_event_configuration` table with an `enabled` flag, maintained through the `/externalevents/configuration` API. A disabled event type is still raised internally (its listeners run as usual) but no external event is created for it, neither on its own nor as an item of a bulk event.
+
+Some events are derived from a transaction of another type: the transaction adjustment events (`LoanAdjustTransactionBusinessEvent`, `WorkingCapitalLoanAdjustTransactionBusinessEvent`) are one event type regardless of which transaction got adjusted. Such an event implements `DependentExternalEvent` and names the event type of the adjusted transaction type (for example `LoanReAgeTransactionBusinessEvent` for a re-age); it's only posted externally when both its own type and that governing type are enabled. Disabling a transaction type's event therefore also silences the adjustments of that transaction type, including the ones raised by a reverse-replay. Transaction types without an event of their own are governed by the adjustment event alone.
 
 == Customizations
 The framework provides a number of customization options:
@@ -438,5 +449,30 @@ NOTE: All the default serializers are having `Ordered.LOWEST_PRECEDENCE`.
 |`FINERACT_EXTERNAL_EVENTS_ENABLED`
 |`false`
 |Whether the external event sending is enabled or disabled.
+
+|`fineract.events.external.thread-pool-core-pool-size`
+|`FINERACT_EVENT_TASK_EXECUTOR_CORE_POOL_SIZE`
+|`2`
+|Core size of the thread pool that marks published events as sent in the database. Separate from the JMS producer pool below.
+
+|`fineract.events.external.thread-pool-max-pool-size`
+|`FINERACT_EVENT_TASK_EXECUTOR_MAX_POOL_SIZE`
+|`25`
+|Maximum size of the thread pool that marks published events as sent.
+
+|`fineract.events.external.thread-pool-queue-capacity`
+|`FINERACT_EVENT_TASK_EXECUTOR_QUEUE_CAPACITY`
+|`500`
+|Queue capacity of the thread pool that marks published events as sent.
+
+|`fineract.events.external.producer.jms.thread-pool-task-executor-core-pool-size`
+|`FINERACT_EXTERNAL_EVENTS_PRODUCER_JMS_TASK_EXECUTOR_CORE_POOL_SIZE`
+|`10`
+|Core size of the thread pool that sends events to the JMS broker. Used only when the JMS producer is enabled. Earlier versions sized this pool with `FINERACT_EVENT_TASK_EXECUTOR_CORE_POOL_SIZE`.
+
+|`fineract.events.external.producer.jms.thread-pool-task-executor-max-pool-size`
+|`FINERACT_EXTERNAL_EVENTS_PRODUCER_JMS_TASK_EXECUTOR_MAX_POOL_SIZE`
+|`100`
+|Maximum size of the thread pool that sends events to the JMS broker. Earlier versions sized this pool with `FINERACT_EVENT_TASK_EXECUTOR_MAX_POOL_SIZE`.
 
 |===

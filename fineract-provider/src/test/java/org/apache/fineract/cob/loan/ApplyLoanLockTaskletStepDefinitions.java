@@ -42,26 +42,29 @@ import org.apache.fineract.infrastructure.core.domain.FineractPlatformTenant;
 import org.apache.fineract.infrastructure.core.service.ThreadLocalContextUtil;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
-import org.springframework.batch.core.JobExecution;
-import org.springframework.batch.core.StepContribution;
-import org.springframework.batch.core.StepExecution;
-import org.springframework.batch.item.ExecutionContext;
-import org.springframework.batch.repeat.RepeatStatus;
+import org.springframework.batch.core.job.JobExecution;
+import org.springframework.batch.core.job.JobInstance;
+import org.springframework.batch.core.job.parameters.JobParameters;
+import org.springframework.batch.core.step.StepContribution;
+import org.springframework.batch.core.step.StepExecution;
+import org.springframework.batch.infrastructure.item.ExecutionContext;
+import org.springframework.batch.infrastructure.repeat.RepeatStatus;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 public class ApplyLoanLockTaskletStepDefinitions implements En {
 
-    ArgumentCaptor<List> valueCaptor = ArgumentCaptor.forClass(List.class);
-    ArgumentCaptor<LockOwner> lockOwnerValueCaptor = ArgumentCaptor.forClass(LockOwner.class);
+    @SuppressWarnings("unchecked")
+    private final ArgumentCaptor<List<Long>> valueCaptor = ArgumentCaptor.forClass(List.class);
+    private final ArgumentCaptor<LockOwner> lockOwnerValueCaptor = ArgumentCaptor.forClass(LockOwner.class);
     private LockingService loanLockingService = mock(LockingService.class);
     private FineractProperties fineractProperties = mock(FineractProperties.class);
     private FineractProperties.FineractQueryProperties fineractQueryProperties = mock(FineractProperties.FineractQueryProperties.class);
     private RetrieveIdService retrieveIdService = mock(RetrieveIdService.class);
-    private TransactionTemplate transactionTemplate = spy(TransactionTemplate.class);
+    private TransactionTemplate requiresNewTransactionJdbcTemplate = spy(new TransactionTemplate(mock(PlatformTransactionManager.class)));
 
     private ApplyLoanLockTasklet applyLoanLockTasklet = new ApplyLoanLockTasklet(fineractProperties, loanLockingService, retrieveIdService,
-            transactionTemplate);
+            requiresNewTransactionJdbcTemplate);
     private RepeatStatus resultItem;
     private StepContribution stepContribution;
 
@@ -71,8 +74,8 @@ public class ApplyLoanLockTaskletStepDefinitions implements En {
             HashMap<BusinessDateType, LocalDate> businessDateMap = new HashMap<>();
             businessDateMap.put(BusinessDateType.COB_DATE, LocalDate.now(ZoneId.systemDefault()));
             ThreadLocalContextUtil.setBusinessDates(businessDateMap);
-            JobExecution jobExecution = new JobExecution(1L, null);
-            StepExecution stepExecution = new StepExecution("test", jobExecution);
+            JobExecution jobExecution = new JobExecution(1L, new JobInstance(1L, "test"), new JobParameters());
+            StepExecution stepExecution = new StepExecution(1L, "test", jobExecution);
             ExecutionContext executionContext = new ExecutionContext();
             COBParameter loanCOBParameter = new COBParameter(1L, 4L);
             executionContext.put(LoanCOBConstant.COB_PARAMETER, loanCOBParameter);
@@ -95,7 +98,7 @@ public class ApplyLoanLockTaskletStepDefinitions implements En {
                 Long lock1 = 1L;
                 Long lock3 = 3L;
                 List<Long> accountLocks = List.of(lock1, lock3);
-                stepContribution.getStepExecution().setCommitCount(4);
+                executionContext.putLong(LoanCOBConstant.COB_PARAMETER + ".apply-lock-attempts", 4);
                 lenient().when(fineractProperties.getQuery()).thenReturn(fineractQueryProperties);
                 lenient().when(fineractQueryProperties.getInClauseParameterSizeLimit()).thenReturn(65000);
                 lenient().when(loanLockingService.findLockIdsByLoanIdIn(Mockito.anyList())).thenReturn(accountLocks);
@@ -108,8 +111,6 @@ public class ApplyLoanLockTaskletStepDefinitions implements En {
                 lenient().when(fineractQueryProperties.getInClauseParameterSizeLimit()).thenReturn(65000);
                 lenient().when(loanLockingService.findLockIdsByLoanIdIn(Mockito.anyList())).thenReturn(accountLocks);
             }
-            transactionTemplate.setTransactionManager(mock(PlatformTransactionManager.class));
-
         });
 
         When("ApplyLoanLockTasklet.execute method executed", () -> {

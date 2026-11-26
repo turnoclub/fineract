@@ -31,6 +31,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.function.Supplier;
 import org.apache.fineract.cob.data.BusinessStepNameAndOrder;
 import org.apache.fineract.cob.domain.BatchBusinessStep;
 import org.apache.fineract.cob.domain.BatchBusinessStepRepository;
@@ -59,6 +60,7 @@ public class COBBusinessStepServiceStepDefinitions implements En {
     private final COBBusinessStepServiceImpl businessStepService;
 
     private COBBusinessStep cobBusinessStep = mock(COBBusinessStep.class);
+    private LoanCOBBusinessStep loanCobBusinessStep = mock(LoanCOBBusinessStep.class);
     private COBBusinessStep notRegistereCobBusinessStep = mock(COBBusinessStep.class);
     private TreeMap<Long, String> executionMap;
     private AbstractAuditableCustom item;
@@ -73,6 +75,11 @@ public class COBBusinessStepServiceStepDefinitions implements En {
     public COBBusinessStepServiceStepDefinitions() throws Exception {
         businessStepService = new COBBusinessStepServiceImpl(batchBusinessStepRepository, applicationContext, beanFactory,
                 businessEventNotifierService, configurationDomainService, reloaderService);
+
+        // The notifier owns opening and closing the recording window; here it just has to run what it was handed and
+        // hand back the result, otherwise the business step chain never executes at all.
+        lenient().doAnswer(invocation -> invocation.getArgument(0, Supplier.class).get()).when(businessEventNotifierService)
+                .withExternalEventRecording(Mockito.<Supplier<Object>>any());
 
         Given("/^The COBBusinessStepService.run method with executeMap (.*)$/", (String executionMap) -> {
             if ("null".equals(executionMap)) {
@@ -124,8 +131,13 @@ public class COBBusinessStepServiceStepDefinitions implements En {
                     lenient().when(this.applicationContext.getBean("test")).thenReturn(this.cobBusinessStep);
                     lenient().when(this.applicationContext.getBean("testNotRegistered")).thenReturn(this.notRegistereCobBusinessStep);
                     lenient().when(this.applicationContext.getBean("notExist")).thenThrow(BeanCreationException.class);
+                    lenient().when(this.applicationContext.getBean("test", LoanCOBBusinessStep.class)).thenReturn(this.loanCobBusinessStep);
+                    lenient().when(this.applicationContext.getBean("testNotRegistered", Object.class))
+                            .thenReturn(this.notRegistereCobBusinessStep);
+                    lenient().when(this.applicationContext.getBean("notExist", (Class<?>) null)).thenThrow(BeanCreationException.class);
 
                     lenient().when(this.cobBusinessStep.getEnumStyledName()).thenReturn("registered");
+                    lenient().when(this.loanCobBusinessStep.getEnumStyledName()).thenReturn("registered");
                     lenient().when(this.notRegistereCobBusinessStep.getEnumStyledName()).thenReturn("notRegistered");
                     lenient().when(this.batchBusinessStep.getStepName()).thenReturn("registered");
                     lenient().when(this.batchBusinessStep.getStepOrder()).thenReturn(1L);
@@ -159,7 +171,7 @@ public class COBBusinessStepServiceStepDefinitions implements En {
             assertThrows(BusinessStepException.class, () -> {
                 resultItem = this.businessStepService.run(this.executionMap, this.item);
             });
-            verify(businessEventNotifierService, Mockito.times(1)).resetEventRecording();
+            verify(businessEventNotifierService, Mockito.times(1)).withExternalEventRecording(Mockito.<Supplier<Object>>any());
             ThreadLocalContextUtil.setActionContext(ActionContext.DEFAULT);
         });
 

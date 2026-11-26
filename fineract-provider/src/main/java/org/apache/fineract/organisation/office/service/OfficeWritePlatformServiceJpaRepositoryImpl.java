@@ -28,6 +28,7 @@ import org.apache.fineract.infrastructure.core.data.CommandProcessingResult;
 import org.apache.fineract.infrastructure.core.data.CommandProcessingResultBuilder;
 import org.apache.fineract.infrastructure.core.exception.ErrorHandler;
 import org.apache.fineract.infrastructure.core.exception.PlatformDataIntegrityException;
+import org.apache.fineract.infrastructure.entityaccess.service.FineractEntityAccessReadServiceImpl;
 import org.apache.fineract.infrastructure.security.exception.NoAuthorizationException;
 import org.apache.fineract.infrastructure.security.service.PlatformSecurityContext;
 import org.apache.fineract.organisation.monetary.domain.ApplicationCurrency;
@@ -62,7 +63,8 @@ public class OfficeWritePlatformServiceJpaRepositoryImpl implements OfficeWriteP
     @Override
     @Caching(evict = {
             @CacheEvict(value = "offices", key = "T(org.apache.fineract.infrastructure.core.service.ThreadLocalContextUtil).getTenant().getTenantIdentifier().concat(#root.target.context.authenticatedUser().getOffice().getHierarchy()+'of')"),
-            @CacheEvict(value = "officesForDropdown", key = "T(org.apache.fineract.infrastructure.core.service.ThreadLocalContextUtil).getTenant().getTenantIdentifier().concat(#root.target.context.authenticatedUser().getOffice().getHierarchy()+'ofd')") })
+            @CacheEvict(value = "officesForDropdown", key = "T(org.apache.fineract.infrastructure.core.service.ThreadLocalContextUtil).getTenant().getTenantIdentifier().concat(#root.target.context.authenticatedUser().getOffice().getHierarchy()+'ofd')"),
+            @CacheEvict(value = FineractEntityAccessReadServiceImpl.OFFICE_ENTITY_ACCESS_CACHE_NAME, allEntries = true) })
     public CommandProcessingResult createOffice(final JsonCommand command) {
 
         try {
@@ -105,7 +107,8 @@ public class OfficeWritePlatformServiceJpaRepositoryImpl implements OfficeWriteP
     @Caching(evict = {
             @CacheEvict(value = "offices", key = "T(org.apache.fineract.infrastructure.core.service.ThreadLocalContextUtil).getTenant().getTenantIdentifier().concat(#root.target.context.authenticatedUser().getOffice().getHierarchy()+'of')"),
             @CacheEvict(value = "officesForDropdown", key = "T(org.apache.fineract.infrastructure.core.service.ThreadLocalContextUtil).getTenant().getTenantIdentifier().concat(#root.target.context.authenticatedUser().getOffice().getHierarchy()+'ofd')"),
-            @CacheEvict(value = "officesById", key = "T(org.apache.fineract.infrastructure.core.service.ThreadLocalContextUtil).getTenant().getTenantIdentifier().concat(#officeId)") })
+            @CacheEvict(value = "officesById", key = "T(org.apache.fineract.infrastructure.core.service.ThreadLocalContextUtil).getTenant().getTenantIdentifier().concat(#officeId)"),
+            @CacheEvict(value = FineractEntityAccessReadServiceImpl.OFFICE_ENTITY_ACCESS_CACHE_NAME, allEntries = true) })
     public CommandProcessingResult updateOffice(final Long officeId, final JsonCommand command) {
 
         try {
@@ -215,7 +218,7 @@ public class OfficeWritePlatformServiceJpaRepositoryImpl implements OfficeWriteP
                     "name", name);
         }
 
-        log.error("Error occured.", dve);
+        log.error("Error occurred.", dve);
         throw ErrorHandler.getMappable(dve, "error.msg.office.unknown.data.integrity.issue", "Unknown data integrity issue with resource.");
     }
 
@@ -228,7 +231,10 @@ public class OfficeWritePlatformServiceJpaRepositoryImpl implements OfficeWriteP
         final Long userOfficeId = currentUser.getOffice().getId();
         final Office userOffice = this.officeRepositoryWrapper.findOfficeHierarchy(userOfficeId);
         if (userOffice.doesNotHaveAnOfficeInHierarchyWithId(officeId)) {
-            throw new NoAuthorizationException("User does not have sufficient priviledges to act on the provided office.");
+            if (officeId != null) {
+                this.officeRepositoryWrapper.findOneWithNotFoundDetection(officeId);
+            }
+            throw new NoAuthorizationException("User does not have sufficient privileges to act on the provided office.");
         }
 
         Office officeToReturn = userOffice;

@@ -1,0 +1,1423 @@
+@WorkingCapital
+@WorkingCapitalBreach
+@WorkingCapitalBreachPauseFeature
+Feature: Working Capital Breach Pause
+
+  @TestRailId:C85234
+  Scenario: Verify working capital loan breach pause - pause in current period extends breach schedule and does not affect delinquency schedule
+    When Admin sets the business date to "01 January 2026"
+    And Admin creates a client with random data
+    And Admin creates a Working Capital Loan Product with custom breach config and overrides enabled:
+      | breachFrequency | breachFrequencyType | breachAmountCalculationType | breachAmount | delinquencyGraceDays |
+      | 6               | DAYS                | PERCENTAGE                  | 1.23         |                      |
+    And Admin creates a working capital loan using created product with the following data:
+      | submittedOnDate | expectedDisbursementDate | principalAmount | totalPaymentVolume | periodPaymentRate | discount |
+      | 01 January 2026 | 01 January 2026          | 9000            | 100000             | 18                | 0        |
+    And Admin successfully approves the working capital loan on "01 January 2026" with "9000" amount and expected disbursement date on "01 January 2026"
+    When Admin successfully disburse the Working Capital loan on "01 January 2026" with "9000" EUR transaction amount
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    Then Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | nearBreach | breach |
+      | 1            | 2026-01-01 | 2026-01-06 | 6            | 110.70           | 110.70            | null       | null   |
+    And Working Capital loan delinquency range schedule has the following data:
+      | periodNumber | fromDate   | toDate     | expectedAmount | paidAmount | outstandingAmount | minPaymentCriteriaMet | delinquentAmount | delinquentDays |
+      | 1            | 2026-01-01 | 2026-01-30 | 270.0          | 0.0        | 270.0             | null                  | null             | null           |
+    When Admin sets the business date to "03 January 2026"
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    And Admin initiate a Working Capital loan breach pause with startDate "03 January 2026" and endDate "05 January 2026"
+    Then Working Capital loan breach action has the following data:
+      | action | startDate  | endDate    |
+      | PAUSE  | 2026-01-03 | 2026-01-05 |
+    And Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | nearBreach | breach |
+      | 1            | 2026-01-01 | 2026-01-09 | 9            | 110.70           | 110.70            | null       | null   |
+    And Working Capital loan delinquency range schedule has the following data:
+      | periodNumber | fromDate   | toDate     | expectedAmount | paidAmount | outstandingAmount | minPaymentCriteriaMet | delinquentAmount | delinquentDays |
+      | 1            | 2026-01-01 | 2026-01-30 | 270.0          | 0.0        | 270.0             | null                  | null             | null           |
+    Then Admin closes the Working Capital loan with a full repayment on "03 January 2026"
+
+  @TestRailId:C85235
+  Scenario: Verify working capital loan breach pause - backdated pause re-triggers evaluation of an already evaluated period
+    When Admin sets the business date to "01 January 2026"
+    And Admin creates a client with random data
+    And Admin creates a Working Capital Loan Product with custom breach config and overrides enabled:
+      | breachFrequency | breachFrequencyType | breachAmountCalculationType | breachAmount | delinquencyGraceDays |
+      | 6               | DAYS                | PERCENTAGE                  | 1.23         |                      |
+    And Admin creates a working capital loan using created product with the following data:
+      | submittedOnDate | expectedDisbursementDate | principalAmount | totalPaymentVolume | periodPaymentRate | discount |
+      | 01 January 2026 | 01 January 2026          | 9000            | 100000             | 18                | 0        |
+    And Admin successfully approves the working capital loan on "01 January 2026" with "9000" amount and expected disbursement date on "01 January 2026"
+    When Admin successfully disburse the Working Capital loan on "01 January 2026" with "9000" EUR transaction amount
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    When Admin sets the business date to "07 January 2026"
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    Then Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | nearBreach | breach |
+      | 1            | 2026-01-01 | 2026-01-06 | 6            | 110.70           | 110.70            | null       | true   |
+      | 2            | 2026-01-07 | 2026-01-12 | 6            | 110.70           | 110.70            | null       | null   |
+    When Admin initiate a Working Capital loan breach pause with startDate "05 January 2026" and endDate "08 January 2026"
+    Then Working Capital loan breach action has the following data:
+      | action | startDate  | endDate    |
+      | PAUSE  | 2026-01-05 | 2026-01-08 |
+    And Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | nearBreach | breach |
+      | 1            | 2026-01-01 | 2026-01-10 | 10           | 110.70           | 110.70            | null       | null   |
+      | 2            | 2026-01-11 | 2026-01-16 | 6            | 110.70           | 110.70            | null       | null   |
+    When Admin sets the business date to "11 January 2026"
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    Then Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | nearBreach | breach |
+      | 1            | 2026-01-01 | 2026-01-10 | 10           | 110.70           | 110.70            | null       | true   |
+      | 2            | 2026-01-11 | 2026-01-16 | 6            | 110.70           | 110.70            | null       | null   |
+    Then Admin closes the Working Capital loan with a full repayment on "11 January 2026"
+
+  @TestRailId:C85236
+  Scenario: Verify working capital loan breach pause - backdated pause keeps breach flag when extended period still ends in the past
+    When Admin sets the business date to "01 January 2026"
+    And Admin creates a client with random data
+    And Admin creates a Working Capital Loan Product with custom breach config and overrides enabled:
+      | breachFrequency | breachFrequencyType | breachAmountCalculationType | breachAmount | delinquencyGraceDays |
+      | 6               | DAYS                | PERCENTAGE                  | 1.23         |                      |
+    And Admin creates a working capital loan using created product with the following data:
+      | submittedOnDate | expectedDisbursementDate | principalAmount | totalPaymentVolume | periodPaymentRate | discount |
+      | 01 January 2026 | 01 January 2026          | 9000            | 100000             | 18                | 0        |
+    And Admin successfully approves the working capital loan on "01 January 2026" with "9000" amount and expected disbursement date on "01 January 2026"
+    When Admin successfully disburse the Working Capital loan on "01 January 2026" with "9000" EUR transaction amount
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    When Admin sets the business date to "11 January 2026"
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    Then Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | nearBreach | breach |
+      | 1            | 2026-01-01 | 2026-01-06 | 6            | 110.70           | 110.70            | null       | true   |
+      | 2            | 2026-01-07 | 2026-01-12 | 6            | 110.70           | 110.70            | null       | null   |
+    When Admin initiate a Working Capital loan breach pause with startDate "04 January 2026" and endDate "05 January 2026"
+    Then Working Capital loan breach action has the following data:
+      | action | startDate  | endDate    |
+      | PAUSE  | 2026-01-04 | 2026-01-05 |
+    And Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | nearBreach | breach |
+      | 1            | 2026-01-01 | 2026-01-08 | 8            | 110.70           | 110.70            | null       | true   |
+      | 2            | 2026-01-09 | 2026-01-14 | 6            | 110.70           | 110.70            | null       | null   |
+    Then Admin closes the Working Capital loan with a full repayment on "11 January 2026"
+
+  @TestRailId:C85237
+  Scenario: Verify working capital loan breach pause - multiple non-overlapping pauses are cumulative
+    When Admin sets the business date to "01 January 2026"
+    And Admin creates a client with random data
+    And Admin creates a Working Capital Loan Product with custom breach config and overrides enabled:
+      | breachFrequency | breachFrequencyType | breachAmountCalculationType | breachAmount | delinquencyGraceDays |
+      | 6               | DAYS                | PERCENTAGE                  | 1.23         |                      |
+    And Admin creates a working capital loan using created product with the following data:
+      | submittedOnDate | expectedDisbursementDate | principalAmount | totalPaymentVolume | periodPaymentRate | discount |
+      | 01 January 2026 | 01 January 2026          | 9000            | 100000             | 18                | 0        |
+    And Admin successfully approves the working capital loan on "01 January 2026" with "9000" amount and expected disbursement date on "01 January 2026"
+    When Admin successfully disburse the Working Capital loan on "01 January 2026" with "9000" EUR transaction amount
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    When Admin sets the business date to "03 January 2026"
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    And Admin initiate a Working Capital loan breach pause with startDate "03 January 2026" and endDate "04 January 2026"
+    And Admin initiate a Working Capital loan breach pause with startDate "06 January 2026" and endDate "07 January 2026"
+    Then Working Capital loan breach action has the following data:
+      | action | startDate  | endDate    |
+      | PAUSE  | 2026-01-03 | 2026-01-04 |
+      | PAUSE  | 2026-01-06 | 2026-01-07 |
+    And Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | nearBreach | breach |
+      | 1            | 2026-01-01 | 2026-01-10 | 10           | 110.70           | 110.70            | null       | null   |
+    Then Admin closes the Working Capital loan with a full repayment on "03 January 2026"
+
+  @TestRailId:C85238
+  Scenario: Verify working capital loan breach pause - overlapping pauses are rejected
+    When Admin sets the business date to "01 January 2026"
+    And Admin creates a client with random data
+    And Admin creates a new Working Capital Loan Product with breachId and overrides enabled
+    And Admin creates a working capital loan using created product with the following data:
+      | submittedOnDate | expectedDisbursementDate | principalAmount | totalPaymentVolume | periodPaymentRate | discount |
+      | 01 January 2026 | 01 January 2026          | 9000            | 100000             | 18                | 0        |
+    And Admin successfully approves the working capital loan on "01 January 2026" with "9000" amount and expected disbursement date on "01 January 2026"
+    When Admin successfully disburse the Working Capital loan on "01 January 2026" with "9000" EUR transaction amount
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    When Admin sets the business date to "03 January 2026"
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    And Admin initiate a Working Capital loan breach pause with startDate "03 January 2026" and endDate "05 January 2026"
+    Then Initiating a Working Capital loan breach pause with startDate "04 January 2026" and endDate "08 January 2026" results an error with the following data:
+      | httpCode | message                                                      |
+      | 400      | Breach pause period cannot overlap with another pause period |
+    And Initiating a Working Capital loan breach pause with startDate "02 January 2026" and endDate "08 January 2026" results an error with the following data:
+      | httpCode | message                                                      |
+      | 400      | Breach pause period cannot overlap with another pause period |
+    And Working Capital loan breach action has the following data:
+      | action | startDate  | endDate    |
+      | PAUSE  | 2026-01-03 | 2026-01-05 |
+    Then Admin closes the Working Capital loan with a full repayment on "03 January 2026"
+
+  @TestRailId:C85239
+  Scenario: Verify working capital loan breach pause - breach pause and delinquency pause are independent
+    When Admin sets the business date to "01 January 2026"
+    And Admin creates a client with random data
+    And Admin creates a Working Capital Loan Product with custom breach config and overrides enabled:
+      | breachFrequency | breachFrequencyType | breachAmountCalculationType | breachAmount | delinquencyGraceDays |
+      | 6               | DAYS                | PERCENTAGE                  | 1.23         |                      |
+    And Admin creates a working capital loan using created product with the following data:
+      | submittedOnDate | expectedDisbursementDate | principalAmount | totalPaymentVolume | periodPaymentRate | discount |
+      | 01 January 2026 | 01 January 2026          | 9000            | 100000             | 18                | 0        |
+    And Admin successfully approves the working capital loan on "01 January 2026" with "9000" amount and expected disbursement date on "01 January 2026"
+    When Admin successfully disburse the Working Capital loan on "01 January 2026" with "9000" EUR transaction amount
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    When Admin sets the business date to "03 January 2026"
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    And Admin initiate a Working Capital loan delinquency pause with startDate "03 January 2026" and endDate "05 January 2026"
+    And Admin initiate a Working Capital loan breach pause with startDate "02 January 2026" and endDate "08 January 2026"
+    Then Working Capital loan delinquency range schedule has the following data:
+      | periodNumber | fromDate   | toDate     | expectedAmount | paidAmount | outstandingAmount | minPaymentCriteriaMet | delinquentAmount | delinquentDays |
+      | 1            | 2026-01-01 | 2026-02-02 | 270.0          | 0.0        | 270.0             | null                  | null             | null           |
+    And Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | nearBreach | breach |
+      | 1            | 2026-01-01 | 2026-01-13 | 13           | 110.70           | 110.70            | null       | null   |
+    Then Admin closes the Working Capital loan with a full repayment on "03 January 2026"
+
+  @TestRailId:C85240
+  Scenario: Verify working capital loan breach pause - next period is generated from the extended period and recorded pauses apply to it
+    When Admin sets the business date to "01 January 2026"
+    And Admin creates a client with random data
+    And Admin creates a Working Capital Loan Product with custom breach config and overrides enabled:
+      | breachFrequency | breachFrequencyType | breachAmountCalculationType | breachAmount | delinquencyGraceDays |
+      | 6               | DAYS                | PERCENTAGE                  | 1.23         |                      |
+    And Admin creates a working capital loan using created product with the following data:
+      | submittedOnDate | expectedDisbursementDate | principalAmount | totalPaymentVolume | periodPaymentRate | discount |
+      | 01 January 2026 | 01 January 2026          | 9000            | 100000             | 18                | 0        |
+    And Admin successfully approves the working capital loan on "01 January 2026" with "9000" amount and expected disbursement date on "01 January 2026"
+    When Admin successfully disburse the Working Capital loan on "01 January 2026" with "9000" EUR transaction amount
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    When Admin sets the business date to "03 January 2026"
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    And Admin initiate a Working Capital loan breach pause with startDate "03 January 2026" and endDate "05 January 2026"
+    And Admin initiate a Working Capital loan breach pause with startDate "12 January 2026" and endDate "13 January 2026"
+    When Admin sets the business date to "10 January 2026"
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    Then Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | nearBreach | breach |
+      | 1            | 2026-01-01 | 2026-01-09 | 9            | 110.70           | 110.70            | null       | true   |
+      | 2            | 2026-01-10 | 2026-01-17 | 8            | 110.70           | 110.70            | null       | null   |
+    Then Admin closes the Working Capital loan with a full repayment on "10 January 2026"
+
+  @TestRailId:C85241
+  Scenario: Verify working capital loan breach pause - future pause beyond the schedule end is preserved when a later backdated pause extends the period over its window
+    When Admin sets the business date to "01 January 2026"
+    And Admin creates a client with random data
+    And Admin creates a Working Capital Loan Product with custom breach config and overrides enabled:
+      | breachFrequency | breachFrequencyType | breachAmountCalculationType | breachAmount | delinquencyGraceDays |
+      | 6               | DAYS                | PERCENTAGE                  | 1.23         |                      |
+    And Admin creates a working capital loan using created product with the following data:
+      | submittedOnDate | expectedDisbursementDate | principalAmount | totalPaymentVolume | periodPaymentRate | discount |
+      | 01 January 2026 | 01 January 2026          | 9000            | 100000             | 18                | 0        |
+    And Admin successfully approves the working capital loan on "01 January 2026" with "9000" amount and expected disbursement date on "01 January 2026"
+    When Admin successfully disburse the Working Capital loan on "01 January 2026" with "9000" EUR transaction amount
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    When Admin sets the business date to "03 January 2026"
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    And Admin initiate a Working Capital loan breach pause with startDate "08 January 2026" and endDate "09 January 2026"
+    Then Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | nearBreach | breach |
+      | 1            | 2026-01-01 | 2026-01-06 | 6            | 110.70           | 110.70            | null       | null   |
+    When Admin initiate a Working Capital loan breach pause with startDate "04 January 2026" and endDate "05 January 2026"
+    Then Working Capital loan breach action has the following data:
+      | action | startDate  | endDate    |
+      | PAUSE  | 2026-01-08 | 2026-01-09 |
+      | PAUSE  | 2026-01-04 | 2026-01-05 |
+    And Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | nearBreach | breach |
+      | 1            | 2026-01-01 | 2026-01-10 | 10           | 110.70           | 110.70            | null       | null   |
+    When Admin sets the business date to "11 January 2026"
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    Then Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | nearBreach | breach |
+      | 1            | 2026-01-01 | 2026-01-10 | 10           | 110.70           | 110.70            | null       | true   |
+      | 2            | 2026-01-11 | 2026-01-16 | 6            | 110.70           | 110.70            | null       | null   |
+    Then Admin closes the Working Capital loan with a full repayment on "11 January 2026"
+
+  @TestRailId:C85242
+  Scenario: Verify working capital loan breach pause - pause created before the first COB run is applied to the initial period
+    When Admin sets the business date to "01 January 2026"
+    And Admin creates a client with random data
+    And Admin creates a new Working Capital Loan Product with breachId and overrides enabled
+    And Admin creates a working capital loan using created product with the following data:
+      | submittedOnDate | expectedDisbursementDate | principalAmount | totalPaymentVolume | periodPaymentRate | discount |
+      | 01 January 2026 | 01 January 2026          | 9000            | 100000             | 18                | 0        |
+    And Admin successfully approves the working capital loan on "01 January 2026" with "9000" amount and expected disbursement date on "01 January 2026"
+    When Admin successfully disburse the Working Capital loan on "01 January 2026" with "9000" EUR transaction amount
+    And Admin initiate a Working Capital loan breach pause with startDate "05 January 2026" and endDate "15 January 2026"
+    Then Working Capital loan breach action has the following data:
+      | action | startDate  | endDate    |
+      | PAUSE  | 2026-01-05 | 2026-01-15 |
+    When Admin runs inline COB job for Working Capital Loan by loanId
+    Then Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | nearBreach | breach |
+      | 1            | 2026-01-01 | 2026-03-11 | 70           | 110.70           | 110.70            | null       | null   |
+    Then Admin closes the Working Capital loan with a full repayment on "01 January 2026"
+
+  @TestRailId:C85243
+  Scenario: Verify working capital loan breach pause - validation errors
+    When Admin sets the business date to "01 January 2026"
+    And Admin creates a client with random data
+    And Admin creates a new Working Capital Loan Product with breachId and overrides enabled
+    And Admin creates a working capital loan using created product with the following data:
+      | submittedOnDate | expectedDisbursementDate | principalAmount | totalPaymentVolume | periodPaymentRate | discount |
+      | 01 January 2026 | 01 January 2026          | 9000            | 100000             | 18                | 0        |
+    And Admin successfully approves the working capital loan on "01 January 2026" with "9000" amount and expected disbursement date on "01 January 2026"
+    When Admin successfully disburse the Working Capital loan on "01 January 2026" with "9000" EUR transaction amount
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    Then Initiating a Working Capital loan breach pause with startDate "25 January 2026" and endDate "15 January 2026" results an error with the following data:
+      | httpCode | message                                                     |
+      | 400      | End date of pause period must be on or after the start date |
+    And Initiating a Working Capital loan breach pause with startDate "25 December 2025" and endDate "05 January 2026" results an error with the following data:
+      | httpCode | message                                                                                  |
+      | 400      | The parameter `startDate` must be greater than or equal to the provided date: 2026-01-01 |
+    And Initiating a Working Capital loan breach action "invalid" with startDate "15 January 2026" and endDate "25 January 2026" results an error with the following data:
+      | httpCode | message                                                                                                 |
+      | 400      | The parameter `action` must be one of [ pause, reschedule, resume, reset, undo_reset, disable, enable ] |
+    And Initiating a Working Capital loan breach action without "action" results an error with the following data:
+      | httpCode | message                             |
+      | 400      | The parameter `action` is mandatory |
+    And Initiating a Working Capital loan breach action without "startDate" results an error with the following data:
+      | httpCode | message                                |
+      | 400      | The parameter `startDate` is mandatory |
+    And Initiating a Working Capital loan breach action without "endDate" results an error with the following data:
+      | httpCode | message                              |
+      | 400      | The parameter `endDate` is mandatory |
+    And Retrieving breach actions for a non-existent Working Capital loan results in a 404 error
+    Then Admin closes the Working Capital loan with a full repayment on "01 January 2026"
+
+  @TestRailId:C85244
+  Scenario: Verify working capital loan breach pause - pause is rejected for a loan without breach configuration
+    When Admin sets the business date to "01 January 2026"
+    And Admin creates a client with random data
+    And Admin creates a working capital loan with the following data:
+      | LoanProduct | submittedOnDate | expectedDisbursementDate | principalAmount | totalPaymentVolume | periodPaymentRate | discount |
+      | WCLP        | 01 January 2026 | 01 January 2026          | 9000            | 100000             | 18                | 0        |
+    And Admin successfully approves the working capital loan on "01 January 2026" with "9000" amount and expected disbursement date on "01 January 2026"
+    When Admin successfully disburse the Working Capital loan on "01 January 2026" with "9000" EUR transaction amount
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    Then Initiating a Working Capital loan breach pause with startDate "15 January 2026" and endDate "25 January 2026" results an error with the following data:
+      | httpCode | message                                                                    |
+      | 400      | Breach actions require a breach configuration on the Working Capital loan. |
+    Then Admin closes the Working Capital loan with a full repayment on "01 January 2026"
+
+  @TestRailId:C85246
+  Scenario: Verify working capital loan breach pause - pause is rejected for a not yet active loan
+    When Admin sets the business date to "01 January 2026"
+    And Admin creates a client with random data
+    And Admin creates a new Working Capital Loan Product with breachId and overrides enabled
+    And Admin creates a working capital loan using created product with the following data:
+      | submittedOnDate | expectedDisbursementDate | principalAmount | totalPaymentVolume | periodPaymentRate | discount |
+      | 01 January 2026 | 01 January 2026          | 9000            | 100000             | 18                | 0        |
+    And Admin successfully approves the working capital loan on "01 January 2026" with "9000" amount and expected disbursement date on "01 January 2026"
+    Then Initiating a Working Capital loan breach pause with startDate "15 January 2026" and endDate "25 January 2026" results an error with the following data:
+      | httpCode | message                                                              |
+      | 400      | Breach actions can be created only for active Working Capital loans. |
+
+  @TestRailId:C85247
+  Scenario: Verify working capital loan breach pause - backdated payment resets breach flag of an already breached period
+    When Admin sets the business date to "01 January 2026"
+    And Admin creates a client with random data
+    And Admin creates a Working Capital Loan Product with custom breach config and overrides enabled:
+      | breachFrequency | breachFrequencyType | breachAmountCalculationType | breachAmount | delinquencyGraceDays |
+      | 6               | DAYS                | PERCENTAGE                  | 1.23         |                      |
+    And Admin creates a working capital loan using created product with the following data:
+      | submittedOnDate | expectedDisbursementDate | principalAmount | totalPaymentVolume | periodPaymentRate | discount |
+      | 01 January 2026 | 01 January 2026          | 9000            | 100000             | 18                | 0        |
+    And Admin successfully approves the working capital loan on "01 January 2026" with "9000" amount and expected disbursement date on "01 January 2026"
+    When Admin successfully disburse the Working Capital loan on "01 January 2026" with "9000" EUR transaction amount
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    When Admin sets the business date to "07 January 2026"
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    Then Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | nearBreach | breach |
+      | 1            | 2026-01-01 | 2026-01-06 | 6            | 110.70           | 110.70            | null       | true   |
+      | 2            | 2026-01-07 | 2026-01-12 | 6            | 110.70           | 110.70            | null       | null   |
+    When Admin initiate a Working Capital loan breach pause with startDate "09 January 2026" and endDate "10 January 2026"
+    Then Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | nearBreach | breach |
+      | 1            | 2026-01-01 | 2026-01-06 | 6            | 110.70           | 110.70            | null       | true   |
+      | 2            | 2026-01-07 | 2026-01-14 | 8            | 110.70           | 110.70            | null       | null   |
+    When Admin sets the business date to "12 January 2026"
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    And Customer makes repayment on "04 January 2026" with 150.0 transaction amount on Working Capital loan
+    Then Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | nearBreach | breach |
+      | 1            | 2026-01-01 | 2026-01-06 | 6            | 110.70           | 0.00              | null       | false  |
+      | 2            | 2026-01-07 | 2026-01-14 | 8            | 110.70           | 110.70            | null       | null   |
+    Then Admin closes the Working Capital loan with a full repayment on "12 January 2026"
+
+  @TestRailId:C85248
+  Scenario: Verify working capital loan breach pause - touching pauses are rejected and contiguous pauses must not share a day
+    When Admin sets the business date to "01 January 2026"
+    And Admin creates a client with random data
+    And Admin creates a Working Capital Loan Product with custom breach config and overrides enabled:
+      | breachFrequency | breachFrequencyType | breachAmountCalculationType | breachAmount | delinquencyGraceDays |
+      | 6               | DAYS                | PERCENTAGE                  | 1.23         |                      |
+    And Admin creates a working capital loan using created product with the following data:
+      | submittedOnDate | expectedDisbursementDate | principalAmount | totalPaymentVolume | periodPaymentRate | discount |
+      | 01 January 2026 | 01 January 2026          | 9000            | 100000             | 18                | 0        |
+    And Admin successfully approves the working capital loan on "01 January 2026" with "9000" amount and expected disbursement date on "01 January 2026"
+    When Admin successfully disburse the Working Capital loan on "01 January 2026" with "9000" EUR transaction amount
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    When Admin sets the business date to "03 January 2026"
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    And Admin initiate a Working Capital loan breach pause with startDate "03 January 2026" and endDate "05 January 2026"
+    # start and end are inclusive, so a second pause sharing the boundary day (05 Jan) overlaps and is rejected
+    Then Initiating a Working Capital loan breach pause with startDate "05 January 2026" and endDate "07 January 2026" results an error with the following data:
+      | httpCode | message                                                      |
+      | 400      | Breach pause period cannot overlap with another pause period |
+    # a contiguous pause must start the day after the previous one ends, so the boundary day is not double-counted
+    When Admin initiate a Working Capital loan breach pause with startDate "06 January 2026" and endDate "07 January 2026"
+    Then Working Capital loan breach action has the following data:
+      | action | startDate  | endDate    |
+      | PAUSE  | 2026-01-03 | 2026-01-05 |
+      | PAUSE  | 2026-01-06 | 2026-01-07 |
+    And Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | nearBreach | breach |
+      | 1            | 2026-01-01 | 2026-01-11 | 11           | 110.70           | 110.70            | null       | null   |
+    Then Admin closes the Working Capital loan with a full repayment on "03 January 2026"
+
+  @TestRailId:C85249
+  Scenario: Verify working capital loan breach pause - a pre-existing payment is not re-bucketed when a later pause shifts the period boundary across its date
+    When Admin sets the business date to "01 January 2026"
+    And Admin creates a client with random data
+    And Admin creates a Working Capital Loan Product with custom breach config and overrides enabled:
+      | breachFrequency | breachFrequencyType | breachAmountCalculationType | breachAmount | delinquencyGraceDays |
+      | 6               | DAYS                | PERCENTAGE                  | 1.23         |                      |
+    And Admin creates a working capital loan using created product with the following data:
+      | submittedOnDate | expectedDisbursementDate | principalAmount | totalPaymentVolume | periodPaymentRate | discount |
+      | 01 January 2026 | 01 January 2026          | 9000            | 100000             | 18                | 0        |
+    And Admin successfully approves the working capital loan on "01 January 2026" with "9000" amount and expected disbursement date on "01 January 2026"
+    When Admin successfully disburse the Working Capital loan on "01 January 2026" with "9000" EUR transaction amount
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    When Admin sets the business date to "07 January 2026"
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    When Admin sets the business date to "10 January 2026"
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    # the 50.00 paid on 08 Jan falls in period 2 (07 Jan - 12 Jan) at the time it is made
+    And Customer makes repayment on "08 January 2026" with 50.0 transaction amount on Working Capital loan
+    Then Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | nearBreach | breach |
+      | 1            | 2026-01-01 | 2026-01-06 | 6            | 110.70           | 110.70            | null       | true   |
+      | 2            | 2026-01-07 | 2026-01-12 | 6            | 110.70           | 60.70             | null       | null   |
+    # backdated pause inside period 1 pushes its end to 09 Jan, so period 1's window now covers 08 Jan,
+    # but the 50.00 paid that day stays credited to period 2
+    When Admin initiate a Working Capital loan breach pause with startDate "03 January 2026" and endDate "05 January 2026"
+    Then Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | nearBreach | breach |
+      | 1            | 2026-01-01 | 2026-01-09 | 9            | 110.70           | 110.70            | null       | true   |
+      | 2            | 2026-01-10 | 2026-01-15 | 6            | 110.70           | 60.70             | null       | null   |
+    Then Admin closes the Working Capital loan with a full repayment on "10 January 2026"
+
+  @TestRailId:C85250
+  Scenario: Verify working capital loan breach pause - pause can be applied and retrieved by loan external id
+    When Admin sets the business date to "01 January 2026"
+    And Admin creates a client with random data
+    And Admin creates a Working Capital Loan Product with custom breach config and overrides enabled:
+      | breachFrequency | breachFrequencyType | breachAmountCalculationType | breachAmount | delinquencyGraceDays |
+      | 6               | DAYS                | PERCENTAGE                  | 1.23         |                      |
+    And Admin creates a working capital loan using created product with the following data:
+      | submittedOnDate | expectedDisbursementDate | principalAmount | totalPaymentVolume | periodPaymentRate | discount |
+      | 01 January 2026 | 01 January 2026          | 9000            | 100000             | 18                | 0        |
+    And Admin successfully approves the working capital loan on "01 January 2026" with "9000" amount and expected disbursement date on "01 January 2026"
+    When Admin successfully disburse the Working Capital loan on "01 January 2026" with "9000" EUR transaction amount
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    When Admin sets the business date to "03 January 2026"
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    And Admin initiate a Working Capital loan breach pause by external ID with startDate "03 January 2026" and endDate "05 January 2026"
+    Then Working Capital loan breach action by external ID has the following data:
+      | action | startDate  | endDate    |
+      | PAUSE  | 2026-01-03 | 2026-01-05 |
+    And Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | nearBreach | breach |
+      | 1            | 2026-01-01 | 2026-01-09 | 9            | 110.70           | 110.70            | null       | null   |
+    Then Admin closes the Working Capital loan with a full repayment on "03 January 2026"
+
+  @TestRailId:C85350
+  Scenario: Verify working capital loan breach pause - a single day pause with the same start and end date extends the schedule by one day
+    When Admin sets the business date to "01 January 2026"
+    And Admin creates a client with random data
+    And Admin creates a Working Capital Loan Product with custom breach config and overrides enabled:
+      | breachFrequency | breachFrequencyType | breachAmountCalculationType | breachAmount | delinquencyGraceDays |
+      | 6               | DAYS                | PERCENTAGE                  | 1.23         |                      |
+    And Admin creates a working capital loan using created product with the following data:
+      | submittedOnDate | expectedDisbursementDate | principalAmount | totalPaymentVolume | periodPaymentRate | discount |
+      | 01 January 2026 | 01 January 2026          | 9000            | 100000             | 18                | 0        |
+    And Admin successfully approves the working capital loan on "01 January 2026" with "9000" amount and expected disbursement date on "01 January 2026"
+    When Admin successfully disburse the Working Capital loan on "01 January 2026" with "9000" EUR transaction amount
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    When Admin sets the business date to "03 January 2026"
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    And Admin initiate a Working Capital loan breach pause with startDate "04 January 2026" and endDate "04 January 2026"
+    Then Working Capital loan breach action has the following data:
+      | action | startDate  | endDate    |
+      | PAUSE  | 2026-01-04 | 2026-01-04 |
+    And Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | nearBreach | breach |
+      | 1            | 2026-01-01 | 2026-01-07 | 7            | 110.70           | 110.70            | null       | null   |
+    Then Admin closes the Working Capital loan with a full repayment on "03 January 2026"
+
+  @TestRailId:C85351
+  Scenario: Verify working capital loan breach pause - a single day pause on the schedule start date extends the schedule by one day
+    When Admin sets the business date to "01 January 2026"
+    And Admin creates a client with random data
+    And Admin creates a new Working Capital Loan Product with breachId and overrides enabled
+    And Admin creates a working capital loan using created product with the following data:
+      | submittedOnDate | expectedDisbursementDate | principalAmount | totalPaymentVolume | periodPaymentRate | discount |
+      | 01 January 2026 | 01 January 2026          | 9000            | 100000             | 18                | 0        |
+    And Admin successfully approves the working capital loan on "01 January 2026" with "9000" amount and expected disbursement date on "01 January 2026"
+    When Admin successfully disburse the Working Capital loan on "01 January 2026" with "9000" EUR transaction amount
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    Then Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | nearBreach | breach |
+      | 1            | 2026-01-01 | 2026-02-28 | 59           | 110.70           | 110.70            | null       | null   |
+    # the pause covers exactly the schedule start date (inclusive), so it still extends the period by one day
+    When Admin initiate a Working Capital loan breach pause with startDate "01 January 2026" and endDate "01 January 2026"
+    Then Working Capital loan breach action has the following data:
+      | action | startDate  | endDate    |
+      | PAUSE  | 2026-01-01 | 2026-01-01 |
+    And Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | nearBreach | breach |
+      | 1            | 2026-01-01 | 2026-03-01 | 60           | 110.70           | 110.70            | null       | null   |
+    Then Admin closes the Working Capital loan with a full repayment on "01 January 2026"
+
+  @TestRailId:C85251
+  Scenario: Verify working capital loan breach pause - resume shortens the active pause and recalculates the breach schedule
+    When Admin sets the business date to "01 January 2026"
+    And Admin creates a client with random data
+    And Admin creates a Working Capital Loan Product with custom breach config and overrides enabled:
+      | breachFrequency | breachFrequencyType | breachAmountCalculationType | breachAmount | delinquencyGraceDays |
+      | 6               | DAYS                | PERCENTAGE                  | 1.23         |                      |
+    And Admin creates a working capital loan using created product with the following data:
+      | submittedOnDate | expectedDisbursementDate | principalAmount | totalPaymentVolume | periodPaymentRate | discount |
+      | 01 January 2026 | 01 January 2026          | 9000            | 100000             | 18                | 0        |
+    And Admin successfully approves the working capital loan on "01 January 2026" with "9000" amount and expected disbursement date on "01 January 2026"
+    When Admin successfully disburse the Working Capital loan on "01 January 2026" with "9000" EUR transaction amount
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    And Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | nearBreach | breach |
+      | 1            | 2026-01-01 | 2026-01-06 | 6            | 110.70           | 110.70            | null       | null   |
+    And Admin initiate a Working Capital loan breach pause with startDate "01 January 2026" and endDate "06 January 2026"
+    Then Working Capital loan breach action has the following data:
+      | action | startDate  | endDate    |
+      | PAUSE  | 2026-01-01 | 2026-01-06 |
+    And Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | nearBreach | breach |
+      | 1            | 2026-01-01 | 2026-01-12 | 12           | 110.70           | 110.70            | null       | null   |
+    When Admin sets the business date to "03 January 2026"
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    And Admin initiate a Working Capital loan breach resume with startDate "03 January 2026"
+    Then Working Capital loan breach action has the following data:
+      | action | startDate  | endDate    |
+      | PAUSE  | 2026-01-01 | 2026-01-06 |
+      | RESUME | 2026-01-03 |            |
+    And Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | nearBreach | breach |
+      | 1            | 2026-01-01 | 2026-01-09 | 9            | 110.70           | 110.70            | null       | null   |
+    Then Admin closes the Working Capital loan with a full repayment on "03 January 2026"
+
+  @TestRailId:C85348
+  Scenario: Verify working capital loan breach pause - resume date remains included in the effective pause
+    When Admin sets the business date to "01 January 2026"
+    And Admin creates a client with random data
+    And Admin creates a Working Capital Loan Product with custom breach config and overrides enabled:
+      | breachFrequency | breachFrequencyType | breachAmountCalculationType | breachAmount | delinquencyGraceDays |
+      | 6               | DAYS                | PERCENTAGE                  | 1.23         |                      |
+    And Admin creates a working capital loan using created product with the following data:
+      | submittedOnDate | expectedDisbursementDate | principalAmount | totalPaymentVolume | periodPaymentRate | discount |
+      | 01 January 2026 | 01 January 2026          | 9000            | 100000             | 18                | 0        |
+    And Admin successfully approves the working capital loan on "01 January 2026" with "9000" amount and expected disbursement date on "01 January 2026"
+    When Admin successfully disburse the Working Capital loan on "01 January 2026" with "9000" EUR transaction amount
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    And Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | nearBreach | breach |
+      | 1            | 2026-01-01 | 2026-01-06 | 6            | 110.70           | 110.70            | null       | null   |
+    And Admin initiate a Working Capital loan breach pause with startDate "01 January 2026" and endDate "06 January 2026"
+    Then Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | nearBreach | breach |
+      | 1            | 2026-01-01 | 2026-01-12 | 12           | 110.70           | 110.70            | null       | null   |
+    When Admin sets the business date to "03 January 2026"
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    And Admin initiate a Working Capital loan breach resume with startDate "03 January 2026"
+    Then Working Capital loan breach action has the following data:
+      | action | startDate  | endDate    |
+      | PAUSE  | 2026-01-01 | 2026-01-06 |
+      | RESUME | 2026-01-03 |            |
+    # Resume date is still paused, so the effective pause is 01 Jan through 03 Jan inclusive.
+    And Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | nearBreach | breach |
+      | 1            | 2026-01-01 | 2026-01-09 | 9            | 110.70           | 110.70            | null       | null   |
+    Then Admin closes the Working Capital loan with a full repayment on "03 January 2026"
+
+  @TestRailId:C85349
+  Scenario: Verify working capital loan breach pause - a new pause can start after the effective resumed pause ends
+    When Admin sets the business date to "01 January 2026"
+    And Admin creates a client with random data
+    And Admin creates a Working Capital Loan Product with custom breach config and overrides enabled:
+      | breachFrequency | breachFrequencyType | breachAmountCalculationType | breachAmount | delinquencyGraceDays |
+      | 6               | DAYS                | PERCENTAGE                  | 1.23         |                      |
+    And Admin creates a working capital loan using created product with the following data:
+      | submittedOnDate | expectedDisbursementDate | principalAmount | totalPaymentVolume | periodPaymentRate | discount |
+      | 01 January 2026 | 01 January 2026          | 9000            | 100000             | 18                | 0        |
+    And Admin successfully approves the working capital loan on "01 January 2026" with "9000" amount and expected disbursement date on "01 January 2026"
+    When Admin successfully disburse the Working Capital loan on "01 January 2026" with "9000" EUR transaction amount
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    And Admin initiate a Working Capital loan breach pause with startDate "01 January 2026" and endDate "06 January 2026"
+    When Admin sets the business date to "03 January 2026"
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    And Admin initiate a Working Capital loan breach resume with startDate "03 January 2026"
+    # The first effective pause ends on 03 Jan, so 04 Jan is the first valid start date for another pause.
+    When Admin initiate a Working Capital loan breach pause with startDate "04 January 2026" and endDate "06 January 2026"
+    Then Working Capital loan breach action has the following data:
+      | action | startDate  | endDate    |
+      | PAUSE  | 2026-01-01 | 2026-01-06 |
+      | RESUME | 2026-01-03 |            |
+      | PAUSE  | 2026-01-04 | 2026-01-06 |
+    And Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | nearBreach | breach |
+      | 1            | 2026-01-01 | 2026-01-12 | 12           | 110.70           | 110.70            | null       | null   |
+    Then Admin closes the Working Capital loan with a full repayment on "03 January 2026"
+
+  @TestRailId:C85252
+  Scenario: Verify working capital loan breach pause - resume is rejected when there is no active pause on the resume date
+    When Admin sets the business date to "01 January 2026"
+    And Admin creates a client with random data
+    And Admin creates a new Working Capital Loan Product with breachId and overrides enabled
+    And Admin creates a working capital loan using created product with the following data:
+      | submittedOnDate | expectedDisbursementDate | principalAmount | totalPaymentVolume | periodPaymentRate | discount |
+      | 01 January 2026 | 01 January 2026          | 9000            | 100000             | 18                | 0        |
+    And Admin successfully approves the working capital loan on "01 January 2026" with "9000" amount and expected disbursement date on "01 January 2026"
+    When Admin successfully disburse the Working Capital loan on "01 January 2026" with "9000" EUR transaction amount
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    And Admin initiate a Working Capital loan breach pause with startDate "02 January 2026" and endDate "03 January 2026"
+    When Admin sets the business date to "05 January 2026"
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    Then Initiating a Working Capital loan breach resume with startDate "05 January 2026" results an error with the following data:
+      | httpCode | message                                                         |
+      | 400      | Resume breach action can only be created during an active pause |
+    Then Admin closes the Working Capital loan with a full repayment on "05 January 2026"
+
+  @TestRailId:C85253
+  Scenario: Verify working capital loan breach pause - resume is rejected when the resume date is not the current business date
+    When Admin sets the business date to "01 January 2026"
+    And Admin creates a client with random data
+    And Admin creates a new Working Capital Loan Product with breachId and overrides enabled
+    And Admin creates a working capital loan using created product with the following data:
+      | submittedOnDate | expectedDisbursementDate | principalAmount | totalPaymentVolume | periodPaymentRate | discount |
+      | 01 January 2026 | 01 January 2026          | 9000            | 100000             | 18                | 0        |
+    And Admin successfully approves the working capital loan on "01 January 2026" with "9000" amount and expected disbursement date on "01 January 2026"
+    When Admin successfully disburse the Working Capital loan on "01 January 2026" with "9000" EUR transaction amount
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    And Admin initiate a Working Capital loan breach pause with startDate "02 January 2026" and endDate "04 January 2026"
+    When Admin sets the business date to "03 January 2026"
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    Then Initiating a Working Capital loan breach resume with startDate "04 January 2026" results an error with the following data:
+      | httpCode | message                                                         |
+      | 400      | Start date of a resume action must be the current business date |
+    Then Admin closes the Working Capital loan with a full repayment on "03 January 2026"
+
+  @TestRailId:C85254
+  Scenario: Verify working capital loan breach pause - resume with an end date is rejected
+    When Admin sets the business date to "01 January 2026"
+    And Admin creates a client with random data
+    And Admin creates a new Working Capital Loan Product with breachId and overrides enabled
+    And Admin creates a working capital loan using created product with the following data:
+      | submittedOnDate | expectedDisbursementDate | principalAmount | totalPaymentVolume | periodPaymentRate | discount |
+      | 01 January 2026 | 01 January 2026          | 9000            | 100000             | 18                | 0        |
+    And Admin successfully approves the working capital loan on "01 January 2026" with "9000" amount and expected disbursement date on "01 January 2026"
+    When Admin successfully disburse the Working Capital loan on "01 January 2026" with "9000" EUR transaction amount
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    And Admin initiate a Working Capital loan breach pause with startDate "02 January 2026" and endDate "04 January 2026"
+    When Admin sets the business date to "03 January 2026"
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    Then Initiating a Working Capital loan breach action "resume" with startDate "03 January 2026" and endDate "05 January 2026" results an error with the following data:
+      | httpCode | message                                           |
+      | 400      | End date must not be provided for a resume action |
+    Then Admin closes the Working Capital loan with a full repayment on "03 January 2026"
+
+  @TestRailId:C85255
+  Scenario: Verify working capital loan breach pause - resume is rejected for a pause that was already resumed
+    When Admin sets the business date to "01 January 2026"
+    And Admin creates a client with random data
+    And Admin creates a new Working Capital Loan Product with breachId and overrides enabled
+    And Admin creates a working capital loan using created product with the following data:
+      | submittedOnDate | expectedDisbursementDate | principalAmount | totalPaymentVolume | periodPaymentRate | discount |
+      | 01 January 2026 | 01 January 2026          | 9000            | 100000             | 18                | 0        |
+    And Admin successfully approves the working capital loan on "01 January 2026" with "9000" amount and expected disbursement date on "01 January 2026"
+    When Admin successfully disburse the Working Capital loan on "01 January 2026" with "9000" EUR transaction amount
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    And Admin initiate a Working Capital loan breach pause with startDate "01 January 2026" and endDate "06 January 2026"
+    When Admin sets the business date to "03 January 2026"
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    And Admin initiate a Working Capital loan breach resume with startDate "03 January 2026"
+    Then Initiating a Working Capital loan breach resume with startDate "03 January 2026" results an error with the following data:
+      | httpCode | message                                                         |
+      | 400      | Resume breach action can only be created during an active pause |
+    Then Admin closes the Working Capital loan with a full repayment on "03 January 2026"
+
+  @TestRailId:C85256
+  Scenario: Verify working capital loan breach pause - resume shortens the pause so the period breaches earlier
+    When Admin sets the business date to "01 January 2026"
+    And Admin creates a client with random data
+    And Admin creates a Working Capital Loan Product with custom breach config and overrides enabled:
+      | breachFrequency | breachFrequencyType | breachAmountCalculationType | breachAmount | delinquencyGraceDays |
+      | 6               | DAYS                | PERCENTAGE                  | 1.23         |                      |
+    And Admin creates a working capital loan using created product with the following data:
+      | submittedOnDate | expectedDisbursementDate | principalAmount | totalPaymentVolume | periodPaymentRate | discount |
+      | 01 January 2026 | 01 January 2026          | 9000            | 100000             | 18                | 0        |
+    And Admin successfully approves the working capital loan on "01 January 2026" with "9000" amount and expected disbursement date on "01 January 2026"
+    When Admin successfully disburse the Working Capital loan on "01 January 2026" with "9000" EUR transaction amount
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    And Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | nearBreach | breach |
+      | 1            | 2026-01-01 | 2026-01-06 | 6            | 110.70           | 110.70            | null       | null   |
+    And Admin initiate a Working Capital loan breach pause with startDate "01 January 2026" and endDate "06 January 2026"
+    Then Working Capital loan breach action has the following data:
+      | action | startDate  | endDate    |
+      | PAUSE  | 2026-01-01 | 2026-01-06 |
+    And Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | nearBreach | breach |
+      | 1            | 2026-01-01 | 2026-01-12 | 12           | 110.70           | 110.70            | null       | null   |
+    When Admin sets the business date to "03 January 2026"
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    And Admin initiate a Working Capital loan breach resume with startDate "03 January 2026"
+    When Admin sets the business date to "10 January 2026"
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    Then Working Capital loan breach action has the following data:
+      | action | startDate  | endDate    |
+      | PAUSE  | 2026-01-01 | 2026-01-06 |
+      | RESUME | 2026-01-03 |            |
+    Then Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | nearBreach | breach |
+      | 1            | 2026-01-01 | 2026-01-09 | 9            | 110.70           | 110.70            | null       | true   |
+      | 2            | 2026-01-10 | 2026-01-15 | 6            | 110.70           | 110.70            | null       | null   |
+    Then Admin closes the Working Capital loan with a full repayment on "10 January 2026"
+
+  @TestRailId:C85257
+  Scenario: Verify working capital loan breach pause - resume on the day before planned pause end shortens schedule by one day
+    When Admin sets the business date to "01 January 2026"
+    And Admin creates a client with random data
+    And Admin creates a Working Capital Loan Product with custom breach config and overrides enabled:
+      | breachFrequency | breachFrequencyType | breachAmountCalculationType | breachAmount | delinquencyGraceDays |
+      | 6               | DAYS                | PERCENTAGE                  | 1.23         |                      |
+    And Admin creates a working capital loan using created product with the following data:
+      | submittedOnDate | expectedDisbursementDate | principalAmount | totalPaymentVolume | periodPaymentRate | discount |
+      | 01 January 2026 | 01 January 2026          | 9000            | 100000             | 18                | 0        |
+    And Admin successfully approves the working capital loan on "01 January 2026" with "9000" amount and expected disbursement date on "01 January 2026"
+    When Admin successfully disburse the Working Capital loan on "01 January 2026" with "9000" EUR transaction amount
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    And Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | nearBreach | breach |
+      | 1            | 2026-01-01 | 2026-01-06 | 6            | 110.70           | 110.70            | null       | null   |
+    And Admin initiate a Working Capital loan breach pause with startDate "01 January 2026" and endDate "06 January 2026"
+    Then Working Capital loan breach action has the following data:
+      | action | startDate  | endDate    |
+      | PAUSE  | 2026-01-01 | 2026-01-06 |
+    And Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | nearBreach | breach |
+      | 1            | 2026-01-01 | 2026-01-12 | 12           | 110.70           | 110.70            | null       | null   |
+    When Admin sets the business date to "05 January 2026"
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    And Admin initiate a Working Capital loan breach resume with startDate "05 January 2026"
+    Then Working Capital loan breach action has the following data:
+      | action | startDate  | endDate    |
+      | PAUSE  | 2026-01-01 | 2026-01-06 |
+      | RESUME | 2026-01-05 |            |
+    And Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | nearBreach | breach |
+      | 1            | 2026-01-01 | 2026-01-11 | 11           | 110.70           | 110.70            | null       | null   |
+    Then Admin closes the Working Capital loan with a full repayment on "05 January 2026"
+
+  @TestRailId:C85258
+  Scenario: Verify working capital loan breach pause - resume by external ID
+    When Admin sets the business date to "01 January 2026"
+    And Admin creates a client with random data
+    And Admin creates a Working Capital Loan Product with custom breach config and overrides enabled:
+      | breachFrequency | breachFrequencyType | breachAmountCalculationType | breachAmount | delinquencyGraceDays |
+      | 6               | DAYS                | PERCENTAGE                  | 1.23         |                      |
+    And Admin creates a working capital loan using created product with the following data:
+      | submittedOnDate | expectedDisbursementDate | principalAmount | totalPaymentVolume | periodPaymentRate | discount |
+      | 01 January 2026 | 01 January 2026          | 9000            | 100000             | 18                | 0        |
+    And Admin successfully approves the working capital loan on "01 January 2026" with "9000" amount and expected disbursement date on "01 January 2026"
+    When Admin successfully disburse the Working Capital loan on "01 January 2026" with "9000" EUR transaction amount
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    And Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | nearBreach | breach |
+      | 1            | 2026-01-01 | 2026-01-06 | 6            | 110.70           | 110.70            | null       | null   |
+    And Admin initiate a Working Capital loan breach pause by external ID with startDate "01 January 2026" and endDate "06 January 2026"
+    Then Working Capital loan breach action has the following data:
+      | action | startDate  | endDate    |
+      | PAUSE  | 2026-01-01 | 2026-01-06 |
+    And Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | nearBreach | breach |
+      | 1            | 2026-01-01 | 2026-01-12 | 12           | 110.70           | 110.70            | null       | null   |
+    When Admin sets the business date to "03 January 2026"
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    And Admin initiate a Working Capital loan breach resume by external ID with startDate "03 January 2026"
+    Then Working Capital loan breach action by external ID has the following data:
+      | action | startDate  | endDate    |
+      | PAUSE  | 2026-01-01 | 2026-01-06 |
+      | RESUME | 2026-01-03 |            |
+    And Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | nearBreach | breach |
+      | 1            | 2026-01-01 | 2026-01-09 | 9            | 110.70           | 110.70            | null       | null   |
+    Then Admin closes the Working Capital loan with a full repayment on "03 January 2026"
+
+  @TestRailId:C85259
+  Scenario: Verify working capital loan breach pause - backdated resume is rejected
+    When Admin sets the business date to "01 January 2026"
+    And Admin creates a client with random data
+    And Admin creates a new Working Capital Loan Product with breachId and overrides enabled
+    And Admin creates a working capital loan using created product with the following data:
+      | submittedOnDate | expectedDisbursementDate | principalAmount | totalPaymentVolume | periodPaymentRate | discount |
+      | 01 January 2026 | 01 January 2026          | 9000            | 100000             | 18                | 0        |
+    And Admin successfully approves the working capital loan on "01 January 2026" with "9000" amount and expected disbursement date on "01 January 2026"
+    When Admin successfully disburse the Working Capital loan on "01 January 2026" with "9000" EUR transaction amount
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    And Admin initiate a Working Capital loan breach pause with startDate "01 January 2026" and endDate "06 January 2026"
+    When Admin sets the business date to "03 January 2026"
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    Then Initiating a Working Capital loan breach resume with startDate "02 January 2026" results an error with the following data:
+      | httpCode | message                                                         |
+      | 400      | Start date of a resume action must be the current business date |
+    Then Admin closes the Working Capital loan with a full repayment on "03 January 2026"
+
+  @TestRailId:C85260
+  Scenario: Verify working capital loan breach pause - resume without an active pause is rejected
+    When Admin sets the business date to "01 January 2026"
+    And Admin creates a client with random data
+    And Admin creates a new Working Capital Loan Product with breachId and overrides enabled
+    And Admin creates a working capital loan using created product with the following data:
+      | submittedOnDate | expectedDisbursementDate | principalAmount | totalPaymentVolume | periodPaymentRate | discount |
+      | 01 January 2026 | 01 January 2026          | 9000            | 100000             | 18                | 0        |
+    And Admin successfully approves the working capital loan on "01 January 2026" with "9000" amount and expected disbursement date on "01 January 2026"
+    When Admin successfully disburse the Working Capital loan on "01 January 2026" with "9000" EUR transaction amount
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    When Admin sets the business date to "03 January 2026"
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    Then Initiating a Working Capital loan breach resume with startDate "03 January 2026" results an error with the following data:
+      | httpCode | message                                                         |
+      | 400      | Resume breach action can only be created during an active pause |
+    Then Admin closes the Working Capital loan with a full repayment on "03 January 2026"
+
+  @TestRailId:C85261
+  Scenario: Verify working capital loan breach pause - resume keeps the PAUSE action dates unchanged and only shortens the breach schedule
+    When Admin sets the business date to "01 January 2026"
+    And Admin creates a client with random data
+    And Admin creates a Working Capital Loan Product with custom breach config and overrides enabled:
+      | breachFrequency | breachFrequencyType | breachAmountCalculationType | breachAmount | delinquencyGraceDays |
+      | 6               | DAYS                | PERCENTAGE                  | 1.23         |                      |
+    And Admin creates a working capital loan using created product with the following data:
+      | submittedOnDate | expectedDisbursementDate | principalAmount | totalPaymentVolume | periodPaymentRate | discount |
+      | 01 January 2026 | 01 January 2026          | 9000            | 100000             | 18                | 0        |
+    And Admin successfully approves the working capital loan on "01 January 2026" with "9000" amount and expected disbursement date on "01 January 2026"
+    When Admin successfully disburse the Working Capital loan on "01 January 2026" with "9000" EUR transaction amount
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    When Admin sets the business date to "04 January 2026"
+    And Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | nearBreach | breach |
+      | 1            | 2026-01-01 | 2026-01-06 | 6            | 110.70           | 110.70            | null       | null   |
+    And Admin initiate a Working Capital loan breach pause with startDate "04 January 2026" and endDate "08 January 2026"
+    Then Working Capital loan breach action has the following data:
+      | action | startDate  | endDate    |
+      | PAUSE  | 2026-01-04 | 2026-01-08 |
+    And Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | nearBreach | breach |
+      | 1            | 2026-01-01 | 2026-01-11 | 11           | 110.70           | 110.70            | null       | null   |
+    When Admin sets the business date to "05 January 2026"
+    And Admin initiate a Working Capital loan breach resume with startDate "05 January 2026"
+    Then Working Capital loan breach action has the following data:
+      | action | startDate  | endDate    |
+      | PAUSE  | 2026-01-04 | 2026-01-08 |
+      | RESUME | 2026-01-05 |            |
+    And Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | nearBreach | breach |
+      | 1            | 2026-01-01 | 2026-01-08 | 8            | 110.70           | 110.70            | null       | null   |
+    Then Admin closes the Working Capital loan with a full repayment on "05 January 2026"
+
+  @TestRailId:C85262
+  Scenario: Verify working capital loan breach pause - COB-generated period after resume honours the shortened pause
+    When Admin sets the business date to "01 January 2026"
+    And Admin creates a client with random data
+    And Admin creates a Working Capital Loan Product with custom breach config and overrides enabled:
+      | breachFrequency | breachFrequencyType | breachAmountCalculationType | breachAmount | delinquencyGraceDays |
+      | 6               | DAYS                | PERCENTAGE                  | 1.23         |                      |
+    And Admin creates a working capital loan using created product with the following data:
+      | submittedOnDate | expectedDisbursementDate | principalAmount | totalPaymentVolume | periodPaymentRate | discount |
+      | 01 January 2026 | 01 January 2026          | 9000            | 100000             | 18                | 0        |
+    And Admin successfully approves the working capital loan on "01 January 2026" with "9000" amount and expected disbursement date on "01 January 2026"
+    When Admin successfully disburse the Working Capital loan on "01 January 2026" with "9000" EUR transaction amount
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    When Admin sets the business date to "04 January 2026"
+    And Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | nearBreach | breach |
+      | 1            | 2026-01-01 | 2026-01-06 | 6            | 110.70           | 110.70            | null       | null   |
+    And Admin initiate a Working Capital loan breach pause with startDate "04 January 2026" and endDate "08 January 2026"
+    Then Working Capital loan breach action has the following data:
+      | action | startDate  | endDate    |
+      | PAUSE  | 2026-01-04 | 2026-01-08 |
+    And Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | nearBreach | breach |
+      | 1            | 2026-01-01 | 2026-01-11 | 11           | 110.70           | 110.70            | null       | null   |
+    When Admin sets the business date to "05 January 2026"
+    And Admin initiate a Working Capital loan breach resume with startDate "05 January 2026"
+    When Admin sets the business date to "09 January 2026"
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    Then Working Capital loan breach action has the following data:
+      | action | startDate  | endDate    |
+      | PAUSE  | 2026-01-04 | 2026-01-08 |
+      | RESUME | 2026-01-05 |            |
+    Then Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | nearBreach | breach |
+      | 1            | 2026-01-01 | 2026-01-08 | 8            | 110.70           | 110.70            | null       | true   |
+      | 2            | 2026-01-09 | 2026-01-14 | 6            | 110.70           | 110.70            | null       | null   |
+    Then Admin closes the Working Capital loan with a full repayment on "09 January 2026"
+
+  @TestRailId:C85263
+  Scenario: Verify working capital loan breach pause - resume does not affect delinquency range schedule
+    When Admin sets the business date to "01 January 2026"
+    And Admin creates a client with random data
+    And Admin creates a Working Capital Loan Product with custom breach config and overrides enabled:
+      | breachFrequency | breachFrequencyType | breachAmountCalculationType | breachAmount | delinquencyGraceDays |
+      | 6               | DAYS                | PERCENTAGE                  | 1.23         |                      |
+    And Admin creates a working capital loan using created product with the following data:
+      | submittedOnDate | expectedDisbursementDate | principalAmount | totalPaymentVolume | periodPaymentRate | discount |
+      | 01 January 2026 | 01 January 2026          | 9000            | 100000             | 18                | 0        |
+    And Admin successfully approves the working capital loan on "01 January 2026" with "9000" amount and expected disbursement date on "01 January 2026"
+    When Admin successfully disburse the Working Capital loan on "01 January 2026" with "9000" EUR transaction amount
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    And Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | nearBreach | breach |
+      | 1            | 2026-01-01 | 2026-01-06 | 6            | 110.70           | 110.70            | null       | null   |
+    And Admin initiate a Working Capital loan breach pause with startDate "01 January 2026" and endDate "06 January 2026"
+    Then Working Capital loan breach action has the following data:
+      | action | startDate  | endDate    |
+      | PAUSE  | 2026-01-01 | 2026-01-06 |
+    And Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | nearBreach | breach |
+      | 1            | 2026-01-01 | 2026-01-12 | 12           | 110.70           | 110.70            | null       | null   |
+    When Admin sets the business date to "03 January 2026"
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    And Admin initiate a Working Capital loan breach resume with startDate "03 January 2026"
+    Then Working Capital loan breach action has the following data:
+      | action | startDate  | endDate    |
+      | PAUSE  | 2026-01-01 | 2026-01-06 |
+      | RESUME | 2026-01-03 |            |
+    Then Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | nearBreach | breach |
+      | 1            | 2026-01-01 | 2026-01-09 | 9            | 110.70           | 110.70            | null       | null   |
+    And Working Capital loan delinquency range schedule has the following data:
+      | periodNumber | fromDate   | toDate     | expectedAmount | paidAmount | outstandingAmount | minPaymentCriteriaMet | delinquentAmount | delinquentDays |
+      | 1            | 2026-01-01 | 2026-01-30 | 270.0          | 0.0        | 270.0             | null                  | null             | null           |
+    Then Admin closes the Working Capital loan with a full repayment on "03 January 2026"
+
+  @TestRailId:C85352
+  Scenario: Verify working capital loan breach pause - resume after a reschedule keeps the rescheduled minimum payment and shortens the schedule
+    When Admin sets the business date to "01 January 2026"
+    And Admin creates a client with random data
+    And Admin creates a Working Capital Loan Product with custom breach config and overrides enabled:
+      | breachFrequency | breachFrequencyType | breachAmountCalculationType | breachAmount | delinquencyGraceDays |
+      | 6               | DAYS                | PERCENTAGE                  | 1.23         |                      |
+    And Admin creates a working capital loan using created product with the following data:
+      | submittedOnDate | expectedDisbursementDate | principalAmount | totalPaymentVolume | periodPaymentRate | discount |
+      | 01 January 2026 | 01 January 2026          | 9000            | 100000             | 18                | 0        |
+    And Admin successfully approves the working capital loan on "01 January 2026" with "9000" amount and expected disbursement date on "01 January 2026"
+    When Admin successfully disburse the Working Capital loan on "01 January 2026" with "9000" EUR transaction amount
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    Then Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | nearBreach | breach |
+      | 1            | 2026-01-01 | 2026-01-06 | 6            | 110.70           | 110.70            | null       | null   |
+    When Admin creates WC breach reschedule action with the following parameters:
+      | minimumPayment | minimumPaymentType |
+      | 1              | PERCENTAGE         |
+    Then Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | nearBreach | breach |
+      | 1            | 2026-01-01 | 2026-01-06 | 6            | 90               | 90                | null       | null   |
+    # the minimumPayment-only reschedule keeps the configured 6-day frequency, so the period extends by the inclusive 5-day pause while the rescheduled minPayment (90) is preserved
+    When Admin initiate a Working Capital loan breach pause with startDate "02 January 2026" and endDate "06 January 2026"
+    Then Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | nearBreach | breach |
+      | 1            | 2026-01-01 | 2026-01-11 | 11           | 90               | 90                | null       | null   |
+    When Admin sets the business date to "04 January 2026"
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    And Admin initiate a Working Capital loan breach resume with startDate "04 January 2026"
+    Then Working Capital loan breach action has the following data:
+      | action     | startDate  | endDate    |
+      | RESCHEDULE | 2026-01-01 |            |
+      | PAUSE      | 2026-01-02 | 2026-01-06 |
+      | RESUME     | 2026-01-04 |            |
+    # resume folds into the pause with an effective inclusive end of 04 Jan (the resume date is still a paused day), shortening the extension from 5 to 3 days
+    And Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | nearBreach | breach |
+      | 1            | 2026-01-01 | 2026-01-09 | 9            | 90               | 90                | null       | null   |
+    Then Admin closes the Working Capital loan with a full repayment on "04 January 2026"
+
+  @TestRailId:C106731
+  Scenario: Verify working capital loan breach pause - backdated pause before an active breach reset is rejected
+    When Admin sets the business date to "01 January 2026"
+    And Admin creates a client with random data
+    And Admin creates a Working Capital Loan Product with custom breach config and overrides enabled:
+      | breachFrequency | breachFrequencyType | breachAmountCalculationType | breachAmount | delinquencyGraceDays |
+      | 6               | DAYS                | PERCENTAGE                  | 50           |                      |
+    And Admin creates a working capital loan using created product with the following data:
+      | submittedOnDate | expectedDisbursementDate | principalAmount | totalPaymentVolume | periodPaymentRate | discount |
+      | 01 January 2026 | 01 January 2026          | 800             | 10000              | 18                | 0        |
+    And Admin successfully approves the working capital loan on "01 January 2026" with "800" amount and expected disbursement date on "01 January 2026"
+    When Admin successfully disburse the Working Capital loan on "01 January 2026" with "800" EUR transaction amount
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    When Admin sets the business date to "08 January 2026"
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    When Admin sets the business date to "12 January 2026"
+    And Admin creates WC breach reset action with restart period from reset date
+    # The reset closes period 2 on the day before the reset date and starts period 3 on it
+    Then Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | nearBreach | breach |
+      | 1            | 2026-01-01 | 2026-01-06 | 6            | 400              | 400               | null       | true   |
+      | 2            | 2026-01-07 | 2026-01-11 | 5            | 400              | 400               | null       | true   |
+      | 3            | 2026-01-12 | 2026-01-17 | 6            | 400              | 400               | null       | null   |
+    # A pause backdated behind the reset would re-date the periods the reset already settled
+    Then Initiating a Working Capital loan breach pause with startDate "09 January 2026" and endDate "10 January 2026" results an error with the following data:
+      | httpCode | message                                                                  |
+      | 400      | Breach pause cannot start before the latest breach reset date: 2026-01-12 |
+    # A pause starting on the reset date itself is still allowed
+    And Admin initiate a Working Capital loan breach pause with startDate "12 January 2026" and endDate "13 January 2026"
+    Then Working Capital loan breach action has the following data:
+      | action | startDate  | endDate    |
+      | RESET  | 2026-01-12 |            |
+      | PAUSE  | 2026-01-12 | 2026-01-13 |
+    # The accepted pause must extend only the restarted period: the split and the settled breach flags stay
+    And Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | nearBreach | breach |
+      | 1            | 2026-01-01 | 2026-01-06 | 6            | 400              | 400               | null       | true   |
+      | 2            | 2026-01-07 | 2026-01-11 | 5            | 400              | 400               | null       | true   |
+      | 3            | 2026-01-12 | 2026-01-19 | 8            | 400              | 400               | null       | null   |
+    Then Admin closes the Working Capital loan with a full repayment on "12 January 2026"
+
+  @TestRailId:C106732
+  Scenario: Verify working capital loan breach pause - a pause recorded before a restart reset keeps the reset split when a later pause is added
+    When Admin sets the business date to "01 January 2026"
+    And Admin creates a client with random data
+    And Admin creates a Working Capital Loan Product with custom breach config and overrides enabled:
+      | breachFrequency | breachFrequencyType | breachAmountCalculationType | breachAmount | delinquencyGraceDays |
+      | 6               | DAYS                | PERCENTAGE                  | 50           |                      |
+    And Admin creates a working capital loan using created product with the following data:
+      | submittedOnDate | expectedDisbursementDate | principalAmount | totalPaymentVolume | periodPaymentRate | discount |
+      | 01 January 2026 | 01 January 2026          | 800             | 10000              | 18                | 0        |
+    And Admin successfully approves the working capital loan on "01 January 2026" with "800" amount and expected disbursement date on "01 January 2026"
+    When Admin successfully disburse the Working Capital loan on "01 January 2026" with "800" EUR transaction amount
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    When Admin sets the business date to "08 January 2026"
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    When Admin sets the business date to "09 January 2026"
+    # --- Pause recorded before the reset extends period 2 by 2 days ---
+    And Admin initiate a Working Capital loan breach pause with startDate "09 January 2026" and endDate "10 January 2026"
+    Then Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | breach | reset |
+      | 1            | 2026-01-01 | 2026-01-06 | 6            | 400.00           | 400.00            | true   | false |
+      | 2            | 2026-01-07 | 2026-01-14 | 8            | 400.00           | 400.00            | null   | false |
+    When Admin sets the business date to "12 January 2026"
+    And Admin creates WC breach reset action with restart period from reset date
+    Then Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | breach | reset |
+      | 1            | 2026-01-01 | 2026-01-06 | 6            | 400.00           | 400.00            | true   | false |
+      | 2            | 2026-01-07 | 2026-01-11 | 5            | 400.00           | 400.00            | true   | false |
+      | 3            | 2026-01-12 | 2026-01-17 | 6            | 400.00           | 400.00            | null   | true  |
+    # --- A valid pause after the reset must extend only the restarted period; the earlier pause must not re-open the cut ---
+    And Admin initiate a Working Capital loan breach pause with startDate "12 January 2026" and endDate "13 January 2026"
+    Then Working Capital loan breach action has the following data:
+      | action | startDate  | endDate    |
+      | PAUSE  | 2026-01-09 | 2026-01-10 |
+      | RESET  | 2026-01-12 |            |
+      | PAUSE  | 2026-01-12 | 2026-01-13 |
+    And Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | breach | reset |
+      | 1            | 2026-01-01 | 2026-01-06 | 6            | 400.00           | 400.00            | true   | false |
+      | 2            | 2026-01-07 | 2026-01-11 | 5            | 400.00           | 400.00            | true   | false |
+      | 3            | 2026-01-12 | 2026-01-19 | 8            | 400.00           | 400.00            | null   | true  |
+    Then Admin closes the Working Capital loan with a full repayment on "12 January 2026"
+
+  @TestRailId:C106733
+  Scenario: Verify working capital loan breach pause - a flag-only breach reset also rejects a backdated pause and a pause on its date only extends the flagged period
+    When Admin sets the business date to "01 January 2026"
+    And Admin creates a client with random data
+    And Admin creates a Working Capital Loan Product with custom breach config and overrides enabled:
+      | breachFrequency | breachFrequencyType | breachAmountCalculationType | breachAmount | delinquencyGraceDays |
+      | 6               | DAYS                | PERCENTAGE                  | 50           |                      |
+    And Admin creates a working capital loan using created product with the following data:
+      | submittedOnDate | expectedDisbursementDate | principalAmount | totalPaymentVolume | periodPaymentRate | discount |
+      | 01 January 2026 | 01 January 2026          | 800             | 10000              | 18                | 0        |
+    And Admin successfully approves the working capital loan on "01 January 2026" with "800" amount and expected disbursement date on "01 January 2026"
+    When Admin successfully disburse the Working Capital loan on "01 January 2026" with "800" EUR transaction amount
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    When Admin sets the business date to "08 January 2026"
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    When Admin sets the business date to "12 January 2026"
+    And Admin creates WC breach reset action
+    Then Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | breach | reset |
+      | 1            | 2026-01-01 | 2026-01-06 | 6            | 400.00           | 400.00            | true   | false |
+      | 2            | 2026-01-07 | 2026-01-12 | 6            | 400.00           | 400.00            | null   | true  |
+    Then Initiating a Working Capital loan breach pause with startDate "11 January 2026" and endDate "13 January 2026" results an error with the following data:
+      | httpCode | message                                                                  |
+      | 400      | Breach pause cannot start before the latest breach reset date: 2026-01-12 |
+    And Admin initiate a Working Capital loan breach pause with startDate "12 January 2026" and endDate "13 January 2026"
+    Then Working Capital loan breach action has the following data:
+      | action | startDate  | endDate    |
+      | RESET  | 2026-01-12 |            |
+      | PAUSE  | 2026-01-12 | 2026-01-13 |
+    And Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | breach | reset |
+      | 1            | 2026-01-01 | 2026-01-06 | 6            | 400.00           | 400.00            | true   | false |
+      | 2            | 2026-01-07 | 2026-01-14 | 8            | 400.00           | 400.00            | null   | true  |
+    Then Admin closes the Working Capital loan with a full repayment on "12 January 2026"
+
+  @TestRailId:C106734
+  Scenario: Verify working capital loan breach pause - an undone breach reset no longer blocks a backdated pause and the restored period absorbs it
+    When Admin sets the business date to "01 January 2026"
+    And Admin creates a client with random data
+    And Admin creates a Working Capital Loan Product with custom breach config and overrides enabled:
+      | breachFrequency | breachFrequencyType | breachAmountCalculationType | breachAmount | delinquencyGraceDays |
+      | 6               | DAYS                | PERCENTAGE                  | 50           |                      |
+    And Admin creates a working capital loan using created product with the following data:
+      | submittedOnDate | expectedDisbursementDate | principalAmount | totalPaymentVolume | periodPaymentRate | discount |
+      | 01 January 2026 | 01 January 2026          | 800             | 10000              | 18                | 0        |
+    And Admin successfully approves the working capital loan on "01 January 2026" with "800" amount and expected disbursement date on "01 January 2026"
+    When Admin successfully disburse the Working Capital loan on "01 January 2026" with "800" EUR transaction amount
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    When Admin sets the business date to "08 January 2026"
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    When Admin sets the business date to "12 January 2026"
+    And Admin creates WC breach reset action with restart period from reset date
+    Then Initiating a Working Capital loan breach pause with startDate "09 January 2026" and endDate "10 January 2026" results an error with the following data:
+      | httpCode | message                                                                  |
+      | 400      | Breach pause cannot start before the latest breach reset date: 2026-01-12 |
+    When Admin creates WC breach undo reset action
+    # The undo restores period 2 to its natural length; period 3 is generated because the business date is the last day of period 2
+    Then Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | breach | reset |
+      | 1            | 2026-01-01 | 2026-01-06 | 6            | 400.00           | 400.00            | true   | false |
+      | 2            | 2026-01-07 | 2026-01-12 | 6            | 400.00           | 400.00            | null   | false |
+      | 3            | 2026-01-13 | 2026-01-18 | 6            | 400.00           | 400.00            | null   | false |
+    And Admin initiate a Working Capital loan breach pause with startDate "09 January 2026" and endDate "10 January 2026"
+    Then Working Capital loan breach action has the following data:
+      | action     | startDate  | endDate    |
+      | RESET      | 2026-01-12 |            |
+      | UNDO_RESET | 2026-01-12 |            |
+      | PAUSE      | 2026-01-09 | 2026-01-10 |
+    And Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | breach | reset |
+      | 1            | 2026-01-01 | 2026-01-06 | 6            | 400.00           | 400.00            | true   | false |
+      | 2            | 2026-01-07 | 2026-01-14 | 8            | 400.00           | 400.00            | null   | false |
+      | 3            | 2026-01-15 | 2026-01-20 | 6            | 400.00           | 400.00            | null   | false |
+    Then Admin closes the Working Capital loan with a full repayment on "12 January 2026"
+
+  @TestRailId:C106735
+  Scenario: Verify working capital loan breach pause - the latest active breach reset is the pause boundary and the earlier reset takes over after an undo
+    When Admin sets the business date to "01 January 2026"
+    And Admin creates a client with random data
+    And Admin creates a Working Capital Loan Product with custom breach config and overrides enabled:
+      | breachFrequency | breachFrequencyType | breachAmountCalculationType | breachAmount | delinquencyGraceDays |
+      | 6               | DAYS                | PERCENTAGE                  | 50           |                      |
+    And Admin creates a working capital loan using created product with the following data:
+      | submittedOnDate | expectedDisbursementDate | principalAmount | totalPaymentVolume | periodPaymentRate | discount |
+      | 01 January 2026 | 01 January 2026          | 800             | 10000              | 18                | 0        |
+    And Admin successfully approves the working capital loan on "01 January 2026" with "800" amount and expected disbursement date on "01 January 2026"
+    When Admin successfully disburse the Working Capital loan on "01 January 2026" with "800" EUR transaction amount
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    When Admin sets the business date to "08 January 2026"
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    And Admin creates WC breach reset action with restart period from reset date
+    When Admin sets the business date to "14 January 2026"
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    And Admin creates WC breach reset action with restart period from reset date
+    Then Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | breach | reset |
+      | 1            | 2026-01-01 | 2026-01-06 | 6            | 400.00           | 400.00            | true   | false |
+      | 2            | 2026-01-07 | 2026-01-07 | 1            | 400.00           | 400.00            | true   | false |
+      | 3            | 2026-01-08 | 2026-01-13 | 6            | 400.00           | 400.00            | true   | true  |
+      | 4            | 2026-01-14 | 2026-01-19 | 6            | 400.00           | 400.00            | null   | true  |
+    # --- The latest active reset (14 Jan) is the boundary, even for a date after the earlier reset ---
+    Then Initiating a Working Capital loan breach pause with startDate "10 January 2026" and endDate "11 January 2026" results an error with the following data:
+      | httpCode | message                                                                  |
+      | 400      | Breach pause cannot start before the latest breach reset date: 2026-01-14 |
+    # --- Undoing the latest reset makes the earlier one the boundary ---
+    When Admin creates WC breach undo reset action
+    Then Initiating a Working Capital loan breach pause with startDate "05 January 2026" and endDate "06 January 2026" results an error with the following data:
+      | httpCode | message                                                                  |
+      | 400      | Breach pause cannot start before the latest breach reset date: 2026-01-08 |
+    And Admin initiate a Working Capital loan breach pause with startDate "10 January 2026" and endDate "11 January 2026"
+    Then Working Capital loan breach action has the following data:
+      | action     | startDate  | endDate    |
+      | RESET      | 2026-01-08 |            |
+      | RESET      | 2026-01-14 |            |
+      | UNDO_RESET | 2026-01-14 |            |
+      | PAUSE      | 2026-01-10 | 2026-01-11 |
+    And Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | breach | reset |
+      | 1            | 2026-01-01 | 2026-01-06 | 6            | 400.00           | 400.00            | true   | false |
+      | 2            | 2026-01-07 | 2026-01-07 | 1            | 400.00           | 400.00            | true   | false |
+      | 3            | 2026-01-08 | 2026-01-15 | 8            | 400.00           | 400.00            | null   | true  |
+      | 4            | 2026-01-16 | 2026-01-21 | 6            | 400.00           | 400.00            | null   | false |
+    Then Admin closes the Working Capital loan with a full repayment on "14 January 2026"
+
+  @TestRailId:C106785
+  Scenario: Verify working capital loan breach pause - a resume after a post-reset pause shortens only the restarted period and keeps the reset cut
+    When Admin sets the business date to "01 January 2026"
+    And Admin creates a client with random data
+    And Admin creates a Working Capital Loan Product with custom breach config and overrides enabled:
+      | breachFrequency | breachFrequencyType | breachAmountCalculationType | breachAmount | delinquencyGraceDays |
+      | 6               | DAYS                | PERCENTAGE                  | 50           |                      |
+    And Admin creates a working capital loan using created product with the following data:
+      | submittedOnDate | expectedDisbursementDate | principalAmount | totalPaymentVolume | periodPaymentRate | discount |
+      | 01 January 2026 | 01 January 2026          | 800             | 10000              | 18                | 0        |
+    And Admin successfully approves the working capital loan on "01 January 2026" with "800" amount and expected disbursement date on "01 January 2026"
+    When Admin successfully disburse the Working Capital loan on "01 January 2026" with "800" EUR transaction amount
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    When Admin sets the business date to "08 January 2026"
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    When Admin sets the business date to "09 January 2026"
+    And Admin initiate a Working Capital loan breach pause with startDate "09 January 2026" and endDate "10 January 2026"
+    When Admin sets the business date to "12 January 2026"
+    And Admin creates WC breach reset action with restart period from reset date
+    And Admin initiate a Working Capital loan breach pause with startDate "12 January 2026" and endDate "15 January 2026"
+    Then Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | breach | reset |
+      | 1            | 2026-01-01 | 2026-01-06 | 6            | 400.00           | 400.00            | true   | false |
+      | 2            | 2026-01-07 | 2026-01-11 | 5            | 400.00           | 400.00            | true   | false |
+      | 3            | 2026-01-12 | 2026-01-21 | 10           | 400.00           | 400.00            | null   | true  |
+    # --- Resume on 13 Jan: the pause is effectively 12-13 Jan, the replay must keep the cut ---
+    When Admin sets the business date to "13 January 2026"
+    And Admin initiate a Working Capital loan breach resume with startDate "13 January 2026"
+    Then Working Capital loan breach action has the following data:
+      | action | startDate  | endDate    |
+      | PAUSE  | 2026-01-09 | 2026-01-10 |
+      | RESET  | 2026-01-12 |            |
+      | PAUSE  | 2026-01-12 | 2026-01-15 |
+      | RESUME | 2026-01-13 |            |
+    And Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | breach | reset |
+      | 1            | 2026-01-01 | 2026-01-06 | 6            | 400.00           | 400.00            | true   | false |
+      | 2            | 2026-01-07 | 2026-01-11 | 5            | 400.00           | 400.00            | true   | false |
+      | 3            | 2026-01-12 | 2026-01-19 | 8            | 400.00           | 400.00            | null   | true  |
+    Then Admin closes the Working Capital loan with a full repayment on "13 January 2026"
+
+  @TestRailId:C111055
+  Scenario: Verify working capital loan breach pause - a restart reset recorded inside an active pause starts the restarted period on the reset date and a later pause keeps the cut
+    When Admin sets the business date to "01 January 2026"
+    And Admin creates a client with random data
+    And Admin creates a Working Capital Loan Product with custom breach config and overrides enabled:
+      | breachFrequency | breachFrequencyType | breachAmountCalculationType | breachAmount | delinquencyGraceDays |
+      | 6               | DAYS                | PERCENTAGE                  | 50           |                      |
+    And Admin creates a working capital loan using created product with the following data:
+      | submittedOnDate | expectedDisbursementDate | principalAmount | totalPaymentVolume | periodPaymentRate | discount |
+      | 01 January 2026 | 01 January 2026          | 800             | 10000              | 18                | 0        |
+    And Admin successfully approves the working capital loan on "01 January 2026" with "800" amount and expected disbursement date on "01 January 2026"
+    When Admin successfully disburse the Working Capital loan on "01 January 2026" with "800" EUR transaction amount
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    When Admin sets the business date to "08 January 2026"
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    When Admin sets the business date to "11 January 2026"
+    # --- Pause 11-13 Jan recorded before the reset, it spans the future reset date ---
+    And Admin initiate a Working Capital loan breach pause with startDate "11 January 2026" and endDate "13 January 2026"
+    Then Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | breach | reset |
+      | 1            | 2026-01-01 | 2026-01-06 | 6            | 400.00           | 400.00            | true   | false |
+      | 2            | 2026-01-07 | 2026-01-15 | 9            | 400.00           | 400.00            | null   | false |
+    And Working Capital loan balance has breach past due amount "400.00"
+    # --- Restart reset on 12 Jan while the pause is active: period 2 is cut the day before, the restarted period starts on the reset date ---
+    When Admin sets the business date to "12 January 2026"
+    And Admin creates WC breach reset action with restart period from reset date
+    Then Working Capital loan breach action has the following data:
+      | action | startDate  | endDate    |
+      | PAUSE  | 2026-01-11 | 2026-01-13 |
+      | RESET  | 2026-01-12 |            |
+    # Period 3 = 6 schedule days + the pause days 12 and 13 Jan; pause day 11 Jan stays in the cut period 2
+    And Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | breach | reset |
+      | 1            | 2026-01-01 | 2026-01-06 | 6            | 400.00           | 400.00            | true   | false |
+      | 2            | 2026-01-07 | 2026-01-11 | 5            | 400.00           | 400.00            | true   | false |
+      | 3            | 2026-01-12 | 2026-01-19 | 8            | 400.00           | 400.00            | null   | true  |
+    And Working Capital loan balance has breach past due amount "0.00"
+    # --- A later pause replays the whole schedule: the cut survives, only the restarted period grows ---
+    When Admin sets the business date to "14 January 2026"
+    And Admin initiate a Working Capital loan breach pause with startDate "14 January 2026" and endDate "14 January 2026"
+    Then Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | breach | reset |
+      | 1            | 2026-01-01 | 2026-01-06 | 6            | 400.00           | 400.00            | true   | false |
+      | 2            | 2026-01-07 | 2026-01-11 | 5            | 400.00           | 400.00            | true   | false |
+      | 3            | 2026-01-12 | 2026-01-20 | 9            | 400.00           | 400.00            | null   | true  |
+    And Working Capital loan balance has breach past due amount "0.00"
+    Then Admin closes the Working Capital loan with a full repayment on "14 January 2026"
+
+  @TestRailId:C111056
+  Scenario: Verify working capital loan breach pause - undo of a restart reset recorded inside an active pause restores the paused period and the reset can be recorded again
+    When Admin sets the business date to "01 January 2026"
+    And Admin creates a client with random data
+    And Admin creates a Working Capital Loan Product with custom breach config and overrides enabled:
+      | breachFrequency | breachFrequencyType | breachAmountCalculationType | breachAmount | delinquencyGraceDays |
+      | 6               | DAYS                | PERCENTAGE                  | 50           |                      |
+    And Admin creates a working capital loan using created product with the following data:
+      | submittedOnDate | expectedDisbursementDate | principalAmount | totalPaymentVolume | periodPaymentRate | discount |
+      | 01 January 2026 | 01 January 2026          | 800             | 10000              | 18                | 0        |
+    And Admin successfully approves the working capital loan on "01 January 2026" with "800" amount and expected disbursement date on "01 January 2026"
+    When Admin successfully disburse the Working Capital loan on "01 January 2026" with "800" EUR transaction amount
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    When Admin sets the business date to "08 January 2026"
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    When Admin sets the business date to "11 January 2026"
+    And Admin initiate a Working Capital loan breach pause with startDate "11 January 2026" and endDate "13 January 2026"
+    When Admin sets the business date to "12 January 2026"
+    And Admin creates WC breach reset action with restart period from reset date
+    Then Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | breach | reset |
+      | 1            | 2026-01-01 | 2026-01-06 | 6            | 400.00           | 400.00            | true   | false |
+      | 2            | 2026-01-07 | 2026-01-11 | 5            | 400.00           | 400.00            | true   | false |
+      | 3            | 2026-01-12 | 2026-01-19 | 8            | 400.00           | 400.00            | null   | true  |
+    And Working Capital loan balance has breach past due amount "0.00"
+    # --- Undo restores the pre-reset schedule: period 2 absorbs the whole pause again, no reset flag, period 1 is past due again ---
+    When Admin creates WC breach undo reset action
+    Then Working Capital loan breach action has the following data:
+      | action     | startDate  | endDate    |
+      | PAUSE      | 2026-01-11 | 2026-01-13 |
+      | RESET      | 2026-01-12 |            |
+      | UNDO_RESET | 2026-01-12 |            |
+    And Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | breach | reset |
+      | 1            | 2026-01-01 | 2026-01-06 | 6            | 400.00           | 400.00            | true   | false |
+      | 2            | 2026-01-07 | 2026-01-15 | 9            | 400.00           | 400.00            | null   | false |
+    And Working Capital loan balance has breach past due amount "400.00"
+    # --- The same reset recorded again inside the pause lands on the same geometry ---
+    When Admin creates WC breach reset action with restart period from reset date
+    Then Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | breach | reset |
+      | 1            | 2026-01-01 | 2026-01-06 | 6            | 400.00           | 400.00            | true   | false |
+      | 2            | 2026-01-07 | 2026-01-11 | 5            | 400.00           | 400.00            | true   | false |
+      | 3            | 2026-01-12 | 2026-01-19 | 8            | 400.00           | 400.00            | null   | true  |
+    And Working Capital loan balance has breach past due amount "0.00"
+    Then Admin closes the Working Capital loan with a full repayment on "12 January 2026"
+
+  @TestRailId:C111057
+  Scenario: Verify working capital loan breach pause - a resume of the pause that holds a restart reset shortens only the restarted period and keeps the cut
+    When Admin sets the business date to "01 January 2026"
+    And Admin creates a client with random data
+    And Admin creates a Working Capital Loan Product with custom breach config and overrides enabled:
+      | breachFrequency | breachFrequencyType | breachAmountCalculationType | breachAmount | delinquencyGraceDays |
+      | 6               | DAYS                | PERCENTAGE                  | 50           |                      |
+    And Admin creates a working capital loan using created product with the following data:
+      | submittedOnDate | expectedDisbursementDate | principalAmount | totalPaymentVolume | periodPaymentRate | discount |
+      | 01 January 2026 | 01 January 2026          | 800             | 10000              | 18                | 0        |
+    And Admin successfully approves the working capital loan on "01 January 2026" with "800" amount and expected disbursement date on "01 January 2026"
+    When Admin successfully disburse the Working Capital loan on "01 January 2026" with "800" EUR transaction amount
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    When Admin sets the business date to "08 January 2026"
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    When Admin sets the business date to "11 January 2026"
+    # --- Pause 11-15 Jan (5 days) recorded before the reset ---
+    And Admin initiate a Working Capital loan breach pause with startDate "11 January 2026" and endDate "15 January 2026"
+    Then Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | breach | reset |
+      | 1            | 2026-01-01 | 2026-01-06 | 6            | 400.00           | 400.00            | true   | false |
+      | 2            | 2026-01-07 | 2026-01-17 | 11           | 400.00           | 400.00            | null   | false |
+    When Admin sets the business date to "12 January 2026"
+    And Admin creates WC breach reset action with restart period from reset date
+    # Period 3 = 6 schedule days + the pause days 12-15 Jan
+    Then Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | breach | reset |
+      | 1            | 2026-01-01 | 2026-01-06 | 6            | 400.00           | 400.00            | true   | false |
+      | 2            | 2026-01-07 | 2026-01-11 | 5            | 400.00           | 400.00            | true   | false |
+      | 3            | 2026-01-12 | 2026-01-21 | 10           | 400.00           | 400.00            | null   | true  |
+    And Working Capital loan balance has breach past due amount "0.00"
+    # --- Resume on 13 Jan: the pause is effectively 11-13 Jan, only the days 12-13 Jan still extend the restarted period ---
+    When Admin sets the business date to "13 January 2026"
+    And Admin initiate a Working Capital loan breach resume with startDate "13 January 2026"
+    Then Working Capital loan breach action has the following data:
+      | action | startDate  | endDate    |
+      | PAUSE  | 2026-01-11 | 2026-01-15 |
+      | RESET  | 2026-01-12 |            |
+      | RESUME | 2026-01-13 |            |
+    And Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | breach | reset |
+      | 1            | 2026-01-01 | 2026-01-06 | 6            | 400.00           | 400.00            | true   | false |
+      | 2            | 2026-01-07 | 2026-01-11 | 5            | 400.00           | 400.00            | true   | false |
+      | 3            | 2026-01-12 | 2026-01-19 | 8            | 400.00           | 400.00            | null   | true  |
+    And Working Capital loan balance has breach past due amount "0.00"
+    Then Admin closes the Working Capital loan with a full repayment on "13 January 2026"
+
+  @TestRailId:C111058
+  Scenario: Verify working capital loan breach pause - a restart reset on the last day of an active pause keeps only that day in the restarted period
+    When Admin sets the business date to "01 January 2026"
+    And Admin creates a client with random data
+    And Admin creates a Working Capital Loan Product with custom breach config and overrides enabled:
+      | breachFrequency | breachFrequencyType | breachAmountCalculationType | breachAmount | delinquencyGraceDays |
+      | 6               | DAYS                | PERCENTAGE                  | 50           |                      |
+    And Admin creates a working capital loan using created product with the following data:
+      | submittedOnDate | expectedDisbursementDate | principalAmount | totalPaymentVolume | periodPaymentRate | discount |
+      | 01 January 2026 | 01 January 2026          | 800             | 10000              | 18                | 0        |
+    And Admin successfully approves the working capital loan on "01 January 2026" with "800" amount and expected disbursement date on "01 January 2026"
+    When Admin successfully disburse the Working Capital loan on "01 January 2026" with "800" EUR transaction amount
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    When Admin sets the business date to "08 January 2026"
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    When Admin sets the business date to "11 January 2026"
+    # --- Pause 11-12 Jan: the reset lands on its last day ---
+    And Admin initiate a Working Capital loan breach pause with startDate "11 January 2026" and endDate "12 January 2026"
+    Then Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | breach | reset |
+      | 1            | 2026-01-01 | 2026-01-06 | 6            | 400.00           | 400.00            | true   | false |
+      | 2            | 2026-01-07 | 2026-01-14 | 8            | 400.00           | 400.00            | null   | false |
+    When Admin sets the business date to "12 January 2026"
+    And Admin creates WC breach reset action with restart period from reset date
+    # Period 3 = 6 schedule days + the single pause day 12 Jan
+    Then Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | breach | reset |
+      | 1            | 2026-01-01 | 2026-01-06 | 6            | 400.00           | 400.00            | true   | false |
+      | 2            | 2026-01-07 | 2026-01-11 | 5            | 400.00           | 400.00            | true   | false |
+      | 3            | 2026-01-12 | 2026-01-18 | 7            | 400.00           | 400.00            | null   | true  |
+    And Working Capital loan balance has breach past due amount "0.00"
+    # --- A pause recorded right after the first one ended replays without re-opening the cut ---
+    When Admin sets the business date to "13 January 2026"
+    And Admin initiate a Working Capital loan breach pause with startDate "13 January 2026" and endDate "13 January 2026"
+    Then Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | breach | reset |
+      | 1            | 2026-01-01 | 2026-01-06 | 6            | 400.00           | 400.00            | true   | false |
+      | 2            | 2026-01-07 | 2026-01-11 | 5            | 400.00           | 400.00            | true   | false |
+      | 3            | 2026-01-12 | 2026-01-19 | 8            | 400.00           | 400.00            | null   | true  |
+    And Working Capital loan balance has breach past due amount "0.00"
+    Then Admin closes the Working Capital loan with a full repayment on "13 January 2026"
+
+  @TestRailId:C111059
+  Scenario: Verify working capital loan breach pause - a frequency reschedule that would end the restarted period under a pause before the business date is rejected
+    When Admin sets the business date to "01 January 2026"
+    And Admin creates a client with random data
+    And Admin creates a Working Capital Loan Product with custom breach config and overrides enabled:
+      | breachFrequency | breachFrequencyType | breachAmountCalculationType | breachAmount | delinquencyGraceDays |
+      | 6               | DAYS                | PERCENTAGE                  | 50           |                      |
+    And Admin creates a working capital loan using created product with the following data:
+      | submittedOnDate | expectedDisbursementDate | principalAmount | totalPaymentVolume | periodPaymentRate | discount |
+      | 01 January 2026 | 01 January 2026          | 800             | 10000              | 18                | 0        |
+    And Admin successfully approves the working capital loan on "01 January 2026" with "800" amount and expected disbursement date on "01 January 2026"
+    When Admin successfully disburse the Working Capital loan on "01 January 2026" with "800" EUR transaction amount
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    When Admin sets the business date to "08 January 2026"
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    When Admin sets the business date to "11 January 2026"
+    And Admin initiate a Working Capital loan breach pause with startDate "11 January 2026" and endDate "13 January 2026"
+    When Admin sets the business date to "12 January 2026"
+    And Admin creates WC breach reset action with restart period from reset date
+    Then Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | breach | reset |
+      | 1            | 2026-01-01 | 2026-01-06 | 6            | 400.00           | 400.00            | true   | false |
+      | 2            | 2026-01-07 | 2026-01-11 | 5            | 400.00           | 400.00            | true   | false |
+      | 3            | 2026-01-12 | 2026-01-19 | 8            | 400.00           | 400.00            | null   | true  |
+    When Admin sets the business date to "16 January 2026"
+    # A 2-day frequency re-dates period 3 to 12-15 Jan (2 days + pause days 12-13 Jan), which is before the business date
+    Then Admin fails to create WC breach reschedule action with minimumPayment 50 PERCENTAGE and frequency 2 DAYS with error containing "Frequency change results a breach period endDate before current businessDate is not allowed"
+    And Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | breach | reset |
+      | 1            | 2026-01-01 | 2026-01-06 | 6            | 400.00           | 400.00            | true   | false |
+      | 2            | 2026-01-07 | 2026-01-11 | 5            | 400.00           | 400.00            | true   | false |
+      | 3            | 2026-01-12 | 2026-01-19 | 8            | 400.00           | 400.00            | null   | true  |
+    Then Admin closes the Working Capital loan with a full repayment on "16 January 2026"

@@ -19,13 +19,15 @@
 
 package org.apache.fineract.infrastructure.core.config;
 
+import static org.springframework.transaction.TransactionDefinition.PROPAGATION_REQUIRES_NEW;
+
 import java.util.List;
 import org.apache.fineract.infrastructure.core.persistence.ExtendedDataSourceTransactionManager;
 import org.apache.fineract.infrastructure.core.persistence.TransactionLifecycleCallback;
 import org.apache.fineract.infrastructure.core.service.database.RoutingDataSource;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.boot.autoconfigure.transaction.TransactionManagerCustomizers;
+import org.springframework.boot.transaction.autoconfigure.TransactionManagerCustomizers;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -46,21 +48,11 @@ public class JdbcTransactionConfig {
         return transactionManager;
     }
 
-    @Bean
-    public PlatformTransactionManager batchJdbcTransactionManager(FineractProperties fineractProperties, RoutingDataSource dataSource,
-            ObjectProvider<TransactionManagerCustomizers> transactionManagerCustomizers, List<TransactionLifecycleCallback> callbacks) {
-        boolean readOnly = fineractProperties.getMode().isReadOnlyMode();
-        ExtendedDataSourceTransactionManager transactionManager = new ExtendedDataSourceTransactionManager(readOnly);
-        transactionManager.setDataSource(dataSource);
-        transactionManager.setLifecycleCallbacks(callbacks);
-        transactionManager.setValidateExistingTransaction(true);
-        transactionManagerCustomizers.ifAvailable(customizers -> customizers.customize(transactionManager));
-        return transactionManager;
-    }
-
-    @Bean
-    public TransactionTemplate batchJdbcTransactionTemplate(
-            @Qualifier("batchJdbcTransactionManager") PlatformTransactionManager batchJdbcTransactionManager) {
-        return new TransactionTemplate(batchJdbcTransactionManager);
+    @Bean("requiresNewTransactionJdbcTemplate")
+    public TransactionTemplate requiresNewTransactionJdbcTemplate(
+            @Qualifier("jdbcTransactionManager") PlatformTransactionManager jdbcTransactionManager) {
+        TransactionTemplate transactionTemplate = new TransactionTemplate(jdbcTransactionManager);
+        transactionTemplate.setPropagationBehavior(PROPAGATION_REQUIRES_NEW);
+        return transactionTemplate;
     }
 }

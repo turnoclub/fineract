@@ -19,15 +19,18 @@
 package org.apache.fineract.portfolio.loanaccount.domain;
 
 import java.math.BigDecimal;
+import java.util.List;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 public interface GLIMAccountInfoRepository
         extends JpaRepository<GroupLoanIndividualMonitoringAccount, Long>, JpaSpecificationExecutor<GroupLoanIndividualMonitoringAccount> {
 
-    GroupLoanIndividualMonitoringAccount findOneByIsAcceptingChild(boolean acceptingChild);
-
     GroupLoanIndividualMonitoringAccount findOneByIsAcceptingChildAndApplicationId(boolean acceptingChild, BigDecimal applicationId);
 
-    GroupLoanIndividualMonitoringAccount findOneByAccountNumber(String accountNumber);
+    @Query("select loan.id from GroupLoanIndividualMonitoringAccount glim join glim.childLoan loan where glim.isAcceptingChild = :acceptingChild and glim.applicationId = :applicationId")
+    List<Long> findChildLoanIdsByIsAcceptingChildAndApplicationId(@Param("acceptingChild") boolean acceptingChild,
+            @Param("applicationId") BigDecimal applicationId);
 }

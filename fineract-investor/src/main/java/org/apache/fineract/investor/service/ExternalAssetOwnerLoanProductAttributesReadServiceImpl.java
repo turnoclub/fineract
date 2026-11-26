@@ -25,6 +25,8 @@ import lombok.RequiredArgsConstructor;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.fineract.infrastructure.core.service.Page;
 import org.apache.fineract.investor.data.ExternalTransferLoanProductAttributesData;
+import org.apache.fineract.investor.data.ExternalTransferLoanProductAttributesTemplateData;
+import org.apache.fineract.investor.data.attribute.ExternalAssetOwnerLoanProductAttribute;
 import org.apache.fineract.investor.domain.ExternalAssetOwnerLoanProductAttributes;
 import org.apache.fineract.investor.domain.ExternalAssetOwnerLoanProductAttributesRepository;
 import org.apache.fineract.portfolio.loanproduct.domain.LoanProductRepository;
@@ -44,6 +46,16 @@ public class ExternalAssetOwnerLoanProductAttributesReadServiceImpl implements E
     private final ExternalAssetOwnerLoanProductAttributesRepository externalAssetOwnerLoanProductAttributesRepository;
     private final LoanProductRepository loanProductRepository;
     private final ExternalAssetOwnerLoanProductAttributesMapper mapper;
+    private final ExternalAssetOwnerLoanProductAttributeProvider attributeProvider;
+
+    @Override
+    public List<ExternalTransferLoanProductAttributesTemplateData> retrieveExternalAssetOwnerLoanProductAttributesTemplate() {
+        List<ExternalTransferLoanProductAttributesTemplateData> result = new ArrayList<>();
+
+        attributeProvider.retrieveAll().forEach(attribute -> addAttributeValues(result, attribute));
+
+        return result;
+    }
 
     @Override
     @Cacheable(cacheNames = "externalAssetOwnerLoanProductAttributes", key = "T(org.apache.fineract.infrastructure.core.service.ThreadLocalContextUtil).getTenant().getTenantIdentifier().concat(#loanProductId.toString() + #attributeKey)", unless = "#attributeKey == null")
@@ -61,6 +73,19 @@ public class ExternalAssetOwnerLoanProductAttributesReadServiceImpl implements E
                 pageOfAttributeData.getNumberOfElements());
     }
 
+    private void addAttributeValues(List<ExternalTransferLoanProductAttributesTemplateData> result,
+            ExternalAssetOwnerLoanProductAttribute attribute) {
+        if (result.stream().anyMatch(data -> data.getAttributeKey().equals(attribute.getAttributeKey()))) {
+            return;
+        }
+
+        ExternalTransferLoanProductAttributesTemplateData data = new ExternalTransferLoanProductAttributesTemplateData();
+        data.setAttributeKey(attribute.getAttributeKey());
+        data.setAttributeValues(attribute.getAttributeValues());
+        data.setMultiValue(attribute.isMultiValue());
+        result.add(data);
+    }
+
     private void validateLoanProduct(final Long loanProductId) {
         if (loanProductId == null) {
             throw new IllegalArgumentException("At least one of the following parameters must be provided: loanProductId");
@@ -70,7 +95,7 @@ public class ExternalAssetOwnerLoanProductAttributesReadServiceImpl implements E
         }
     }
 
-    public static Specification<ExternalAssetOwnerLoanProductAttributes> retrieveLoanProductAttributesByLoanProductIdAndAttributeKeySpecification(
+    private static Specification<ExternalAssetOwnerLoanProductAttributes> retrieveLoanProductAttributesByLoanProductIdAndAttributeKeySpecification(
             final Long loanProductId, final String attributeKey) {
         return (root, query, cb) -> {
             List<Predicate> predicates = new ArrayList<>();

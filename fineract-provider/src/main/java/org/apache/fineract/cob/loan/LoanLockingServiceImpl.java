@@ -18,9 +18,13 @@
  */
 package org.apache.fineract.cob.loan;
 
+import static org.apache.fineract.query.QMLoanAccountLocks.mLoanAccountLocks;
+
+import com.querydsl.sql.SQLQueryFactory;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.fineract.cob.domain.AbstractLockingService;
 import org.apache.fineract.infrastructure.core.config.FineractProperties;
+import org.apache.fineract.infrastructure.core.service.database.DatabaseSpecificSQLGenerator;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 @Slf4j
@@ -36,8 +40,9 @@ public class LoanLockingServiceImpl extends AbstractLockingService {
                 UPDATE m_loan_account_locks SET version= version + 1, lock_owner = ?, lock_placed_on = ? WHERE loan_id = ?
             """;
 
-    public LoanLockingServiceImpl(JdbcTemplate jdbcTemplate, FineractProperties fineractProperties) {
-        super(jdbcTemplate, fineractProperties);
+    public LoanLockingServiceImpl(final JdbcTemplate jdbcTemplate, final DatabaseSpecificSQLGenerator sqlGenerator,
+            final FineractProperties fineractProperties, final SQLQueryFactory queryFactory) {
+        super(jdbcTemplate, sqlGenerator, fineractProperties, queryFactory, mLoanAccountLocks, mLoanAccountLocks.loanId);
     }
 
     @Override

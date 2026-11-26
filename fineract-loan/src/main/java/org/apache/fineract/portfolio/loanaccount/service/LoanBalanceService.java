@@ -23,6 +23,7 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import org.apache.fineract.infrastructure.core.persistence.FlushModeHandler;
@@ -32,6 +33,7 @@ import org.apache.fineract.organisation.monetary.domain.MonetaryCurrency;
 import org.apache.fineract.organisation.monetary.domain.Money;
 import org.apache.fineract.portfolio.loanaccount.domain.Loan;
 import org.apache.fineract.portfolio.loanaccount.domain.LoanCharge;
+import org.apache.fineract.portfolio.loanaccount.domain.LoanCreditAllocationRule;
 import org.apache.fineract.portfolio.loanaccount.domain.LoanDisbursementDetails;
 import org.apache.fineract.portfolio.loanaccount.domain.LoanInstallmentCharge;
 import org.apache.fineract.portfolio.loanaccount.domain.LoanRepaymentScheduleInstallment;
@@ -39,8 +41,7 @@ import org.apache.fineract.portfolio.loanaccount.domain.LoanRepaymentSchedulePro
 import org.apache.fineract.portfolio.loanaccount.domain.LoanSummary;
 import org.apache.fineract.portfolio.loanaccount.domain.LoanTransaction;
 import org.apache.fineract.portfolio.loanaccount.domain.LoanTransactionComparator;
-import org.apache.fineract.portfolio.loanaccount.domain.LoanTransactionRepository;
-import org.apache.fineract.portfolio.loanproduct.domain.CreditAllocationTransactionType;
+import org.apache.fineract.portfolio.loanproduct.domain.CreditAllocationStrategy;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -78,10 +79,13 @@ public class LoanBalanceService {
                     totalPaidInRepayments = totalPaidInRepayments.minus(loanTransaction.getOverPaymentPortion(currency));
                 }
             } else if (loanTransaction.isChargeback()) {
-                if (loanTransaction.getPrincipalPortion(currency).isZero() && loan.getCreditAllocationRules().stream() //
-                        .filter(car -> car.getTransactionType().equals(CreditAllocationTransactionType.CHARGEBACK)) //
-                        .findAny() //
-                        .isEmpty()) {
+                final CreditAllocationStrategy creditAllocationStrategy = LoanCreditAllocationRule
+                        .resolveAllocationStrategy(loan.getCreditAllocationRules(), loanTransaction.getTypeOf());
+                final boolean overpaymentCoversPrincipalOnly = switch (creditAllocationStrategy) {
+                    case PRINCIPAL_ONLY -> true;
+                    case RULE_BASED -> false;
+                };
+                if (loanTransaction.getPrincipalPortion(currency).isZero() && overpaymentCoversPrincipalOnly) {
                     totalPaidInRepayments = totalPaidInRepayments.minus(loanTransaction.getOverPaymentPortion(currency));
                 }
             }
@@ -136,8 +140,9 @@ public class LoanBalanceService {
         }
         if (MathUtil.isZero(summary.getTotalFeeChargesOutstanding())) {
             for (final LoanCharge charge : charges) {
+                // the fee of a tranche that is not disbursed yet is in no installment, so the summary does not cover it
                 if (charge.isActive() && charge.isFeeCharge() && !charge.isPaid() && !charge.isWaived()
-                        && MathUtil.isGreaterThanZero(charge.getAmount())) {
+                        && !charge.isDownPaymentFeeAwaitingDisbursement() && MathUtil.isGreaterThanZero(charge.getAmount())) {
                     charge.reconcileFullyPaid();
                 }
             }
@@ -152,10 +157,17 @@ public class LoanBalanceService {
         }
     }
 
-    private Money calculateTotalRecoveredPayments(Loan loan) {
-        // in case logic for reversing recovered payment is implemented handle subtraction from totalRecoveredPayments
-        final BigDecimal totalRecoveryAmount = loanTransactionRepository.calculateTotalRecoveryPaymentAmount(loan);
-        return Money.of(loan.getCurrency(), totalRecoveryAmount);
+    Money calculateTotalRecoveredPayments(final Loan loan) {
+        // Summed from the loan's transactions rather than queried: the summary is refreshed with FlushModeType.COMMIT
+        // before a new recovery payment is saved, so a query would not see it yet.
+        final MonetaryCurrency currency = loan.getCurrency();
+        Money totalRecovered = Money.zero(currency);
+        for (final LoanTransaction transaction : loan.getLoanTransactions()) {
+            if (transaction.isRecoveryRepayment()) {
+                totalRecovered = totalRecovered.plus(transaction.getAmount(currency));
+            }
+        }
+        return totalRecovered;
     }
 
     public void updateLoanOutstandingBalances(Loan loan) {
@@ -176,8 +188,10 @@ public class LoanBalanceService {
             } else if (loanTransaction.isChargeback() || loanTransaction.isCreditBalanceRefund()) {
                 Money transactionOutstanding = loanTransaction.getPrincipalPortion(loan.getCurrency());
                 if (loanTransaction.isOverPaid()) {
-                    // in case of advanced payment strategy and creditAllocations the full amount is recognized first
-                    if (loan.getCreditAllocationRules() != null && !loan.getCreditAllocationRules().isEmpty()) {
+                    // in case of advanced payment strategy and rule based creditAllocations the full amount is
+                    // recognized first
+                    if (loan.getCreditAllocationRules() != null && loan.getCreditAllocationRules().stream()
+                            .anyMatch(rule -> rule.getAllocationStrategy() == CreditAllocationStrategy.RULE_BASED)) {
                         Money payedPrincipal = loanTransaction.getLoanTransactionToRepaymentScheduleMappings().stream() //
                                 .map(mapping -> mapping.getPrincipalPortion(loan.getCurrency())) //
                                 .reduce(Money.zero(loan.getCurrency()), Money::plus);
@@ -222,21 +236,29 @@ public class LoanBalanceService {
     }
 
     public Money getReceivableInterest(final Loan loan, final LocalDate tillDate) {
+        return getReceivableInterest(loan, tillDate, null);
+    }
+
+    /**
+     * Interest accrued but not yet received or waived up to {@code tillDate}, leaving out {@code excludedTransaction}.
+     * An adjustment builds the replacement of a transaction before it reverses the original, so the original has to be
+     * left out explicitly for the replacement to see the balance it will actually apply to.
+     */
+    public Money getReceivableInterest(final Loan loan, final LocalDate tillDate, final LoanTransaction excludedTransaction) {
         Money receivableInterest = Money.zero(loan.getCurrency());
         for (final LoanTransaction transaction : loan.getLoanTransactions()) {
-            if (transaction.isNotReversed() && !transaction.isRepaymentAtDisbursement() && !transaction.isDisbursement()
-                    && !DateUtils.isAfter(transaction.getTransactionDate(), tillDate)) {
+            if (!Objects.equals(transaction, excludedTransaction) && transaction.isNotReversed() && !transaction.isRepaymentAtDisbursement()
+                    && !transaction.isDisbursement() && !DateUtils.isAfter(transaction.getTransactionDate(), tillDate)) {
                 if (transaction.isAccrual()) {
                     receivableInterest = receivableInterest.plus(transaction.getInterestPortion(loan.getCurrency()));
                 } else if (transaction.isRepaymentLikeType() || transaction.isInterestWaiver() || transaction.isAccrualAdjustment()) {
                     receivableInterest = receivableInterest.minus(transaction.getInterestPortion(loan.getCurrency()));
                 }
             }
-            if (receivableInterest.isLessThanZero()) {
-                receivableInterest = receivableInterest.zero();
-            }
         }
-        return receivableInterest;
+        // Floor only the net balance: interest received before it is accrued (a repayment made before the accrual job
+        // posts that interest) offsets that later accrual instead of leaving it receivable.
+        return receivableInterest.isLessThanZero() ? receivableInterest.zero() : receivableInterest;
     }
 
     public LoanRepaymentScheduleInstallment fetchLoanForeclosureDetail(final Loan loan, final LocalDate closureDate) {

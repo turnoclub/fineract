@@ -40,6 +40,8 @@ public final class WorkingCapitalLoanProductConstants {
 
     // Settings
     public static final String amortizationTypeParamName = "amortizationType";
+    public static final String paymentAmountCalculationStrategyParamName = "paymentAmountCalculationStrategy";
+    public static final String annualEirParamName = "annualEir";
     public static final String delinquencyBucketIdParamName = "delinquencyBucketId";
     public static final String npvDayCountParamName = "npvDayCount";
     public static final String paymentAllocationParamName = "paymentAllocation";
@@ -51,9 +53,15 @@ public final class WorkingCapitalLoanProductConstants {
     public static final String minPeriodPaymentRateParamName = "minPeriodPaymentRate";
     public static final String periodPaymentRateParamName = "periodPaymentRate";
     public static final String maxPeriodPaymentRateParamName = "maxPeriodPaymentRate";
+    public static final String minAnnualEirParamName = "minAnnualEir";
+    public static final String maxAnnualEirParamName = "maxAnnualEir";
+    public static final String paymentAmountParamName = "paymentAmount";
+    public static final String minPaymentAmountParamName = "minPaymentAmount";
+    public static final String maxPaymentAmountParamName = "maxPaymentAmount";
     public static final String discountParamName = "discount";
     public static final String repaymentEveryParamName = "repaymentEvery";
     public static final String repaymentFrequencyTypeParamName = "repaymentFrequencyType";
+    public static final String INVALID_PERIOD_FREQUENCY_TYPE_CODE = "invalid.period.frequency.type";
     public static final String breachIdParamName = "breachId";
     public static final String nearBreachIdParamName = "nearBreachId";
 
@@ -68,6 +76,14 @@ public final class WorkingCapitalLoanProductConstants {
     // Delinquency grace
     public static final String delinquencyGraceDaysParamName = "delinquencyGraceDays";
     public static final String delinquencyStartTypeParamName = "delinquencyStartType";
+    public static final String cannotEnableDelinquencyGraceDaysWithoutBucket = "cannot.enable.delinquency.grace.days.without.delinquency.bucket";
+    public static final String cannotEnableDelinquencyStartTypeWithoutBucket = "cannot.enable.delinquency.start.type.without.delinquency.bucket";
+
+    // Breach grace
+    public static final String breachGraceDaysParamName = "breachGraceDays";
+    public static final String breachStartTypeParamName = "breachStartType";
+    public static final String cannotEnableBreachGraceDaysWithoutBreach = "cannot.enable.breach.grace.days.without.breach";
+    public static final String cannotEnableBreachStartTypeWithoutBreach = "cannot.enable.breach.start.type.without.breach";
 
     // Accounting
     public static final String accountingRuleParamName = "accountingRule";
@@ -106,4 +122,7 @@ public final class WorkingCapitalLoanProductConstants {
 
     // Resource name for permissions
     public static final String WCLP_RESOURCE_NAME = "WORKINGCAPITALLOANPRODUCT";
+
+    public static final String DELINQUENCY_BUCKET_ID_MUST_BE_OF_TYPE_VALIDATION_CODE = "validation.msg." + WCLP_RESOURCE_NAME
+            + ".delinquencyBucketId.must.be.of.type";
 }

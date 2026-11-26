@@ -19,7 +19,6 @@
 package org.apache.fineract.portfolio.loanaccount.service;
 
 import jakarta.persistence.FlushModeType;
-import jakarta.transaction.Transactional;
 import java.time.LocalDate;
 import java.util.Optional;
 import java.util.Set;
@@ -40,6 +39,7 @@ import org.apache.fineract.portfolio.loanaccount.repository.ProgressiveLoanModel
 import org.apache.fineract.portfolio.loanproduct.calc.data.ProgressiveLoanInterestScheduleModel;
 import org.apache.fineract.portfolio.loanproduct.domain.ILoanConfigurationDetails;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 @Service
 @RequiredArgsConstructor
@@ -49,6 +49,7 @@ public class InterestScheduleModelRepositoryWrapperImpl implements InterestSched
     private final ProgressiveLoanInterestScheduleModelParserService progressiveLoanInterestScheduleModelParserService;
     private final AdvancedPaymentScheduleTransactionProcessor advancedPaymentScheduleTransactionProcessor;
     private final FlushModeHandler flushModeHandler;
+    private final LoanMeetingCalendarService loanMeetingCalendarService;
 
     @Transactional
     @Override
@@ -75,11 +76,11 @@ public class InterestScheduleModelRepositoryWrapperImpl implements InterestSched
 
     @Override
     public Optional<ProgressiveLoanModel> findOneByLoanId(Long loanId) {
-        final Optional[] progressiveLoanModel = new Optional[1];
+        AtomicReference<Optional<ProgressiveLoanModel>> progressiveLoanModel = new AtomicReference<>();
         flushModeHandler.withFlushMode(FlushModeType.COMMIT, () -> {
-            progressiveLoanModel[0] = loanModelRepository.findOneByLoanId(loanId);
+            progressiveLoanModel.set(loanModelRepository.findOneByLoanId(loanId));
         });
-        return progressiveLoanModel[0];
+        return progressiveLoanModel.get();
     }
 
     @Override
@@ -95,7 +96,8 @@ public class InterestScheduleModelRepositoryWrapperImpl implements InterestSched
     public Optional<ProgressiveLoanInterestScheduleModel> extractModel(Optional<ProgressiveLoanModel> progressiveLoanModel) {
         return progressiveLoanModel.map(ProgressiveLoanModel::getJsonModel) //
                 .map(jsonModel -> progressiveLoanInterestScheduleModelParserService.fromJson(jsonModel,
-                        LoanConfigurationDetailsMapper.map(progressiveLoanModel.get().getLoan()), MoneyHelper.getMathContext(),
+                        LoanConfigurationDetailsMapper.map(progressiveLoanModel.get().getLoan(), loanMeetingCalendarService),
+                        MoneyHelper.getMathContext(),
                         progressiveLoanModel.get().getLoan().getLoanProductRelatedDetail().getInstallmentAmountInMultiplesOf()));
     }
 
@@ -118,7 +120,7 @@ public class InterestScheduleModelRepositoryWrapperImpl implements InterestSched
                         loan.getActiveLoanTermVariations());
                 ctx.setChargedOff(loan.isChargedOff());
                 ctx.setWrittenOff(loan.isClosedWrittenOff());
-                ctx.setContractTerminated(loan.isContractTermination());
+                ctx.setContractTerminated(loan.isTerminatedEarly());
                 advancedPaymentScheduleTransactionProcessor.recalculateInterestForDate(businessDate, ctx);
             }
         } else {

@@ -18,6 +18,8 @@
  */
 package org.apache.fineract.useradministration.domain;
 
+import java.util.Collection;
+import java.util.List;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
@@ -30,5 +32,14 @@ public interface RoleRepository extends JpaRepository<Role, Long>, JpaSpecificat
 
     @Query("SELECT role FROM Role role WHERE LOWER(role.name) = LOWER(:name)")
     Role getRoleByName(@Param("name") String name);
+
+    @Query("SELECT role FROM Role role WHERE role.disabled = false AND LOWER(role.name) IN :lowerCaseNames")
+    List<Role> findEnabledByLowerCaseNames(@Param("lowerCaseNames") Collection<String> lowerCaseNames);
+
+    // Lets a caller unassign a permission from every role holding it before deleting the permission itself -
+    // m_role_permission has a FK onto m_permission that a plain permissionRepository.delete(...) doesn't clean
+    // up, since JPA only maintains this @ManyToMany join table from the Role (owning) side.
+    @Query("SELECT role FROM Role role JOIN role.permissions p WHERE p.id = :permissionId")
+    List<Role> findByPermissionId(@Param("permissionId") Long permissionId);
 
 }

@@ -38,6 +38,7 @@ import org.apache.fineract.accounting.glaccount.domain.GLAccountType;
 import org.apache.fineract.accounting.glaccount.service.GLAccountReadPlatformService;
 import org.apache.fineract.accounting.journalentry.data.JournalEntryAssociationParametersData;
 import org.apache.fineract.accounting.journalentry.data.JournalEntryData;
+import org.apache.fineract.accounting.journalentry.data.JournalEntrySource;
 import org.apache.fineract.accounting.journalentry.data.OfficeOpeningBalancesData;
 import org.apache.fineract.accounting.journalentry.data.TransactionDetailData;
 import org.apache.fineract.accounting.journalentry.data.TransactionTypeEnumData;
@@ -62,12 +63,16 @@ import org.apache.fineract.portfolio.paymentdetail.data.PaymentDetailData;
 import org.apache.fineract.portfolio.paymenttype.data.PaymentTypeData;
 import org.apache.fineract.portfolio.savings.data.SavingsAccountTransactionEnumData;
 import org.apache.fineract.portfolio.savings.service.SavingsEnumerations;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
+import org.springframework.stereotype.Service;
 import org.springframework.util.CollectionUtils;
 
 @RequiredArgsConstructor
+@Service
+@ConditionalOnMissingBean(value = JournalEntryReadPlatformService.class, ignored = JournalEntryReadPlatformServiceImpl.class)
 public class JournalEntryReadPlatformServiceImpl implements JournalEntryReadPlatformService {
 
     private final JdbcTemplate jdbcTemplate;
@@ -237,8 +242,8 @@ public class JournalEntryReadPlatformServiceImpl implements JournalEntryReadPlat
 
     @Override
     public Page<JournalEntryData> retrieveAll(final SearchParameters searchParameters, final Long glAccountId,
-            final Boolean onlyManualEntries, final LocalDate fromDate, final LocalDate toDate, final LocalDate submittedOnDateFrom,
-            final LocalDate submittedOnDateTo, final String transactionId, final Integer entityType,
+            final Boolean onlyManualEntries, final JournalEntrySource entrySource, final LocalDate fromDate, final LocalDate toDate,
+            final LocalDate submittedOnDateFrom, final LocalDate submittedOnDateTo, final String transactionId, final Integer entityType,
             final JournalEntryAssociationParametersData associationParametersData) {
         GLJournalEntryMapper rm = getGlJournalEntryMapper(associationParametersData);
         final StringBuilder sqlBuilder = new StringBuilder(200);
@@ -270,6 +275,14 @@ public class JournalEntryReadPlatformServiceImpl implements JournalEntryReadPlat
         if (searchParameters.hasOfficeId()) {
             sqlBuilder.append(whereClose).append(" journalEntry.office_id = ?");
             objectArray[arrayPos] = searchParameters.getOfficeId();
+            arrayPos = arrayPos + 1;
+
+            whereClose = " and ";
+        }
+
+        if (searchParameters.hasHierarchy()) {
+            sqlBuilder.append(whereClose).append(" office.hierarchy like ?");
+            objectArray[arrayPos] = searchParameters.getHierarchy() + "%";
             arrayPos = arrayPos + 1;
 
             whereClose = " and ";
@@ -337,9 +350,16 @@ public class JournalEntryReadPlatformServiceImpl implements JournalEntryReadPlat
             if (onlyManualEntries) {
                 sqlBuilder.append(whereClose).append(" journalEntry.manual_entry = ?");
                 whereClose = " and ";
-                objectArray[arrayPos] = Boolean.TRUE;
+                objectArray[arrayPos] = true;
                 arrayPos = arrayPos + 1;
             }
+        }
+
+        if (entrySource != null) {
+            sqlBuilder.append(whereClose).append(" journalEntry.manual_entry = ?");
+            whereClose = " and ";
+            objectArray[arrayPos] = entrySource == JournalEntrySource.MANUAL;
+            arrayPos = arrayPos + 1;
         }
 
         if (searchParameters.hasLoanId()) {
@@ -388,14 +408,18 @@ public class JournalEntryReadPlatformServiceImpl implements JournalEntryReadPlat
 
     @Override
     public JournalEntryData retrieveGLJournalEntryById(final long glJournalEntryId,
-            JournalEntryAssociationParametersData associationParametersData) {
+            JournalEntryAssociationParametersData associationParametersData, final String officeHierarchy) {
         try {
 
             final GLJournalEntryMapper rm = getGlJournalEntryMapper(associationParametersData);
+            if (StringUtils.isBlank(officeHierarchy)) {
+                // Programmatic query, disable sonar issue
+                final String sql = "select " + rm.schema() + " where journalEntry.id = ?";
+                return this.jdbcTemplate.queryForObject(sql, rm, glJournalEntryId); // NOSONAR
+            }
             // Programmatic query, disable sonar issue
-            final String sql = "select " + rm.schema() + " where journalEntry.id = ?";
-
-            return this.jdbcTemplate.queryForObject(sql, rm, glJournalEntryId); // NOSONAR
+            final String sql = "select " + rm.schema() + " where journalEntry.id = ? and office.hierarchy like ?";
+            return this.jdbcTemplate.queryForObject(sql, rm, glJournalEntryId, officeHierarchy + "%"); // NOSONAR
         } catch (final EmptyResultDataAccessException e) {
             throw new JournalEntriesNotFoundException(glJournalEntryId, e);
         }
@@ -520,7 +544,7 @@ public class JournalEntryReadPlatformServiceImpl implements JournalEntryReadPlat
         final SearchParameters searchParameters = SearchParameters.builder().orphansOnly(false).officeId(officeId).offset(0)
                 .orderBy("journalEntry.id").sortOrder("ASC").currencyCode(currencyCode).build();
 
-        return retrieveAll(searchParameters, contraId, onlyManualEntries, fromDate, toDate, submittedOnDateFrom, submittedOnDateTo,
+        return retrieveAll(searchParameters, contraId, onlyManualEntries, null, fromDate, toDate, submittedOnDateFrom, submittedOnDateTo,
                 transactionId, entityType, associationParametersData);
 
     }

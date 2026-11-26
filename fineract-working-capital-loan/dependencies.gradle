@@ -23,13 +23,15 @@ dependencies {
     implementation(project(path: ':fineract-loan'))
     implementation(project(path: ':fineract-accounting'))
     implementation(project(path: ':fineract-cob'))
+    implementation(project(path: ':fineract-querydsl'))
     implementation('org.apache.avro:avro')
     implementation(
             project(path: ':fineract-avro-schemas')
             )
+    implementation(project(path: ':fineract-fund'))
 
     implementation(
-            'org.springframework.boot:spring-boot-starter-web',
+            'org.springframework.boot:spring-boot-starter-webmvc',
             'org.springframework.boot:spring-boot-starter-security',
             'org.springframework.batch:spring-batch-integration',
             'org.springframework:spring-context-support',
@@ -41,6 +43,8 @@ dependencies {
 
             'org.apache.commons:commons-lang3',
 
+            'org.apache.httpcomponents:httpclient',
+
             'com.jayway.jsonpath:json-path',
 
             'io.swagger.core.v3:swagger-annotations-jakarta',
@@ -50,7 +54,7 @@ dependencies {
             'org.springdoc:springdoc-openapi-starter-webmvc-ui',
             'org.mapstruct:mapstruct',
 
-            'io.github.resilience4j:resilience4j-spring-boot3',
+            'io.github.resilience4j:resilience4j-spring-boot4',
             )
     compileOnly 'com.github.spotbugs:spotbugs-annotations'
     compileOnly 'org.projectlombok:lombok'
@@ -73,5 +77,4 @@ dependencies {
         exclude group: 'javax.activation'
         exclude group: 'org.skyscreamer'
     }
-    testImplementation ('org.mockito:mockito-inline')
 }

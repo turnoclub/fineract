@@ -32,8 +32,7 @@ import org.apache.fineract.infrastructure.codes.domain.CodeValueRepository;
 import org.apache.fineract.infrastructure.core.api.JsonCommand;
 import org.apache.fineract.infrastructure.core.serialization.FromJsonHelper;
 import org.apache.fineract.portfolio.PortfolioProductType;
-import org.apache.fineract.portfolio.charge.domain.ChargeRepositoryWrapper;
-import org.apache.fineract.portfolio.paymenttype.domain.PaymentTypeRepositoryWrapper;
+import org.apache.fineract.portfolio.paymenttype.domain.PaymentTypeRepository;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -41,10 +40,10 @@ public class ShareProductToGLAccountMappingHelper extends ProductToGLAccountMapp
 
     public ShareProductToGLAccountMappingHelper(final GLAccountRepository glAccountRepository,
             final ProductToGLAccountMappingRepository glAccountMappingRepository, final FromJsonHelper fromApiJsonHelper,
-            final ChargeRepositoryWrapper chargeRepositoryWrapper, final GLAccountRepositoryWrapper accountRepositoryWrapper,
-            final PaymentTypeRepositoryWrapper paymentTypeRepositoryWrapper, final CodeValueRepository codeValueRepository) {
-        super(glAccountRepository, glAccountMappingRepository, fromApiJsonHelper, chargeRepositoryWrapper, accountRepositoryWrapper,
-                paymentTypeRepositoryWrapper, codeValueRepository);
+            final AccountingChargeReadService accountingChargeReadService, final GLAccountRepositoryWrapper accountRepositoryWrapper,
+            final PaymentTypeRepository paymentTypeRepository, final CodeValueRepository codeValueRepository) {
+        super(glAccountRepository, glAccountMappingRepository, fromApiJsonHelper, accountingChargeReadService, accountRepositoryWrapper,
+                paymentTypeRepository, codeValueRepository);
     }
 
     /***
@@ -136,18 +135,18 @@ public class ShareProductToGLAccountMappingHelper extends ProductToGLAccountMapp
         final Long shareEquityId = this.fromApiJsonHelper.extractLongNamed(SharesProductAccountingParams.SHARES_EQUITY.getValue(), element);
 
         switch (accountingRuleType) {
-            case NONE:
-            break;
-            case CASH_BASED:
+            case NONE -> {
+            }
+            case CASH_BASED -> {
                 changes.put(SharesProductAccountingParams.SHARES_REFERENCE.getValue(), shareReferenceId);
                 changes.put(SharesProductAccountingParams.INCOME_FROM_FEES.getValue(), incomeFromFeeAccountId);
                 changes.put(SharesProductAccountingParams.SHARES_SUSPENSE.getValue(), shareSuspenseId);
                 changes.put(SharesProductAccountingParams.SHARES_EQUITY.getValue(), shareEquityId);
-            break;
-            case ACCRUAL_PERIODIC:
-            break;
-            case ACCRUAL_UPFRONT:
-            break;
+            }
+            case ACCRUAL_PERIODIC -> {
+            }
+            case ACCRUAL_UPFRONT -> {
+            }
         }
         return changes;
     }
@@ -163,9 +162,9 @@ public class ShareProductToGLAccountMappingHelper extends ProductToGLAccountMapp
     public void handleChangesToSharesProductToGLAccountMappings(final Long sharesProductId, final Map<String, Object> changes,
             final JsonElement element, final AccountingRuleType accountingRuleType) {
         switch (accountingRuleType) {
-            case NONE:
-            break;
-            case CASH_BASED:
+            case NONE -> {
+            }
+            case CASH_BASED -> {
                 // asset
                 mergeSharesToAssetAccountMappingChanges(element, SharesProductAccountingParams.SHARES_REFERENCE.getValue(), sharesProductId,
                         CashAccountsForShares.SHARES_REFERENCE.getValue(), CashAccountsForShares.SHARES_REFERENCE.toString(), changes);
@@ -183,11 +182,11 @@ public class ShareProductToGLAccountMappingHelper extends ProductToGLAccountMapp
                 // equity
                 mergeSharesToEquityAccountMappingChanges(element, SharesProductAccountingParams.SHARES_EQUITY.getValue(), sharesProductId,
                         CashAccountsForShares.SHARES_EQUITY.getValue(), CashAccountsForShares.SHARES_EQUITY.toString(), changes);
-            break;
-            case ACCRUAL_PERIODIC:
-            break;
-            case ACCRUAL_UPFRONT:
-            break;
+            }
+            case ACCRUAL_PERIODIC -> {
+            }
+            case ACCRUAL_UPFRONT -> {
+            }
         }
     }
 

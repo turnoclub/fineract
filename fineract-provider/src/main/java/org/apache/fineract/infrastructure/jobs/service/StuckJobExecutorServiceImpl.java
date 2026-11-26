@@ -18,17 +18,20 @@
  */
 package org.apache.fineract.infrastructure.jobs.service;
 
-import static org.springframework.transaction.TransactionDefinition.PROPAGATION_REQUIRES_NEW;
-
+import java.time.Duration;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.fineract.infrastructure.core.config.FineractProperties;
+import org.apache.fineract.infrastructure.core.service.DateUtils;
 import org.apache.fineract.infrastructure.jobs.data.partitionedjobs.PartitionedJob;
 import org.apache.fineract.infrastructure.jobs.domain.JobExecutionRepository;
+import org.springframework.batch.core.job.JobExecution;
 import org.springframework.batch.core.launch.JobOperator;
+import org.springframework.batch.core.launch.NoSuchJobExecutionException;
+import org.springframework.batch.core.repository.JobRepository;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.TransactionStatus;
-import org.springframework.transaction.support.TransactionCallbackWithoutResult;
 import org.springframework.transaction.support.TransactionTemplate;
 
 @Service
@@ -37,8 +40,11 @@ import org.springframework.transaction.support.TransactionTemplate;
 public class StuckJobExecutorServiceImpl implements StuckJobExecutorService {
 
     private final JobExecutionRepository jobExecutionRepository;
-    private final TransactionTemplate transactionTemplate;
+    @Qualifier("requiresNewTransactionJdbcTemplate")
+    private final TransactionTemplate requiresNewTransactionJdbcTemplate;
     private final JobOperator jobOperator;
+    private final JobRepository jobRepository;
+    private final FineractProperties fineractProperties;
 
     @Override
     public void resumeStuckJob(String jobName) {
@@ -56,10 +62,26 @@ public class StuckJobExecutorServiceImpl implements StuckJobExecutorService {
 
     private void handleStuckTaskletJob(Long stuckJobId) {
         try {
-            jobOperator.restart(stuckJobId);
+            jobOperator.restart(getJobExecutionOrFail(stuckJobId));
         } catch (Exception e) {
             throw new RuntimeException("Exception while handling a stuck job", e);
         }
+    }
+
+    /**
+     * Batch 6 replaced {@code JobOperator.restart(long)} with {@code restart(JobExecution)}, but
+     * {@code JobRepository.getJobExecution} is {@code @Nullable} and takes a primitive. Resolve both here so an unknown
+     * or absent id surfaces as a meaningful error rather than an NPE.
+     */
+    private JobExecution getJobExecutionOrFail(Long stuckJobId) throws NoSuchJobExecutionException {
+        if (stuckJobId == null) {
+            throw new NoSuchJobExecutionException("Job execution id must not be null");
+        }
+        JobExecution jobExecution = jobRepository.getJobExecution(stuckJobId);
+        if (jobExecution == null) {
+            throw new NoSuchJobExecutionException("No job execution found for id " + stuckJobId);
+        }
+        return jobExecution;
     }
 
     private void restartPartitionedJobs(String jobName, List<Long> stuckJobIds) {
@@ -86,29 +108,32 @@ public class StuckJobExecutorServiceImpl implements StuckJobExecutorService {
     private void handleStuckPartitionedJob(Long stuckJobId, String partitionerStepName) {
         try {
             waitUntilAllPartitionsFinished(stuckJobId, partitionerStepName);
-            transactionTemplate.setPropagationBehavior(PROPAGATION_REQUIRES_NEW);
-            transactionTemplate.execute(new TransactionCallbackWithoutResult() {
-
-                @Override
-                protected void doInTransactionWithoutResult(TransactionStatus status) {
-                    jobExecutionRepository.updateJobStatusToFailed(stuckJobId, partitionerStepName);
-                }
-            });
-            jobOperator.restart(stuckJobId);
+            updateJobStatusToFailedInNewTransaction(stuckJobId, partitionerStepName);
+            jobOperator.restart(getJobExecutionOrFail(stuckJobId));
         } catch (Exception e) {
             throw new RuntimeException("Exception while handling a stuck job", e);
         }
     }
 
+    private void updateJobStatusToFailedInNewTransaction(Long stuckJobId, String partitionerStepName) {
+        requiresNewTransactionJdbcTemplate
+                .executeWithoutResult(status -> jobExecutionRepository.updateJobStatusToFailed(stuckJobId, partitionerStepName));
+    }
+
     private void waitUntilAllPartitionsFinished(Long stuckJobId, String partitionerStepName) throws InterruptedException {
-        while (!areAllPartitionsCompleted(stuckJobId, partitionerStepName)) {
+        final Duration stuckPartitionTimeout = fineractProperties.getJob().getStuckPartitionTimeout();
+        while (true) {
+            int failedPartitions = jobExecutionRepository.failStalePartitions(stuckJobId, partitionerStepName,
+                    DateUtils.getLocalDateTimeOfSystem().minus(stuckPartitionTimeout));
+            if (failedPartitions > 0) {
+                log.warn("Marked {} partition(s) of job {} as FAILED: not updated for more than {}", failedPartitions, stuckJobId,
+                        stuckPartitionTimeout);
+            }
+            if (jobExecutionRepository.getActivePartitionsCount(stuckJobId, partitionerStepName) == 0L) {
+                return;
+            }
             log.info("Sleeping for a second to wait for the partitions to complete for job {}", stuckJobId);
             Thread.sleep(1000);
         }
-    }
-
-    private boolean areAllPartitionsCompleted(Long stuckJobId, String partitionerStepName) {
-        Long notCompletedPartitions = jobExecutionRepository.getNotCompletedPartitionsCount(stuckJobId, partitionerStepName);
-        return notCompletedPartitions == 0L;
     }
 }

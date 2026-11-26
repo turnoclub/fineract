@@ -33,18 +33,19 @@ import org.apache.fineract.client.models.PostTaxesComponentsResponse;
 import org.apache.fineract.client.models.PostTaxesGroupRequest;
 import org.apache.fineract.client.models.PostTaxesGroupResponse;
 import org.apache.fineract.client.models.PostTaxesGroupTaxComponents;
+import org.apache.fineract.integrationtests.client.feign.helpers.FeignAccountHelper;
 import org.apache.fineract.integrationtests.client.feign.helpers.FeignTaxComponentHelper;
 import org.apache.fineract.integrationtests.client.feign.helpers.FeignTaxGroupHelper;
 import org.apache.fineract.integrationtests.common.FineractFeignClientHelper;
 import org.apache.fineract.integrationtests.common.Utils;
 import org.apache.fineract.integrationtests.common.accounting.Account;
-import org.apache.fineract.integrationtests.common.accounting.AccountHelper;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 public class TaxesTest {
 
+    private final FeignAccountHelper accountHelper = new FeignAccountHelper(FineractFeignClientHelper.getFineractFeignClient());
     private FeignTaxComponentHelper taxComponentHelper;
     private FeignTaxGroupHelper taxGroupHelper;
 
@@ -100,7 +101,7 @@ public class TaxesTest {
     }
 
     private Long createTaxComponentWithLiabilityToCredit(final String taxComponentPrefix) {
-        final Account taxComponentGlAccount = AccountHelper.createLiabilityGlAccount(taxComponentPrefix);
+        final Account taxComponentGlAccount = accountHelper.createLiabilityAccount(taxComponentPrefix);
 
         final PostTaxesComponentsRequest taxComponentRequest = new PostTaxesComponentsRequest()
                 .name(Utils.randomStringGenerator(taxComponentPrefix, 4)).percentage(12.0f).startDate("01 January 2023")
@@ -115,7 +116,7 @@ public class TaxesTest {
     }
 
     private Long createTaxComponentWithLiabilityToDebit(final String taxComponentPrefix) {
-        final Account taxComponentGlAccount = AccountHelper.createLiabilityGlAccount(taxComponentPrefix);
+        final Account taxComponentGlAccount = accountHelper.createLiabilityAccount(taxComponentPrefix);
 
         final PostTaxesComponentsRequest taxComponentRequest = new PostTaxesComponentsRequest()
                 .name(Utils.randomStringGenerator(taxComponentPrefix, 4)).percentage(12.0f).startDate("01 January 2023")
@@ -149,6 +150,20 @@ public class TaxesTest {
         assertEquals(404, exception.getStatus());
         assertTrue(exception.getMessage().contains("error.msg.tax.component.id.invalid"),
                 "Response should contain the error code for tax component not found");
+    }
+
+    @Test
+    void createTaxGroupWithoutTaxComponent_shouldReturnValidationError() {
+        final PostTaxesGroupRequest taxGroupRequest = new PostTaxesGroupRequest().name(Utils.randomStringGenerator("TAX_GRP_", 4))
+                .taxComponents(new HashSet<>()).dateFormat("dd MMMM yyyy").locale("en");
+
+        CallFailedRuntimeException exception = taxGroupHelper.createTaxGroupExpectingError(taxGroupRequest);
+
+        assertEquals(400, exception.getStatus());
+        assertTrue(exception.getMessage().contains("validation.msg.at.least.one.tax.component.required"),
+                "Response should contain the error code requiring at least one tax component");
+        assertTrue(exception.getMessage().contains("Please add at least one Tax Component before submitting the Tax Group."),
+                "Response should contain the user friendly validation message");
     }
 
 }

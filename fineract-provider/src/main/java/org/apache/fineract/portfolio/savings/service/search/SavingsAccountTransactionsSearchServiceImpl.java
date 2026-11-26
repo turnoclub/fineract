@@ -22,6 +22,7 @@ import static org.apache.fineract.infrastructure.core.domain.AuditableFieldsCons
 import static org.apache.fineract.portfolio.savings.SavingsApiConstants.SAVINGS_ACCOUNT_RESOURCE_NAME;
 
 import com.google.gson.JsonObject;
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -42,21 +43,21 @@ import org.apache.fineract.infrastructure.dataqueries.service.GenericDataService
 import org.apache.fineract.infrastructure.security.service.PlatformSecurityContext;
 import org.apache.fineract.portfolio.savings.SavingsAccountTransactionType;
 import org.apache.fineract.portfolio.savings.data.SavingsAccountTransactionData;
-import org.apache.fineract.portfolio.savings.service.SavingsAccountReadPlatformServiceImpl;
+import org.apache.fineract.portfolio.savings.service.SavingsAccountTransactionsMapper;
 import org.apache.fineract.portfolio.search.data.AdvancedQueryData;
 import org.apache.fineract.portfolio.search.data.AdvancedQueryRequest;
 import org.apache.fineract.portfolio.search.data.ColumnFilterData;
 import org.apache.fineract.portfolio.search.data.TableQueryData;
 import org.apache.fineract.portfolio.search.data.TransactionSearchRequest;
 import org.apache.fineract.portfolio.search.service.SearchUtil;
+import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.support.PageableExecutionUtils;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.rowset.SqlRowSet;
-import org.springframework.lang.NonNull;
-import org.springframework.lang.Nullable;
 import org.springframework.transaction.annotation.Transactional;
 
 @Transactional(readOnly = true)
@@ -70,7 +71,7 @@ public class SavingsAccountTransactionsSearchServiceImpl implements SavingsAccou
     private final DataTableValidator dataTableValidator;
     private final JdbcTemplate jdbcTemplate;
     private final SearchUtil searchUtil;
-    protected SavingsAccountReadPlatformServiceImpl.SavingsAccountTransactionsMapper tm = new SavingsAccountReadPlatformServiceImpl.SavingsAccountTransactionsMapper();
+    protected SavingsAccountTransactionsMapper tm = new SavingsAccountTransactionsMapper();
 
     @Override
     public Page<SavingsAccountTransactionData> searchTransactions(@NonNull Long savingsId,
@@ -94,7 +95,7 @@ public class SavingsAccountTransactionsSearchServiceImpl implements SavingsAccou
 
         List<ColumnFilterData> columnFilters = new ArrayList<>();
         columnFilters.add(ColumnFilterData.eq("savings_account_id", savingsId.toString()));
-        columnFilters.add(ColumnFilterData.eq("is_reversal", Boolean.FALSE.toString()));
+        columnFilters.add(ColumnFilterData.eq("is_reversal", "false"));
         addFromToFilter("transaction_date", DateUtils.format(searchParameters.getFromDate()),
                 DateUtils.format(searchParameters.getToDate()), columnFilters);
         addFromToFilter("submitted_on_date", DateUtils.format(searchParameters.getFromSubmittedDate()),
@@ -141,6 +142,7 @@ public class SavingsAccountTransactionsSearchServiceImpl implements SavingsAccou
     }
 
     @Nullable
+    @SuppressFBWarnings("NP_BOOLEAN_RETURN_NULL")
     private static Boolean addTransactionTypesFilter(@NonNull TransactionSearchRequest searchParameters,
             List<ColumnFilterData> columnFilters) {
         Predicate<SavingsAccountTransactionType> filter = null;

@@ -1,0 +1,790 @@
+@WorkingCapital
+@WorkingCapitalLoanDetailsFeature
+Feature: Working Capital Loan Details
+
+  @TestRailId:C85423
+  Scenario: Loan details GET returns the general fields aligned with the Term loan API
+    When Admin sets the business date to "01 January 2026"
+    And Admin creates a client with random data
+    And Admin creates a working capital loan with the following data:
+      | LoanProduct | submittedOnDate | expectedDisbursementDate | principalAmount | totalPaymentVolume | periodPaymentRate | discount |
+      | WCLP        | 01 January 2026 | 01 January 2026          | 100.0           | 100.0              | 1.0               | 0.0      |
+    Then Working capital loan creation was successful
+    When Admin successfully approves the working capital loan on "01 January 2026" with "100" amount and expected disbursement date on "01 January 2026"
+    Then Working capital loan approval was successful
+    When Admin successfully disburse the Working Capital loan on "01 January 2026" with "100" EUR transaction amount
+    Then Verify Working Capital loan disbursement was successful
+    Then Working capital loan details has the following field values:
+      | id                                             | present                      |
+      | accountNo                                      | present                      |
+      | clientId                                       | present                      |
+      | clientAccountNo                                | present                      |
+      | clientName                                     | present                      |
+      | clientOfficeId                                 | 1                            |
+      | clientOfficeName                               | Head Office                  |
+      | loanProductId                                  | present                      |
+      | loanProductName                                | WCLP                         |
+      | loanProductDescription                         | Working Capital Loan Product |
+      | externalId                                     | present                      |
+      | clientExternalId                               | present                      |
+      | status.value                                   | Active                       |
+      | status.id                                      | 300                          |
+      | status.code                                    | loanStatusType.active        |
+      | status.pendingApproval                         | false                        |
+      | status.waitingForDisbursal                     | false                        |
+      | status.active                                  | true                         |
+      | status.closedObligationsMet                    | false                        |
+      | status.closedWrittenOff                        | false                        |
+      | status.closedRescheduled                       | false                        |
+      | status.closed                                  | false                        |
+      | status.overpaid                                | false                        |
+      | proposedPrincipal                              | 100.0                        |
+      | approvedPrincipal                              | 100.0                        |
+      | principal                                      | 100.0                        |
+      | netDisbursalAmount                             | 100.0                        |
+      | totalPaymentVolume                             | 100.0                        |
+      | paymentRate                                    | 1.0                          |
+      | periodPaymentAmount                            | 0.01                         |
+      | numberOfRepayments                             | 10000                        |
+      | calculatedAnnualEir                            | 0.0                          |
+      | proposedDiscountFee                            | 0.0                          |
+      | approvedDiscountFee                            | null                         |
+      | discountFee                                    | null                         |
+      | amortizationType.code                          | EIR                          |
+      | amortizationType.value                         | present                      |
+      | npvDayCount                                    | 360                          |
+      | loanProductCounter                             | 1                            |
+      | currency.code                                  | EUR                          |
+      | currency.name                                  | Euro                         |
+      | currency.decimalPlaces                         | 2                            |
+      | currency.inMultiplesOf                         | 1                            |
+      | currency.displaySymbol                         | €                            |
+      | currency.nameCode                              | currency.EUR                 |
+      | currency.displayLabel                          | Euro (€)                     |
+      | fundId                                         | null                         |
+      | fundName                                       | null                         |
+      | repaymentEvery                                 | 1                            |
+      | repaymentFrequencyType.code                    | DAYS                         |
+      | repaymentFrequencyType.value                   | present                      |
+      | delinquencyGraceDays                           | null                         |
+      | delinquencyStartType.code                      | null                         |
+      | breachGraceDays                                | null                         |
+      | delinquencyBucket                              | present                      |
+      | delinquencyBucket.id                           | present                      |
+      | delinquencyBucket.name                         | present                      |
+      | delinquencyBucket.ranges                       | present                      |
+      | delinquencyBucket.bucketType                   | WORKING_CAPITAL              |
+      | breach                                         | null                         |
+      | nearBreach                                     | null                         |
+      | breachStartDate                                | null                         |
+      | delinquencyStartDate                           | null                         |
+      | lastClosedBusinessDate                         | null                         |
+      | balance.principal                              | 100.0                        |
+      | balance.principalPaid                          | 0.0                          |
+      | balance.principalOutstanding                   | 100.0                        |
+      | balance.totalDisbursement                      | 100.0                        |
+      | balance.totalRepayment                         | 0.0                          |
+      | balance.totalOutstanding                       | 100.0                        |
+      | balance.totalExpectedRepayment                 | 100.0                        |
+      | balance.id                                     | present                      |
+      | balance.fee                                    | 0.0                          |
+      | balance.feePaid                                | 0.0                          |
+      | balance.feeOutstanding                         | 0.0                          |
+      | balance.penalty                                | 0.0                          |
+      | balance.penaltyPaid                            | 0.0                          |
+      | balance.penaltyOutstanding                     | 0.0                          |
+      | balance.realizedIncomeFromDiscountFee          | 0.0                          |
+      | balance.unrealizedIncomeFromDiscountFee        | 0.0                          |
+      | balance.overpaymentAmount                      | 0.0                          |
+      | balance.totalDiscountFee                       | 0.0                          |
+      | balance.totalDiscountFeeAdjustment             | 0.0                          |
+      | summary.principal                              | 100.0                        |
+      | summary.principalOutstanding                   | 100.0                        |
+      | summary.totalDisbursement                      | 100.0                        |
+      | summary.totalOutstanding                       | 100.0                        |
+      | summary.currency.code                          | EUR                          |
+      | summary.currency.name                          | Euro                         |
+      | summary.currency.decimalPlaces                 | 2                            |
+      | summary.currency.inMultiplesOf                 | 1                            |
+      | summary.currency.displaySymbol                 | €                            |
+      | summary.currency.nameCode                      | currency.EUR                 |
+      | summary.currency.displayLabel                  | Euro (€)                     |
+      | summary.principalPaid                          | 0.0                          |
+      | summary.fee                                    | 0.0                          |
+      | summary.feePaid                                | 0.0                          |
+      | summary.feeOutstanding                         | 0.0                          |
+      | summary.penalty                                | 0.0                          |
+      | summary.penaltyPaid                            | 0.0                          |
+      | summary.penaltyOutstanding                     | 0.0                          |
+      | summary.realizedIncomeFromDiscountFee          | 0.0                          |
+      | summary.unrealizedIncomeFromDiscountFee        | 0.0                          |
+      | summary.overpayment                            | 0.0                          |
+      | summary.totalDiscountFee                       | 0.0                          |
+      | summary.totalDiscountFeeAdjustment             | 0.0                          |
+      | summary.totalExpectedRepayment                 | 100.0                        |
+      | summary.totalRepayment                         | 0.0                          |
+      | delinquent.pastDueDays                         | 0                            |
+      | delinquent.delinquentDays                      | 0                            |
+      | delinquent.delinquentAmount                    | 0.0                          |
+      | delinquent.delinquentPrincipal                 | 0.0                          |
+      | delinquent.delinquencyPausePeriods.size        | 0                            |
+      | delinquent.delinquentDate                      | null                         |
+      | delinquent.installmentLevelDelinquency.size    | 0                            |
+      | timeline.submittedOnDate                       | 2026-01-01                   |
+      | timeline.submittedByUsername                   | mifos                        |
+      | timeline.submittedByFirstname                  | App                          |
+      | timeline.submittedByLastname                   | Administrator                |
+      | timeline.approvedOnDate                        | 2026-01-01                   |
+      | timeline.approvedByUsername                    | mifos                        |
+      | timeline.approvedByFirstname                   | App                          |
+      | timeline.approvedByLastname                    | Administrator                |
+      | timeline.rejectedOnDate                        | null                         |
+      | timeline.expectedDisbursementDate              | 2026-01-01                   |
+      | timeline.actualDisbursementDate                | 2026-01-01                   |
+      | timeline.disbursedByUsername                   | mifos                        |
+      | timeline.disbursedByFirstname                  | App                          |
+      | timeline.disbursedByLastname                   | Administrator                |
+      | timeline.expectedMaturityDate                  | 2053-05-19                   |
+      | timeline.actualMaturityDate                    | null                         |
+      | charges.size                                   | 0                            |
+      | disbursementDetails.size                       | 1                            |
+      | disbursementDetails.0.id                       | present                      |
+      | disbursementDetails.0.loanId                   | present                      |
+      | disbursementDetails.0.principal                | 100.0                        |
+      | disbursementDetails.0.expectedDisbursementDate | 2026-01-01                   |
+      | disbursementDetails.0.actualDisbursementDate   | 2026-01-01                   |
+      | paymentAllocation.size                         | 1                            |
+      | paymentAllocation.0.transactionType            | present                      |
+      | paymentAllocation.0.paymentAllocationOrder     | present                      |
+      | originators.size                               | 0                            |
+      | enableInstallmentLevelDelinquency              | true                         |
+      | fraud                                          | false                        |
+      | chargedOff                                     | false                        |
+    And Working capital loan details has the auto-generated fields present
+
+  @TestRailId:C85424
+  Scenario: Loan details GET returns the fund when the loan is created with one
+    When Admin sets the business date to "01 January 2026"
+    And Admin creates a client with random data
+    And Admin creates a working capital loan with fund and the following data:
+      | LoanProduct | submittedOnDate | expectedDisbursementDate | principalAmount | totalPaymentVolume | periodPaymentRate | discount |
+      | WCLP        | 01 January 2026 | 01 January 2026          | 100.0           | 100.0              | 1.0               | 0.0      |
+    Then Working capital loan creation was successful
+    Then Working capital loan details has the following field values:
+      | fundId   | 1        |
+      | fundName | Lender A |
+
+  @TestRailId:C85425
+  Scenario: Loan details GET returns the charges added to the loan
+    Given Admin sets the business date to "01 January 2026"
+    And Admin creates a client with random data and creates-approves-disburses a working capital loan with the following data:
+      | LoanProduct | submittedOnDate | expectedDisbursementDate | principalAmount | totalPaymentVolume | periodPaymentRate | discount |
+      | WCLP        | 01 January 2026 | 01 January 2026          | 100.0           | 100.0              | 1.0               | 0.0      |
+    And Admin adds "WORKING_CAPITAL_SPECIFIED_DUE_DATE_FEE" specified due date charge to working capital loan with "12 January 2026" due date and 35.0 transaction amount
+    Then Working capital loan details has the following field values:
+      | charges.size                          | 1                        |
+      | charges.0.id                          | present                  |
+      | charges.0.chargeId                    | present                  |
+      | charges.0.name                        | Working Capital Loan Fee |
+      | charges.0.amount                      | 35.0                     |
+      | charges.0.amountOutstanding           | 35.0                     |
+      | charges.0.dueDate                     | 2026-01-12               |
+      | charges.0.penalty                     | false                    |
+      | charges.0.paid                        | false                    |
+      | charges.0.loanId                      | present                  |
+      | charges.0.externalId                  | present                  |
+      | charges.0.externalLoanId              | present                  |
+      | charges.0.currency.code               | EUR                      |
+      | charges.0.chargeTimeType.value        | Specified due date       |
+      | charges.0.chargeCalculationType.value | Flat                     |
+      | charges.0.chargePaymentMode.value     | Regular                  |
+
+  @TestRailId:C85444
+  Scenario: Loan details GET returns the originator attached to loan
+    When Admin sets the business date to "01 January 2026"
+    And Admin creates a client with random data
+    And Admin creates a new loan originator with external ID and name "WC Inline Originator"
+    And Admin creates a working capital loan with originator attached inline and the following data:
+      | LoanProduct | submittedOnDate | expectedDisbursementDate | principalAmount | totalPaymentVolume | periodPaymentRate | discount |
+      | WCLP        | 01 January 2026 | 01 January 2026          | 100.0           | 100.0              | 1.0               | 0.0      |
+    Then Working capital loan creation was successful
+    Then Working capital loan details has the originator attached
+    Then Working capital loan details has the following field values:
+      | originators.size         | 1                    |
+      | originators.0.id         | present              |
+      | originators.0.externalId | present              |
+      | originators.0.name       | WC Inline Originator |
+      | originators.0.status     | ACTIVE               |
+
+  @TestRailId:C85445
+  Scenario: Loan details GET returns the breach and near breach values
+    When Admin sets the business date to "01 January 2026"
+    And Admin creates a client with random data
+    And Admin creates a working capital loan with the following data:
+      | LoanProduct | submittedOnDate | expectedDisbursementDate | principalAmount | totalPaymentVolume | periodPaymentRate | discount |
+      | WCLP        | 01 January 2026 | 01 January 2026          | 100.0           | 100.0              | 1.0               | 0.0      |
+    Then Working capital loan creation was successful
+    And Working capital loan account has the correct data:
+      | product.name | submittedOnDate | expectedDisbursementDate | status                         | proposedPrincipal | approvedPrincipal | totalPaymentVolume | periodPaymentRate | discountProposed |
+      | WCLP         | 2026-01-01      | 2026-01-01               | Submitted and pending approval | 100.0             | 0.0               | 100.0              | 1.0               | 0.0              |
+    And Admin modifies the working capital loan with 70 "DAYS" breach and 4 "WEEKS" near breach override data
+    Then Verify working capital loan account has been created with correct breach and near breach override data
+    Then Working capital loan account has the correct data:
+      | product.name | submittedOnDate | expectedDisbursementDate | status                         | proposedPrincipal | approvedPrincipal | totalPaymentVolume | periodPaymentRate | discountProposed |
+      | WCLP         | 2026-01-01      | 2026-01-01               | Submitted and pending approval | 100.0             | 0.0               | 100.0              | 1.0               | 0.0              |
+    Then Working capital loan details has the following field values:
+      | breach.id                                | present    |
+      | breach.name                              | present    |
+      | breach.breachFrequency                   | 70         |
+      | breach.breachFrequencyType.code          | DAYS       |
+      | breach.breachFrequencyType.value         | DAYS       |
+      | breach.breachAmountCalculationType.code  | PERCENTAGE |
+      | breach.breachAmountCalculationType.value | Percentage |
+      | breach.breachAmount                      | present    |
+      | nearBreach.id                            | present    |
+      | nearBreach.name                          | present    |
+      | nearBreach.frequency                     | 4          |
+      | nearBreach.frequencyType.code            | WEEKS      |
+      | nearBreach.frequencyType.value           | WEEKS      |
+      | nearBreach.threshold                     | present    |
+
+  @TestRailId:C98207
+  Scenario: Verify loan details returns the active principal following the reduced approve and disburse amounts
+    When Admin sets the business date to "01 January 2026"
+    And Admin creates a client with random data
+    And Admin creates a working capital loan with the following data:
+      | LoanProduct | submittedOnDate | expectedDisbursementDate | principalAmount | totalPaymentVolume | periodPaymentRate | discount |
+      | WCLP        | 01 January 2026 | 01 January 2026          | 500.0           | 500.0              | 1.0               | 100.0    |
+    Then Working capital loan creation was successful
+    Then Working capital loan details has the following field values:
+      | status.value                 | Submitted and pending approval |
+      | proposedPrincipal            | 500.0                          |
+      | approvedPrincipal            | 0.0                            |
+      | principal                    | 500.0                          |
+      | netDisbursalAmount           | null                           |
+      | balance.principal            | 0.0                            |
+      | balance.totalDisbursement    | 0.0                            |
+      | summary.principalOutstanding | 0.0                            |
+      | summary.totalDisbursement    | 0.0                            |
+    When Admin successfully approves the working capital loan on "01 January 2026" with "450" amount and "45" discount amount and expected disbursement date on "01 January 2026"
+    Then Working capital loan approval was successful
+    Then Working capital loan details has the following field values:
+      | status.value              | Approved |
+      | proposedPrincipal         | 500.0    |
+      | approvedPrincipal         | 450.0    |
+      | principal                 | 450.0    |
+      | approvedDiscountFee       | 45.0     |
+      | discountFee               | null     |
+      | netDisbursalAmount        | 450.0    |
+      | balance.principal         | 0.0      |
+      | balance.totalDisbursement | 0.0      |
+      | summary.totalDisbursement | 0.0      |
+    And Admin successfully disburse the Working Capital loan on "01 January 2026" with "250" EUR transaction amount and "25" discount amount
+    Then Verify Working Capital loan disbursement was successful
+    Then Working capital loan details has the following field values:
+      | status.value                 | Active |
+      | proposedPrincipal            | 500.0  |
+      | approvedPrincipal            | 450.0  |
+      | principal                    | 250.0  |
+      | discountFee                  | 25.0   |
+      | netDisbursalAmount           | 250.0  |
+      | balance.principal            | 275.0  |
+      | balance.totalDiscountFee     | 25.0   |
+      | balance.totalDisbursement    | 250.0  |
+      | summary.principal            | 275.0  |
+      | summary.principalOutstanding | 275.0  |
+      | summary.totalDisbursement    | 250.0  |
+    Then Customer makes repayment on "01 January 2026" with 100.0 transaction amount on Working Capital loan
+    Then Working capital loan details has the following field values:
+      | principal                    | 250.0 |
+      | balance.principal            | 275.0 |
+      | balance.principalPaid        | 100.0 |
+      | balance.totalDisbursement    | 250.0 |
+      | summary.principalOutstanding | 175.0 |
+
+  @TestRailId:C98208
+  Scenario: Verify loan details returns the modified principal as both proposed and active principal
+    When Admin sets the business date to "01 January 2026"
+    And Admin creates a client with random data
+    And Admin creates a working capital loan with the following data:
+      | LoanProduct | submittedOnDate | expectedDisbursementDate | principalAmount | totalPaymentVolume | periodPaymentRate | discount |
+      | WCLP        | 01 January 2026 | 01 January 2026          | 500.0           | 500.0              | 1.0               | 100.0    |
+    Then Working capital loan creation was successful
+    Then Working capital loan details has the following field values:
+      | proposedPrincipal               | 500.0 |
+      | principal                       | 500.0 |
+      | disbursementDetails.0.principal | 500.0 |
+    When Admin modifies the working capital loan with the following data:
+      | submittedOnDate | expectedDisbursementDate | principalAmount | totalPaymentVolume | periodPaymentRate | discount |
+      |                 |                          | 400.0           |                    |                   |          |
+    Then Working capital loan details has the following field values:
+      | status.value                    | Submitted and pending approval |
+      | proposedPrincipal               | 400.0                          |
+      | approvedPrincipal               | 0.0                            |
+      | principal                       | 400.0                          |
+      | disbursementDetails.0.principal | 400.0                          |
+
+  @TestRailId:C98209
+  Scenario: Verify active principal and balances after undo disbursal, undo approval and re-disbursement
+    When Admin sets the business date to "01 January 2026"
+    And Admin creates a client with random data
+    And Admin creates a working capital loan with the following data:
+      | LoanProduct | submittedOnDate | expectedDisbursementDate | principalAmount | totalPaymentVolume | periodPaymentRate | discount |
+      | WCLP        | 01 January 2026 | 01 January 2026          | 500.0           | 500.0              | 1.0               | 100.0    |
+    Then Working capital loan creation was successful
+    When Admin successfully approves the working capital loan on "01 January 2026" with "450" amount and "45" discount amount and expected disbursement date on "01 January 2026"
+    Then Working capital loan approval was successful
+    And Admin successfully disburse the Working Capital loan on "01 January 2026" with "250" EUR transaction amount and "25" discount amount
+    Then Verify Working Capital loan disbursement was successful
+    Then Admin successfully undo Working Capital disbursal
+    Then Working capital loan details has the following field values:
+      | status.value                            | Approved |
+      | proposedPrincipal                       | 500.0    |
+      | approvedPrincipal                       | 450.0    |
+      | principal                               | 450.0    |
+      | discountFee                             | null     |
+      | netDisbursalAmount                      | 450.0    |
+      | balance.principal                       | 0.0      |
+      | balance.principalPaid                   | 0.0      |
+      | balance.principalOutstanding            | 0.0      |
+      | balance.totalOutstanding                | 0.0      |
+      | balance.totalExpectedRepayment          | 0.0      |
+      | balance.totalDisbursement               | 0.0      |
+      | balance.totalDiscountFee                | 0.0      |
+      | balance.unrealizedIncomeFromDiscountFee | 0.0      |
+      | summary.principal                       | 0.0      |
+      | summary.principalOutstanding            | 0.0      |
+      | summary.totalDisbursement               | 0.0      |
+      | summary.totalDiscountFee                | 0.0      |
+    When Admin makes undo approval on the working capital loan
+    Then Working capital loan undo approval was successful
+    Then Working capital loan details has the following field values:
+      | status.value        | Submitted and pending approval |
+      | proposedPrincipal   | 500.0                          |
+      | approvedPrincipal   | 0.0                            |
+      | principal           | 500.0                          |
+      | approvedDiscountFee | null                           |
+    When Admin successfully approves the working capital loan on "01 January 2026" with "450" amount and "45" discount amount and expected disbursement date on "01 January 2026"
+    Then Working capital loan approval was successful
+    And Admin successfully disburse the Working Capital loan on "01 January 2026" with "300" EUR transaction amount and "30" discount amount
+    Then Verify Working Capital loan disbursement was successful
+    Then Working capital loan details has the following field values:
+      | status.value                       | Active |
+      | proposedPrincipal                  | 500.0  |
+      | approvedPrincipal                  | 450.0  |
+      | principal                          | 300.0  |
+      | discountFee                        | 30.0   |
+      | netDisbursalAmount                 | 300.0  |
+      | disbursementDetails.0.principal    | 450.0  |
+      | disbursementDetails.0.actualAmount | 300.0  |
+      | balance.principal                  | 330.0  |
+      | balance.principalOutstanding       | 330.0  |
+      | balance.totalDisbursement          | 300.0  |
+      | balance.totalDiscountFee           | 30.0   |
+      | summary.principalOutstanding       | 330.0  |
+      | summary.totalDisbursement          | 300.0  |
+
+  @TestRailId:C102392
+  Scenario: Verify last payment and repayment fields - UC1: After repayment transaction
+    When Admin sets the business date to "01 January 2026"
+    And Admin creates a client with random data
+    And Admin creates a working capital loan with the following data:
+      | LoanProduct | submittedOnDate | expectedDisbursementDate | principalAmount | totalPaymentVolume | periodPaymentRate | discount |
+      | WCLP        | 01 January 2026 | 01 January 2026          | 100.0           | 100.0              | 1.0               | 0.0      |
+    Then Working capital loan creation was successful
+    When Admin successfully approves the working capital loan on "01 January 2026" with "100" amount and expected disbursement date on "01 January 2026"
+    Then Working capital loan approval was successful
+    When Admin successfully disburse the Working Capital loan on "01 January 2026" with "100" EUR transaction amount
+    Then Verify Working Capital loan disbursement was successful
+    # --- Repayment ---
+    When Admin sets the business date to "15 January 2026"
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    When Customer makes repayment on "15 January 2026" with 25.0 transaction amount on Working Capital loan
+    Then Working capital loan details has the following field values:
+      | delinquent.lastPaymentDate     | 2026-01-15 |
+      | delinquent.lastPaymentAmount   | 25.0       |
+      | delinquent.lastRepaymentDate   | 2026-01-15 |
+      | delinquent.lastRepaymentAmount | 25.0       |
+    # Closing the loan
+    When Admin closes the Working Capital loan with a full repayment on "15 January 2026"
+    Then Working Capital loan status will be "CLOSED_OBLIGATIONS_MET"
+
+  @TestRailId:C102393
+  Scenario: Verify last payment and repayment fields - UC2: Goodwill credit is repayment-like but not repayment
+    When Admin sets the business date to "01 January 2026"
+    And Admin creates a client with random data
+    And Admin creates a working capital loan with the following data:
+      | LoanProduct | submittedOnDate | expectedDisbursementDate | principalAmount | totalPaymentVolume | periodPaymentRate | discount |
+      | WCLP        | 01 January 2026 | 01 January 2026          | 100.0           | 100.0              | 1.0               | 0.0      |
+    Then Working capital loan creation was successful
+    When Admin successfully approves the working capital loan on "01 January 2026" with "100" amount and expected disbursement date on "01 January 2026"
+    Then Working capital loan approval was successful
+    When Admin successfully disburse the Working Capital loan on "01 January 2026" with "100" EUR transaction amount
+    Then Verify Working Capital loan disbursement was successful
+    # --- Repayment ---
+    When Admin sets the business date to "15 January 2026"
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    When Customer makes repayment on "15 January 2026" with 20.0 transaction amount on Working Capital loan
+    # --- Goodwill credit ---
+    When Admin sets the business date to "20 January 2026"
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    When Customer makes "GOODWILL_CREDIT" transaction on "20 January 2026" with 10.0 transaction amount on Working Capital loan
+    Then Working capital loan details has the following field values:
+      | delinquent.lastPaymentDate     | 2026-01-20 |
+      | delinquent.lastPaymentAmount   | 10.0       |
+      | delinquent.lastRepaymentDate   | 2026-01-15 |
+      | delinquent.lastRepaymentAmount | 20.0       |
+    # Closing the loan
+    When Admin closes the Working Capital loan with a full repayment on "20 January 2026"
+    Then Working Capital loan status will be "CLOSED_OBLIGATIONS_MET"
+
+  @TestRailId:C102394
+  Scenario: Verify last payment and repayment fields - UC3: No payments made
+    When Admin sets the business date to "01 January 2026"
+    And Admin creates a client with random data
+    And Admin creates a working capital loan with the following data:
+      | LoanProduct | submittedOnDate | expectedDisbursementDate | principalAmount | totalPaymentVolume | periodPaymentRate | discount |
+      | WCLP        | 01 January 2026 | 01 January 2026          | 100.0           | 100.0              | 1.0               | 0.0      |
+    Then Working capital loan creation was successful
+    When Admin successfully approves the working capital loan on "01 January 2026" with "100" amount and expected disbursement date on "01 January 2026"
+    Then Working capital loan approval was successful
+    When Admin successfully disburse the Working Capital loan on "01 January 2026" with "100" EUR transaction amount
+    Then Verify Working Capital loan disbursement was successful
+    And Working capital loan details has the following field values:
+      | delinquent.lastPaymentDate     | null |
+      | delinquent.lastPaymentAmount   | null |
+      | delinquent.lastRepaymentDate   | null |
+      | delinquent.lastRepaymentAmount | null |
+    # Closing the loan
+    When Admin closes the Working Capital loan with a full repayment on "01 January 2026"
+    Then Working Capital loan status will be "CLOSED_OBLIGATIONS_MET"
+
+  @TestRailId:C102395
+  Scenario: Verify last payment and repayment fields - UC4: Multiple repayments
+    When Admin sets the business date to "01 January 2026"
+    And Admin creates a client with random data
+    And Admin creates a working capital loan with the following data:
+      | LoanProduct | submittedOnDate | expectedDisbursementDate | principalAmount | totalPaymentVolume | periodPaymentRate | discount |
+      | WCLP        | 01 January 2026 | 01 January 2026          | 100.0           | 100.0              | 1.0               | 0.0      |
+    Then Working capital loan creation was successful
+    When Admin successfully approves the working capital loan on "01 January 2026" with "100" amount and expected disbursement date on "01 January 2026"
+    Then Working capital loan approval was successful
+    When Admin successfully disburse the Working Capital loan on "01 January 2026" with "100" EUR transaction amount
+    Then Verify Working Capital loan disbursement was successful
+    # --- First repayment ---
+    When Admin sets the business date to "15 January 2026"
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    When Customer makes repayment on "15 January 2026" with 20.0 transaction amount on Working Capital loan
+    # --- Second repayment ---
+    When Admin sets the business date to "20 January 2026"
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    When Customer makes repayment on "20 January 2026" with 30.0 transaction amount on Working Capital loan
+    Then Working capital loan details has the following field values:
+      | delinquent.lastPaymentDate     | 2026-01-20 |
+      | delinquent.lastPaymentAmount   | 30.0       |
+      | delinquent.lastRepaymentDate   | 2026-01-20 |
+      | delinquent.lastRepaymentAmount | 30.0       |
+    # Closing the loan
+    When Admin closes the Working Capital loan with a full repayment on "20 January 2026"
+    Then Working Capital loan status will be "CLOSED_OBLIGATIONS_MET"
+
+  @TestRailId:C102396
+  Scenario: Verify last payment and repayment fields - UC5: Reversed repayment falls back to the previous one
+    When Admin sets the business date to "01 January 2026"
+    And Admin creates a client with random data
+    And Admin creates a working capital loan with the following data:
+      | LoanProduct | submittedOnDate | expectedDisbursementDate | principalAmount | totalPaymentVolume | periodPaymentRate | discount |
+      | WCLP        | 01 January 2026 | 01 January 2026          | 100.0           | 100.0              | 1.0               | 0.0      |
+    Then Working capital loan creation was successful
+    When Admin successfully approves the working capital loan on "01 January 2026" with "100" amount and expected disbursement date on "01 January 2026"
+    Then Working capital loan approval was successful
+    When Admin successfully disburse the Working Capital loan on "01 January 2026" with "100" EUR transaction amount
+    Then Verify Working Capital loan disbursement was successful
+    # --- First repayment ---
+    When Admin sets the business date to "15 January 2026"
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    When Customer makes repayment on "15 January 2026" with 20.0 transaction amount on Working Capital loan
+    # --- Second repayment, which becomes the last payment ---
+    When Admin sets the business date to "20 January 2026"
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    When Customer makes repayment on "20 January 2026" with 30.0 transaction amount on Working Capital loan
+    Then Working capital loan details has the following field values:
+      | delinquent.lastPaymentDate     | 2026-01-20 |
+      | delinquent.lastPaymentAmount   | 30.0       |
+      | delinquent.lastRepaymentDate   | 2026-01-20 |
+      | delinquent.lastRepaymentAmount | 30.0       |
+    # --- Reversing it must fall back to the 15 January repayment, not report the reversed one ---
+    When Customer undo "1"th "REPAYMENT" transaction made on "20 January 2026" on Working Capital loan
+    Then Working capital loan details has the following field values:
+      | delinquent.lastPaymentDate     | 2026-01-15 |
+      | delinquent.lastPaymentAmount   | 20.0       |
+      | delinquent.lastRepaymentDate   | 2026-01-15 |
+      | delinquent.lastRepaymentAmount | 20.0       |
+    # Closing the loan
+    When Admin closes the Working Capital loan with a full repayment on "20 January 2026"
+    Then Working Capital loan status will be "CLOSED_OBLIGATIONS_MET"
+
+  @TestRailId:C102397
+  Scenario: Verify last payment and repayment fields - UC6: Two repayments on the same date, the later one wins
+    When Admin sets the business date to "01 January 2026"
+    And Admin creates a client with random data
+    And Admin creates a working capital loan with the following data:
+      | LoanProduct | submittedOnDate | expectedDisbursementDate | principalAmount | totalPaymentVolume | periodPaymentRate | discount |
+      | WCLP        | 01 January 2026 | 01 January 2026          | 100.0           | 100.0              | 1.0               | 0.0      |
+    Then Working capital loan creation was successful
+    When Admin successfully approves the working capital loan on "01 January 2026" with "100" amount and expected disbursement date on "01 January 2026"
+    Then Working capital loan approval was successful
+    When Admin successfully disburse the Working Capital loan on "01 January 2026" with "100" EUR transaction amount
+    Then Verify Working Capital loan disbursement was successful
+    # --- Both repayments share a transaction date, so only the (date, id) ordering can break the tie ---
+    When Admin sets the business date to "15 January 2026"
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    When Customer makes repayment on "15 January 2026" with 20.0 transaction amount on Working Capital loan
+    And Customer makes repayment on "15 January 2026" with 30.0 transaction amount on Working Capital loan
+    Then Working capital loan details has the following field values:
+      | delinquent.lastPaymentDate     | 2026-01-15 |
+      | delinquent.lastPaymentAmount   | 30.0       |
+      | delinquent.lastRepaymentDate   | 2026-01-15 |
+      | delinquent.lastRepaymentAmount | 30.0       |
+    # Closing the loan
+    When Admin closes the Working Capital loan with a full repayment on "15 January 2026"
+    Then Working Capital loan status will be "CLOSED_OBLIGATIONS_MET"
+
+  @TestRailId:C111082
+  Scenario: Verify that undo disbursal resets delinquency, breach, charges and the amortization model, and the next disbursement rebuilds them
+    When Admin sets the business date to "01 September 2026"
+    And Admin creates a client with random data
+    And Admin creates WC Delinquency Bucket with frequency 10 DAYS and minimumPayment 3 PERCENTAGE
+    And Admin creates a new Working Capital Loan Product with delinquency bucket and custom breach config:
+      | breachFrequency | breachFrequencyType | breachAmountCalculationType | breachAmount |
+      | 15              | DAYS                | PERCENTAGE                  | 10           |
+    And Admin creates a working capital loan with the following data:
+      | LoanProduct      | submittedOnDate   | expectedDisbursementDate | principalAmount | totalPaymentVolume | periodPaymentRate | discount |
+      | WCLP_DELINQUENCY | 01 September 2026 | 05 September 2026        | 9000            | 100000             | 18                | 0        |
+    And Admin successfully approves the working capital loan on "01 September 2026" with "9000" amount and expected disbursement date on "05 September 2026"
+    Then Working capital loan approval was successful
+# --- disbursed two days after the expected disbursement date --- #
+    When Admin sets the business date to "07 September 2026"
+    And Admin successfully disburse the Working Capital loan on "07 September 2026" with "9000" EUR transaction amount
+    Then Working Capital loan status will be "ACTIVE"
+    And Admin retrieves the projected amortization schedule
+    And The retrieved amortization schedule has payments with the following details in first "2" lines:
+      | paymentNo | date       | expectedPaymentAmount | expectedBalance | expectedAmortizationAmount | actualPaymentAmount | actualAmortizationAmount | expectedDiscountFeeBalance | actualBalance | actualDiscountFeeBalance |
+      | 0         | 2026-09-07 | -9000.00              | 9000.00         |                            |                     |                          | 0.00                       | 9000.00       | 0.00                     |
+      | 1         | 2026-09-08 | 50.00                 | 8950.00         | 0.00                       |                     |                          | 0.00                       |               |                          |
+    Then Working Capital loan delinquency range schedule has the following data:
+      | periodNumber | fromDate   | toDate     | expectedAmount | paidAmount | outstandingAmount | minPaymentCriteriaMet | delinquentAmount | delinquentDays |
+      | 1            | 2026-09-07 | 2026-09-16 | 270.0          | 0.0        | 270.0             | null                  | null             | null           |
+    Then Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | nearBreach | breach |
+      | 1            | 2026-09-07 | 2026-09-21 | 15           | 900.00           | 900.00            | null       | null   |
+# --- charge, delinquency action and breach action on the disbursed loan --- #
+    And Admin adds "WORKING_CAPITAL_SPECIFIED_DUE_DATE_FEE" specified due date charge to working capital loan with "20 September 2026" due date and 35.0 transaction amount
+    When Admin creates WC delinquency reschedule action with the following parameters:
+      | minimumPayment | minimumPaymentType | frequency | frequencyType |
+      | 5              | PERCENTAGE         | 10        | DAYS          |
+    When Admin creates WC breach reschedule action with the following parameters:
+      | minimumPayment | minimumPaymentType | frequency | frequencyType |
+      | 20             | PERCENTAGE         | 10        | DAYS          |
+    Then WC loan delinquency actions contain 1 action
+    Then WC loan breach actions have the following data:
+      | action     | startDate         | minimumPayment | minimumPaymentType | frequency | frequencyType |
+      | RESCHEDULE | 07 September 2026 | 20             | PERCENTAGE         | 10        | DAYS          |
+    Then Working capital loan details has the following field values:
+      | charges.size | 1 |
+# --- partial repayment, then COB makes the loan delinquent --- #
+    When Admin sets the business date to "10 September 2026"
+    And Customer makes repayment on "10 September 2026" with 100 transaction amount on Working Capital loan
+    When Admin sets the business date to "07 October 2026"
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    Then Delinquency Tag History for Working Capital loan has lines:
+      | periodNumber | addedOnDate | liftedOnDate | classification | minimumAgeDays | maximumAgeDays |
+      | 3            | 2026-10-07  |              | D00            | 1              | 30             |
+      | 2            | 2026-09-27  |              | D00            | 1              | 30             |
+      | 1            | 2026-09-17  |              | D00            | 1              | 30             |
+# --- undo the repayment, then the disbursal --- #
+    When Customer undo "1"th "Repayment" transaction made on "10 September 2026" on Working Capital loan
+    Then Admin successfully undo Working Capital disbursal
+    Then Working Capital loan status will be "APPROVED"
+# --- the amortization model is back on the approved state, from the expected disbursement date --- #
+    And Admin retrieves the projected amortization schedule
+    And The retrieved amortization schedule has payments with the following details in first "2" lines:
+      | paymentNo | date       | expectedPaymentAmount | expectedBalance | expectedAmortizationAmount | actualPaymentAmount | actualAmortizationAmount | expectedDiscountFeeBalance | actualBalance | actualDiscountFeeBalance |
+      | 0         | 2026-09-05 | -9000.00              | 9000.00         |                            |                     |                          | 0.00                       | 9000.00       | 0.00                     |
+      | 1         | 2026-09-06 | 50.00                 | 8950.00         | 0.00                       |                     |                          | 0.00                       |               |                          |
+# --- disbursed again, everything is rebuilt from the loan's own configuration, not the dropped reschedule actions --- #
+    When Admin successfully disburse the Working Capital loan on "06 October 2026" with "9000" EUR transaction amount
+    Then Working Capital loan status will be "ACTIVE"
+    And Admin retrieves the projected amortization schedule
+    And The retrieved amortization schedule has payments with the following details in first "2" lines:
+      | paymentNo | date       | expectedPaymentAmount | expectedBalance | expectedAmortizationAmount | actualPaymentAmount | actualAmortizationAmount | expectedDiscountFeeBalance | actualBalance | actualDiscountFeeBalance |
+      | 0         | 2026-10-06 | -9000.00              | 9000.00         |                            |                     |                          | 0.00                       | 9000.00       | 0.00                     |
+      | 1         | 2026-10-07 | 50.00                 | 8950.00         | 0.00                       |                     |                          | 0.00                       |               |                          |
+    Then Working Capital loan delinquency range schedule has the following data:
+      | periodNumber | fromDate   | toDate     | expectedAmount | paidAmount | outstandingAmount | minPaymentCriteriaMet | delinquentAmount | delinquentDays |
+      | 1            | 2026-10-06 | 2026-10-15 | 270.0          | 0.0        | 270.0             | null                  | null             | null           |
+    Then Working Capital loan breach schedule has the following data:
+      | periodNumber | fromDate   | toDate     | numberOfDays | minPaymentAmount | outstandingAmount | nearBreach | breach |
+      | 1            | 2026-10-06 | 2026-10-20 | 15           | 900.00           | 900.00            | null       | null   |
+    Then WC loan delinquency actions contain 0 actions
+    Then WC loan breach actions have the following data:
+      | action | startDate | minimumPayment | minimumPaymentType | frequency | frequencyType |
+    Then Working capital loan details has the following field values:
+      | charges.size | 0 |
+    Then Delinquency Tag History for Working Capital loan has lines:
+      | periodNumber | addedOnDate | liftedOnDate | classification | minimumAgeDays | maximumAgeDays |
+    Then Admin closes the Working Capital loan with all obligations met with a full repayment on "07 October 2026"
+
+  @TestRailId:C115369
+  Scenario: Verify Working Capital loan details totalPayment - UC1: reversed repayment is excluded
+    When Admin sets the business date to "01 January 2026"
+    And Admin creates a client with random data
+    And Admin creates a working capital loan with the following data:
+      | LoanProduct | submittedOnDate | expectedDisbursementDate | principalAmount | totalPaymentVolume | periodPaymentRate | discount |
+      | WCLP        | 01 January 2026 | 01 January 2026          | 100.0           | 100.0              | 1.0               | 0.0      |
+    Then Working capital loan creation was successful
+    When Admin successfully approves the working capital loan on "01 January 2026" with "100" amount and expected disbursement date on "01 January 2026"
+    Then Working capital loan approval was successful
+    When Admin successfully disburse the Working Capital loan on "01 January 2026" with "100" EUR transaction amount
+    Then Verify Working Capital loan disbursement was successful
+    When Admin sets the business date to "02 January 2026"
+    And Admin runs inline COB job for Working Capital Loan by loanId
+# --- Repayment ---
+    When Customer makes repayment on "02 January 2026" with 30 transaction amount on Working Capital loan
+    Then Working capital loan details has the following field values:
+      | summary.totalRepayment | 30.0 |
+      | summary.totalPayment   | 30.0 |
+# --- Undo the repayment: it must be excluded from totalPayment ---
+    When Customer undo "1"th "Repayment" transaction made on "02 January 2026" on Working Capital loan
+    Then Working capital loan details has the following field values:
+      | summary.totalRepayment | 0.0 |
+      | summary.totalPayment   | 0.0 |
+# Closing the loan
+    When Admin sets the business date to "03 January 2026"
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    Then Admin closes the Working Capital loan with a full repayment on "03 January 2026"
+    Then Working Capital loan status will be "CLOSED_OBLIGATIONS_MET"
+
+  @TestRailId:C115370
+  Scenario: Verify Working Capital loan details totalPayment - UC2: multiple repayment-like transaction types are summed
+    When Admin sets the business date to "01 January 2026"
+    And Admin creates a client with random data
+    And Admin creates a working capital loan with the following data:
+      | LoanProduct | submittedOnDate | expectedDisbursementDate | principalAmount | totalPaymentVolume | periodPaymentRate | discount |
+      | WCLP        | 01 January 2026 | 01 January 2026          | 100.0           | 100.0              | 1.0               | 0.0      |
+    Then Working capital loan creation was successful
+    When Admin successfully approves the working capital loan on "01 January 2026" with "100" amount and expected disbursement date on "01 January 2026"
+    Then Working capital loan approval was successful
+    When Admin successfully disburse the Working Capital loan on "01 January 2026" with "100" EUR transaction amount
+    Then Verify Working Capital loan disbursement was successful
+    When Admin sets the business date to "02 January 2026"
+    And Admin runs inline COB job for Working Capital Loan by loanId
+# --- Repayment ---
+    When Customer makes repayment on "02 January 2026" with 20 transaction amount on Working Capital loan
+# --- Payout refund ---
+    When Customer makes "PAYOUT_REFUND" transaction on "02 January 2026" with 10 transaction amount on Working Capital loan
+# --- Goodwill credit ---
+    When Customer makes "GOODWILL_CREDIT" transaction on "02 January 2026" with 5 transaction amount on Working Capital loan
+    Then Working capital loan details has the following field values:
+      | summary.totalPayment | 35.0 |
+# Closing the loan
+    When Admin sets the business date to "03 January 2026"
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    Then Admin closes the Working Capital loan with a full repayment on "03 January 2026"
+    Then Working Capital loan status will be "CLOSED_OBLIGATIONS_MET"
+
+  @TestRailId:C115371
+  Scenario: Verify Working Capital loan details totalPayment - UC3: overpaid loan exposes totalPayment and CBR keeps it unchanged
+    When Admin sets the business date to "01 January 2026"
+    And Admin creates a client with random data
+    And Admin creates a working capital loan with the following data:
+      | LoanProduct | submittedOnDate | expectedDisbursementDate | principalAmount | totalPaymentVolume | periodPaymentRate | discount |
+      | WCLP        | 01 January 2026 | 01 January 2026          | 100.0           | 100.0              | 1.0               | 0.0      |
+    Then Working capital loan creation was successful
+    When Admin successfully approves the working capital loan on "01 January 2026" with "100" amount and expected disbursement date on "01 January 2026"
+    Then Working capital loan approval was successful
+    When Admin successfully disburse the Working Capital loan on "01 January 2026" with "100" EUR transaction amount
+    Then Verify Working Capital loan disbursement was successful
+    When Admin sets the business date to "02 January 2026"
+    And Admin runs inline COB job for Working Capital Loan by loanId
+# --- Repayment ---
+    When Customer makes repayment on "02 January 2026" with 150 transaction amount on Working Capital loan
+    Then Working Capital loan status will be "OVERPAID"
+    And Working capital loan details has the following field values:
+      | summary.totalRepayment | 100.0 |
+      | summary.overpayment    | 50.0  |
+      | summary.totalPayment   | 150.0 |
+# --- Credit balance refund closes the loan; CBR is not a payment type so totalPayment stays unchanged ---
+    When Admin sets the business date to "03 January 2026"
+    And Admin runs inline COB job for Working Capital Loan by loanId
+    When Customer makes credit balance refund on "03 January 2026" with 50.0 transaction amount on Working Capital loan
+    Then Working Capital loan status will be "CLOSED_OBLIGATIONS_MET"
+    And Working capital loan details has the following field values:
+      | summary.totalRepayment | 100.0 |
+      | summary.overpayment    | 0.0   |
+      | summary.totalPayment   | 150.0 |
+
+  @TestRailId:C115444
+  Scenario: Verify loan details returns the client office of a client outside of the head office in every loan status - UC1
+    When Admin sets the business date to "01 January 2026"
+    And Admin creates a new office
+    And Admin creates a client with random data in the last created office
+    And Admin creates a working capital loan with the following data:
+      | LoanProduct | submittedOnDate | expectedDisbursementDate | principalAmount | totalPaymentVolume | periodPaymentRate | discount |
+      | WCLP        | 01 January 2026 | 01 January 2026          | 100.0           | 100.0              | 1.0               | 0.0      |
+    Then Working capital loan creation was successful
+    Then Working capital loan details has the client office of the last created office
+    And Working capital loan details has the following field values:
+      | status.value | Submitted and pending approval |
+    When Admin successfully approves the working capital loan on "01 January 2026" with "100" amount and expected disbursement date on "01 January 2026"
+    Then Working capital loan approval was successful
+    Then Working capital loan details has the client office of the last created office
+    When Admin successfully disburse the Working Capital loan on "01 January 2026" with "100" EUR transaction amount
+    Then Verify Working Capital loan disbursement was successful
+    Then Working capital loan details has the client office of the last created office
+    Then Admin closes the Working Capital loan with all obligations met with a full repayment on "01 January 2026"
+    Then Working capital loan details has the client office of the last created office
+
+  @TestRailId:C115445
+  Scenario: Verify the client office is returned by loan details by external id, the loan list and the batch api - UC2
+    When Admin sets the business date to "01 January 2026"
+    And Admin creates a new office
+    And Admin creates a client with random data in the last created office
+    And Admin creates a working capital loan with the following data:
+      | LoanProduct | submittedOnDate | expectedDisbursementDate | principalAmount | totalPaymentVolume | periodPaymentRate | discount |
+      | WCLP        | 01 January 2026 | 01 January 2026          | 100.0           | 100.0              | 1.0               | 0.0      |
+    Then Working capital loan creation was successful
+    When Admin successfully approves the working capital loan on "01 January 2026" with "100" amount and expected disbursement date on "01 January 2026"
+    Then Working capital loan approval was successful
+    When Admin successfully disburse the Working Capital loan on "01 January 2026" with "100" EUR transaction amount
+    Then Verify Working Capital loan disbursement was successful
+    Then Working capital loan details retrieved by external id has the client office of the last created office
+    And Working capital loan list filtered by client has the client office of the last created office
+    And Working capital loan details has the client office of the last created office via batch api
+    Then Admin closes the Working Capital loan with all obligations met with a full repayment on "01 January 2026"
+
+  @TestRailId:C115446
+  Scenario: Verify loan details returns the new office name after the client office is renamed - UC3
+    When Admin sets the business date to "01 January 2026"
+    And Admin creates a new office
+    And Admin creates a client with random data in the last created office
+    And Admin creates a working capital loan with the following data:
+      | LoanProduct | submittedOnDate | expectedDisbursementDate | principalAmount | totalPaymentVolume | periodPaymentRate | discount |
+      | WCLP        | 01 January 2026 | 01 January 2026          | 100.0           | 100.0              | 1.0               | 0.0      |
+    Then Working capital loan creation was successful
+    When Admin successfully approves the working capital loan on "01 January 2026" with "100" amount and expected disbursement date on "01 January 2026"
+    Then Working capital loan approval was successful
+    When Admin successfully disburse the Working Capital loan on "01 January 2026" with "100" EUR transaction amount
+    Then Verify Working Capital loan disbursement was successful
+    Then Working capital loan details has the client office of the last created office
+    When Admin renames the last created office
+    Then Working capital loan details has the client office of the last created office
+    Then Admin closes the Working Capital loan with all obligations met with a full repayment on "01 January 2026"
+
+  @TestRailId:C115447
+  Scenario: Verify loan template does not return the client office fields - UC4
+    When Admin sets the business date to "01 January 2026"
+    And Admin creates a new office
+    And Admin creates a client with random data in the last created office
+    Then Working capital loan template for the client has no client office fields
+

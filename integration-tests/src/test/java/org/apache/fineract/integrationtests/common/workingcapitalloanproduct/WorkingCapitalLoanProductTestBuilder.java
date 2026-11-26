@@ -19,6 +19,7 @@
 package org.apache.fineract.integrationtests.common.workingcapitalloanproduct;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.IntStream;
@@ -46,7 +47,7 @@ public class WorkingCapitalLoanProductTestBuilder {
     public static final BigDecimal DEFAULT_PERIOD_PAYMENT_RATE_PERCENT = BigDecimal.valueOf(18);
     public static final BigDecimal DEFAULT_MIN_PERIOD_PAYMENT_RATE_PERCENT = BigDecimal.valueOf(5);
     public static final BigDecimal DEFAULT_MAX_PERIOD_PAYMENT_RATE_PERCENT = BigDecimal.valueOf(25);
-    private static final Integer DEFAULT_PERIOD_PAYMENT_FREQUENCY = 30;
+    private static final Integer DEFAULT_PERIOD_PAYMENT_FREQUENCY = 1;
     private static final String DEFAULT_PERIOD_PAYMENT_FREQUENCY_TYPE = WorkingCapitalLoanPeriodFrequencyType.DAYS.name();
     private static final List<String> DEFAULT_PAYMENT_ALLOCATION_TYPES = List.of("DUE_PENALTY", "DUE_FEE", "DUE_PRINCIPAL",
             "IN_ADVANCE_PENALTY", "IN_ADVANCE_FEE", "IN_ADVANCE_PRINCIPAL");
@@ -69,18 +70,28 @@ public class WorkingCapitalLoanProductTestBuilder {
     private BigDecimal minPeriodPaymentRate;
     private BigDecimal periodPaymentRate = DEFAULT_PERIOD_PAYMENT_RATE_PERCENT;
     private BigDecimal maxPeriodPaymentRate;
+    private String paymentAmountCalculationStrategy;
+    private BigDecimal annualEir;
+    private BigDecimal minAnnualEir;
+    private BigDecimal maxAnnualEir;
+    private BigDecimal paymentAmount;
+    private BigDecimal minPaymentAmount;
+    private BigDecimal maxPaymentAmount;
     private BigDecimal discount;
     private Integer repaymentEvery = DEFAULT_PERIOD_PAYMENT_FREQUENCY;
     private String repaymentFrequencyType = DEFAULT_PERIOD_PAYMENT_FREQUENCY_TYPE;
     private Long breachId;
     private List<String> paymentAllocationTypes = DEFAULT_PAYMENT_ALLOCATION_TYPES;
+    private final List<PostPaymentAllocation> additionalPaymentAllocations = new ArrayList<>();
     private Map<String, Boolean> allowAttributeOverrides;
     private Integer delinquencyGraceDays;
     private String delinquencyStartType;
+    private Integer breachGraceDays;
+    private String breachStartType;
     private AccountingRuleEnum accountingRule = DEFAULT_ACCOUNTING_RULE;
     private Long nearBreachId;
 
-    // GL account IDs for cash-based accounting
+    // GL account IDs for accrual with deferred revenue amortization accounting
     private Long fundSourceAccountId;
     private Long loanPortfolioAccountId;
     private Long transfersInSuspenseAccountId;
@@ -93,6 +104,10 @@ public class WorkingCapitalLoanProductTestBuilder {
     private Long writeOffAccountId;
     private Long overpaymentLiabilityAccountId;
     private Long deferredIncomeLiabilityAccountId;
+    private Long chargeOffExpenseAccountId;
+    private Long incomeFromChargeOffFeesAccountId;
+    private Long incomeFromChargeOffPenaltyAccountId;
+    private Long goodwillCreditAccountId;
 
     public WorkingCapitalLoanProductTestBuilder withName(final String name) {
         this.name = name;
@@ -154,6 +169,17 @@ public class WorkingCapitalLoanProductTestBuilder {
         return this;
     }
 
+    /**
+     * Adds a payment allocation rule scoped to a specific transaction type (e.g. GOODWILL_CREDIT, CHARGE_ADJUSTMENT),
+     * on top of the DEFAULT rule. {@code allocationOrder} must contain every
+     * {@link org.apache.fineract.client.models.PaymentAllocationOrder} rule exactly once.
+     */
+    public WorkingCapitalLoanProductTestBuilder withPaymentAllocationForTransactionType(
+            final PostPaymentAllocation.TransactionTypeEnum transactionType, final List<String> allocationOrder) {
+        this.additionalPaymentAllocations.add(buildPaymentAllocationEntry(transactionType, allocationOrder));
+        return this;
+    }
+
     public WorkingCapitalLoanProductTestBuilder withPrincipalAmountMin(final BigDecimal principalAmountMin) {
         this.principalAmountMin = principalAmountMin;
         return this;
@@ -181,6 +207,41 @@ public class WorkingCapitalLoanProductTestBuilder {
 
     public WorkingCapitalLoanProductTestBuilder withMaxPeriodPaymentRate(final BigDecimal maxPeriodPaymentRate) {
         this.maxPeriodPaymentRate = maxPeriodPaymentRate;
+        return this;
+    }
+
+    public WorkingCapitalLoanProductTestBuilder withPaymentAmountCalculationStrategy(final String paymentAmountCalculationStrategy) {
+        this.paymentAmountCalculationStrategy = paymentAmountCalculationStrategy;
+        return this;
+    }
+
+    public WorkingCapitalLoanProductTestBuilder withAnnualEir(final BigDecimal annualEir) {
+        this.annualEir = annualEir;
+        return this;
+    }
+
+    public WorkingCapitalLoanProductTestBuilder withMinAnnualEir(final BigDecimal minAnnualEir) {
+        this.minAnnualEir = minAnnualEir;
+        return this;
+    }
+
+    public WorkingCapitalLoanProductTestBuilder withMaxAnnualEir(final BigDecimal maxAnnualEir) {
+        this.maxAnnualEir = maxAnnualEir;
+        return this;
+    }
+
+    public WorkingCapitalLoanProductTestBuilder withPaymentAmount(final BigDecimal paymentAmount) {
+        this.paymentAmount = paymentAmount;
+        return this;
+    }
+
+    public WorkingCapitalLoanProductTestBuilder withMinPaymentAmount(final BigDecimal minPaymentAmount) {
+        this.minPaymentAmount = minPaymentAmount;
+        return this;
+    }
+
+    public WorkingCapitalLoanProductTestBuilder withMaxPaymentAmount(final BigDecimal maxPaymentAmount) {
+        this.maxPaymentAmount = maxPaymentAmount;
         return this;
     }
 
@@ -221,6 +282,16 @@ public class WorkingCapitalLoanProductTestBuilder {
 
     public WorkingCapitalLoanProductTestBuilder withDelinquencyStartType(final String delinquencyStartType) {
         this.delinquencyStartType = delinquencyStartType;
+        return this;
+    }
+
+    public WorkingCapitalLoanProductTestBuilder withBreachGraceDays(final Integer breachGraceDays) {
+        this.breachGraceDays = breachGraceDays;
+        return this;
+    }
+
+    public WorkingCapitalLoanProductTestBuilder withBreachStartType(final String breachStartType) {
+        this.breachStartType = breachStartType;
         return this;
     }
 
@@ -289,6 +360,26 @@ public class WorkingCapitalLoanProductTestBuilder {
         return this;
     }
 
+    public WorkingCapitalLoanProductTestBuilder withChargeOffExpenseAccountId(final Long chargeOffExpenseAccountId) {
+        this.chargeOffExpenseAccountId = chargeOffExpenseAccountId;
+        return this;
+    }
+
+    public WorkingCapitalLoanProductTestBuilder withIncomeFromChargeOffFeesAccountId(final Long incomeFromChargeOffFeesAccountId) {
+        this.incomeFromChargeOffFeesAccountId = incomeFromChargeOffFeesAccountId;
+        return this;
+    }
+
+    public WorkingCapitalLoanProductTestBuilder withIncomeFromChargeOffPenaltyAccountId(final Long incomeFromChargeOffPenaltyAccountId) {
+        this.incomeFromChargeOffPenaltyAccountId = incomeFromChargeOffPenaltyAccountId;
+        return this;
+    }
+
+    public WorkingCapitalLoanProductTestBuilder withGoodwillCreditAccountId(final Long goodwillCreditAccountId) {
+        this.goodwillCreditAccountId = goodwillCreditAccountId;
+        return this;
+    }
+
     public PostWorkingCapitalLoanProductsRequest build() {
         final PostWorkingCapitalLoanProductsRequest request = new PostWorkingCapitalLoanProductsRequest();
         populateCommonFields(request);
@@ -325,6 +416,16 @@ public class WorkingCapitalLoanProductTestBuilder {
         request.setMinPeriodPaymentRate(this.minPeriodPaymentRate);
         request.setPeriodPaymentRate(this.periodPaymentRate);
         request.setMaxPeriodPaymentRate(this.maxPeriodPaymentRate);
+        if (this.paymentAmountCalculationStrategy != null) {
+            request.setPaymentAmountCalculationStrategy(PostWorkingCapitalLoanProductsRequest.PaymentAmountCalculationStrategyEnum
+                    .valueOf(this.paymentAmountCalculationStrategy));
+        }
+        request.setAnnualEir(this.annualEir);
+        request.setMinAnnualEir(this.minAnnualEir);
+        request.setMaxAnnualEir(this.maxAnnualEir);
+        request.setPaymentAmount(this.paymentAmount);
+        request.setMinPaymentAmount(this.minPaymentAmount);
+        request.setMaxPaymentAmount(this.maxPaymentAmount);
         request.setDiscount(this.discount);
         request.setRepaymentEvery(this.repaymentEvery);
         if (this.repaymentFrequencyType != null) {
@@ -333,6 +434,8 @@ public class WorkingCapitalLoanProductTestBuilder {
         }
         request.setDelinquencyGraceDays(this.delinquencyGraceDays);
         request.setDelinquencyStartType(this.delinquencyStartType);
+        request.setBreachGraceDays(this.breachGraceDays);
+        request.setBreachStartType(this.breachStartType);
         request.setBreachId(this.breachId);
         request.setAccountingRule(this.accountingRule);
         request.setNearBreachId(this.nearBreachId);
@@ -348,6 +451,10 @@ public class WorkingCapitalLoanProductTestBuilder {
         request.setWriteOffAccountId(this.writeOffAccountId);
         request.setOverpaymentLiabilityAccountId(this.overpaymentLiabilityAccountId);
         request.setDeferredIncomeLiabilityAccountId(this.deferredIncomeLiabilityAccountId);
+        request.setChargeOffExpenseAccountId(this.chargeOffExpenseAccountId);
+        request.setIncomeFromChargeOffFeesAccountId(this.incomeFromChargeOffFeesAccountId);
+        request.setIncomeFromChargeOffPenaltyAccountId(this.incomeFromChargeOffPenaltyAccountId);
+        request.setGoodwillCreditAccountId(this.goodwillCreditAccountId);
         request.setLocale("en_US");
         request.setDateFormat("yyyy-MM-dd");
     }
@@ -379,6 +486,8 @@ public class WorkingCapitalLoanProductTestBuilder {
         }
         request.setDelinquencyGraceDays(this.delinquencyGraceDays);
         request.setDelinquencyStartType(this.delinquencyStartType);
+        request.setBreachGraceDays(this.breachGraceDays);
+        request.setBreachStartType(this.breachStartType);
         request.setBreachId(this.breachId);
         if (this.accountingRule != null) {
             request.setAccountingRule(PutWorkingCapitalLoanProductsProductIdRequest.AccountingRuleEnum.valueOf(this.accountingRule.name()));
@@ -389,31 +498,39 @@ public class WorkingCapitalLoanProductTestBuilder {
     }
 
     private void setPaymentAllocation(final PostWorkingCapitalLoanProductsRequest request) {
-        if (this.paymentAllocationTypes != null && !this.paymentAllocationTypes.isEmpty()) {
-            PostPaymentAllocation defaultPaymentAllocation = new PostPaymentAllocation();
-            defaultPaymentAllocation.setTransactionType(PostPaymentAllocation.TransactionTypeEnum.DEFAULT);
-            defaultPaymentAllocation.setPaymentAllocationOrder(IntStream.range(0, this.paymentAllocationTypes.size()).mapToObj(index -> {
-                PaymentAllocationOrder paymentAllocationOrder = new PaymentAllocationOrder();
-                paymentAllocationOrder.setOrder(index + 1);
-                paymentAllocationOrder.setPaymentAllocationRule(this.paymentAllocationTypes.get(index));
-                return paymentAllocationOrder;
-            }).toList());
-            request.setPaymentAllocation(List.of(defaultPaymentAllocation));
+        final List<PostPaymentAllocation> allocations = buildPaymentAllocations();
+        if (!allocations.isEmpty()) {
+            request.setPaymentAllocation(allocations);
         }
     }
 
     private void setPaymentAllocation(final PutWorkingCapitalLoanProductsProductIdRequest request) {
-        if (this.paymentAllocationTypes != null && !this.paymentAllocationTypes.isEmpty()) {
-            PostPaymentAllocation defaultPaymentAllocation = new PostPaymentAllocation();
-            defaultPaymentAllocation.setTransactionType(PostPaymentAllocation.TransactionTypeEnum.DEFAULT);
-            defaultPaymentAllocation.setPaymentAllocationOrder(IntStream.range(0, this.paymentAllocationTypes.size()).mapToObj(index -> {
-                PaymentAllocationOrder paymentAllocationOrder = new PaymentAllocationOrder();
-                paymentAllocationOrder.setOrder(index + 1);
-                paymentAllocationOrder.setPaymentAllocationRule(this.paymentAllocationTypes.get(index));
-                return paymentAllocationOrder;
-            }).toList());
-            request.setPaymentAllocation(List.of(defaultPaymentAllocation));
+        final List<PostPaymentAllocation> allocations = buildPaymentAllocations();
+        if (!allocations.isEmpty()) {
+            request.setPaymentAllocation(allocations);
         }
+    }
+
+    private List<PostPaymentAllocation> buildPaymentAllocations() {
+        final List<PostPaymentAllocation> allocations = new ArrayList<>();
+        if (this.paymentAllocationTypes != null && !this.paymentAllocationTypes.isEmpty()) {
+            allocations.add(buildPaymentAllocationEntry(PostPaymentAllocation.TransactionTypeEnum.DEFAULT, this.paymentAllocationTypes));
+        }
+        allocations.addAll(this.additionalPaymentAllocations);
+        return allocations;
+    }
+
+    private static PostPaymentAllocation buildPaymentAllocationEntry(final PostPaymentAllocation.TransactionTypeEnum transactionType,
+            final List<String> allocationOrder) {
+        final PostPaymentAllocation paymentAllocation = new PostPaymentAllocation();
+        paymentAllocation.setTransactionType(transactionType);
+        paymentAllocation.setPaymentAllocationOrder(IntStream.range(0, allocationOrder.size()).mapToObj(index -> {
+            PaymentAllocationOrder paymentAllocationOrder = new PaymentAllocationOrder();
+            paymentAllocationOrder.setOrder(index + 1);
+            paymentAllocationOrder.setPaymentAllocationRule(allocationOrder.get(index));
+            return paymentAllocationOrder;
+        }).toList());
+        return paymentAllocation;
     }
 
     private void setAllowAttributeOverrides(final PostWorkingCapitalLoanProductsRequest request) {

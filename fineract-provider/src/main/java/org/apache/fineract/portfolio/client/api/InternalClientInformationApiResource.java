@@ -25,6 +25,9 @@ import static org.apache.fineract.infrastructure.core.domain.AuditableFieldsCons
 
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
@@ -32,10 +35,12 @@ import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.UriInfo;
+import java.time.OffsetDateTime;
 import java.util.HashMap;
 import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.fineract.infrastructure.core.annotation.AlternativeOperationId;
 import org.apache.fineract.infrastructure.core.api.ApiRequestParameterHelper;
 import org.apache.fineract.infrastructure.core.boot.FineractProfiles;
 import org.apache.fineract.infrastructure.core.serialization.ApiRequestJsonSerializationSettings;
@@ -74,6 +79,8 @@ public class InternalClientInformationApiResource implements InitializingBean {
     @Path("{clientId}/audit")
     @Produces({ MediaType.APPLICATION_JSON })
     @Operation(summary = "Get internal client audit fields", operationId = "getInternalClientAuditFields")
+    @AlternativeOperationId("getClientAuditFields")
+    @ApiResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = ClientAuditFieldsData.class)))
     @SuppressFBWarnings("SLF4J_SIGN_ONLY_FORMAT")
     public String getClientAuditFields(@Context final UriInfo uriInfo, @PathParam("clientId") Long clientId) {
         log.warn("------------------------------------------------------------");
@@ -88,5 +95,8 @@ public class InternalClientInformationApiResource implements InitializingBean {
                         client.getLastModifiedBy().orElse(null), LAST_MODIFIED_DATE, client.getLastModifiedDate().orElse(null)));
         final ApiRequestJsonSerializationSettings settings = this.apiRequestParameterHelper.process(uriInfo.getQueryParameters());
         return this.toApiJsonSerializer.serialize(settings, auditFields);
+    }
+
+    private record ClientAuditFieldsData(Long createdBy, OffsetDateTime createdDate, Long lastModifiedBy, OffsetDateTime lastModifiedDate) {
     }
 }

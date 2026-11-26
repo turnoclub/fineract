@@ -18,6 +18,7 @@
  */
 package org.apache.fineract.infrastructure.entityaccess.api;
 
+import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.DELETE;
@@ -35,6 +36,7 @@ import lombok.RequiredArgsConstructor;
 import org.apache.fineract.commands.domain.CommandWrapper;
 import org.apache.fineract.commands.service.CommandWrapperBuilder;
 import org.apache.fineract.commands.service.PortfolioCommandSourceWritePlatformService;
+import org.apache.fineract.infrastructure.core.annotation.AlternativeOperationId;
 import org.apache.fineract.infrastructure.core.api.ApiRequestParameterHelper;
 import org.apache.fineract.infrastructure.core.data.CommandProcessingResult;
 import org.apache.fineract.infrastructure.core.serialization.ApiRequestJsonSerializationSettings;
@@ -61,9 +63,11 @@ public class FineractEntityApiResource {
 
     @GET
     @Produces({ MediaType.APPLICATION_JSON })
+    @Operation(operationId = "retrieveAll_3")
+    @AlternativeOperationId("retrieveAll_7")
     public String retrieveAll(@Context final UriInfo uriInfo) {
 
-        this.context.authenticatedUser().validateHasReadPermission(FineractEntityApiResourceConstants.FINERACT_ENTITY_RESOURCE_NAME);
+        this.context.authenticatedUser().validateHasReadPermission(FineractEntityApiResourceConstants.ENTITY_MAPPING_RESOURCE_NAME);
 
         final Collection<FineractEntityRelationData> entityMappings = this.readPlatformService.retrieveAllSupportedMappingTypes();
         final ApiRequestJsonSerializationSettings settings = this.apiRequestParameterHelper.process(uriInfo.getQueryParameters());
@@ -73,9 +77,11 @@ public class FineractEntityApiResource {
     @GET
     @Path("/{mapId}")
     @Produces({ MediaType.APPLICATION_JSON })
+    @Operation(operationId = "retrieveOne")
+    @AlternativeOperationId("retrieveOne_4")
     public String retrieveOne(@PathParam("mapId") final Long mapId, @Context final UriInfo uriInfo) {
 
-        this.context.authenticatedUser().validateHasReadPermission(FineractEntityApiResourceConstants.FINERACT_ENTITY_RESOURCE_NAME);
+        this.context.authenticatedUser().validateHasReadPermission(FineractEntityApiResourceConstants.ENTITY_MAPPING_RESOURCE_NAME);
 
         final Collection<FineractEntityToEntityMappingData> entityToEntityMappings = this.readPlatformService.retrieveOneMapping(mapId);
         final ApiRequestJsonSerializationSettings settings = this.apiRequestParameterHelper.process(uriInfo.getQueryParameters());
@@ -89,7 +95,7 @@ public class FineractEntityApiResource {
     public String getEntityToEntityMappings(@PathParam("mapId") final Long mapId, @PathParam("fromId") final Long fromId,
             @PathParam("toId") final Long toId, @Context final UriInfo uriInfo) {
 
-        this.context.authenticatedUser().validateHasReadPermission(FineractEntityApiResourceConstants.FINERACT_ENTITY_RESOURCE_NAME);
+        this.context.authenticatedUser().validateHasReadPermission(FineractEntityApiResourceConstants.ENTITY_MAPPING_RESOURCE_NAME);
 
         final Collection<FineractEntityToEntityMappingData> entityToEntityMappings = this.readPlatformService
                 .retrieveEntityToEntityMappings(mapId, fromId, toId);
@@ -135,6 +141,8 @@ public class FineractEntityApiResource {
     @DELETE
     @Path("{mapId}")
     @Produces({ MediaType.APPLICATION_JSON })
+    @Operation(operationId = "delete")
+    @AlternativeOperationId("delete_4")
     public String delete(@PathParam("mapId") final Long mapId) {
 
         final CommandWrapper commandRequest = new CommandWrapperBuilder() //

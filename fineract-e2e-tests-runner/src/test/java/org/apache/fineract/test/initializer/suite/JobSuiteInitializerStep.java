@@ -24,9 +24,9 @@ import static org.apache.fineract.client.feign.util.FeignCalls.ok;
 import java.util.Map;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.fineract.client.feign.FineractFeignClient;
-import org.apache.fineract.client.models.ExecuteJobRequest;
 import org.apache.fineract.client.models.GetJobsResponse;
-import org.apache.fineract.client.models.PutJobsJobIDRequest;
+import org.apache.fineract.client.models.JobExecuteRequest;
+import org.apache.fineract.client.models.JobUpdateRequest;
 import org.springframework.stereotype.Component;
 
 @Slf4j
@@ -60,12 +60,12 @@ public class JobSuiteInitializerStep implements FineractSuiteInitializerStep {
         // CRITICAL: SchedulerGlobalInitializerStep stops the scheduler globally
         // Solution: START the scheduler so the job runs every 1 second automatically
         log.debug("Starting scheduler to enable automatic job execution every 1 second...");
-        executeVoid(() -> fineractClient.scheduler().changeSchedulerStatus("start", Map.of()));
+        executeVoid(() -> fineractClient.scheduler().handleCommandsScheduler("start", Map.of()));
         log.debug("Scheduler started successfully");
 
         // Manually execute once immediately to publish any queued events from initialization
         log.debug("Manually executing '{}' job once to publish queued events...", SEND_ASYNCHRONOUS_EVENTS_JOB_NAME);
-        executeVoid(() -> fineractClient.schedulerJob().executeJob(jobId, new ExecuteJobRequest(), Map.of("command", "executeJob")));
+        executeVoid(() -> fineractClient.schedulerJob().executeJob(jobId, new JobExecuteRequest(), Map.of("command", "executeJob")));
 
         // Poll job history to confirm it ran
         log.debug("Polling job history to confirm initial execution...");
@@ -110,7 +110,7 @@ public class JobSuiteInitializerStep implements FineractSuiteInitializerStep {
         // Stop the scheduler to prevent jobs from running between test suites
         log.debug("Stopping scheduler...");
         try {
-            executeVoid(() -> fineractClient.scheduler().changeSchedulerStatus(Map.of("command", "stop")));
+            executeVoid(() -> fineractClient.scheduler().handleCommandsScheduler(Map.of("command", "stop")));
             log.debug("Scheduler stopped successfully");
         } catch (Exception e) {
             log.warn("Failed to stop scheduler: {}", e.getMessage());
@@ -126,7 +126,7 @@ public class JobSuiteInitializerStep implements FineractSuiteInitializerStep {
                 .filter(r -> r.getDisplayName().equals(SEND_ASYNCHRONOUS_EVENTS_JOB_NAME)).findAny()
                 .orElseThrow(() -> new IllegalStateException(SEND_ASYNCHRONOUS_EVENTS_JOB_NAME + " is not found"));
         Long jobId = externalEventJobResponse.getJobId();
-        executeVoid(() -> fineractClient.schedulerJob().updateJobDetail(jobId, new PutJobsJobIDRequest().cronExpression(cronExpression)));
+        executeVoid(() -> fineractClient.schedulerJob().updateJobDetail(jobId, new JobUpdateRequest().cronExpression(cronExpression)));
         return jobId;
     }
 }

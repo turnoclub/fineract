@@ -18,23 +18,24 @@
  */
 package org.apache.fineract.portfolio.charge.starter;
 
+import jakarta.validation.Validator;
 import org.apache.fineract.accounting.common.AccountingDropdownReadPlatformService;
 import org.apache.fineract.accounting.glaccount.domain.GLAccountRepositoryWrapper;
 import org.apache.fineract.infrastructure.configuration.domain.ConfigurationDomainServiceJpa;
 import org.apache.fineract.infrastructure.entityaccess.service.FineractEntityAccessUtil;
-import org.apache.fineract.infrastructure.security.service.PlatformSecurityContext;
 import org.apache.fineract.organisation.monetary.service.CurrencyReadPlatformService;
 import org.apache.fineract.portfolio.charge.domain.ChargeRepository;
-import org.apache.fineract.portfolio.charge.serialization.ChargeDefinitionCommandFromApiJsonDeserializer;
 import org.apache.fineract.portfolio.charge.service.ChargeDropdownReadPlatformService;
 import org.apache.fineract.portfolio.charge.service.ChargeDropdownReadPlatformServiceImpl;
-import org.apache.fineract.portfolio.charge.service.ChargeReadPlatformService;
-import org.apache.fineract.portfolio.charge.service.ChargeReadPlatformServiceImpl;
-import org.apache.fineract.portfolio.charge.service.ChargeWritePlatformService;
-import org.apache.fineract.portfolio.charge.service.ChargeWritePlatformServiceJpaRepositoryImpl;
+import org.apache.fineract.portfolio.charge.service.ChargeReadService;
+import org.apache.fineract.portfolio.charge.service.ChargeReadServiceImpl;
+import org.apache.fineract.portfolio.charge.service.ChargeWriteService;
+import org.apache.fineract.portfolio.charge.service.ChargeWriteServiceImpl;
 import org.apache.fineract.portfolio.common.service.DropdownReadPlatformService;
+import org.apache.fineract.portfolio.loanaccount.domain.LoanRepository;
 import org.apache.fineract.portfolio.loanproduct.domain.LoanProductRepository;
-import org.apache.fineract.portfolio.paymenttype.domain.PaymentTypeRepositoryWrapper;
+import org.apache.fineract.portfolio.paymenttype.domain.PaymentTypeRepository;
+import org.apache.fineract.portfolio.savings.domain.SavingsAccountRepository;
 import org.apache.fineract.portfolio.tax.domain.TaxGroupRepositoryWrapper;
 import org.apache.fineract.portfolio.tax.service.TaxReadPlatformService;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
@@ -53,25 +54,25 @@ public class ChargeConfiguration {
     }
 
     @Bean
-    @ConditionalOnMissingBean(ChargeReadPlatformService.class)
-    public ChargeReadPlatformService chargeReadPlatformService(CurrencyReadPlatformService currencyReadPlatformService,
+    @ConditionalOnMissingBean(ChargeReadService.class)
+    public ChargeReadService chargeReadService(CurrencyReadPlatformService currencyReadPlatformService,
             ChargeDropdownReadPlatformService chargeDropdownReadPlatformService, JdbcTemplate jdbcTemplate,
             DropdownReadPlatformService dropdownReadPlatformService, FineractEntityAccessUtil fineractEntityAccessUtil,
             AccountingDropdownReadPlatformService accountingDropdownReadPlatformService, TaxReadPlatformService taxReadPlatformService,
-            ConfigurationDomainServiceJpa configurationDomainServiceJpa, NamedParameterJdbcTemplate namedParameterJdbcTemplate) {
-        return new ChargeReadPlatformServiceImpl(currencyReadPlatformService, chargeDropdownReadPlatformService, jdbcTemplate,
+            ConfigurationDomainServiceJpa configurationDomainServiceJpa, NamedParameterJdbcTemplate namedParameterJdbcTemplate,
+            LoanRepository loanRepository, SavingsAccountRepository savingsAccountRepository) {
+        return new ChargeReadServiceImpl(currencyReadPlatformService, chargeDropdownReadPlatformService, jdbcTemplate,
                 dropdownReadPlatformService, fineractEntityAccessUtil, accountingDropdownReadPlatformService, taxReadPlatformService,
-                configurationDomainServiceJpa, namedParameterJdbcTemplate);
+                configurationDomainServiceJpa, namedParameterJdbcTemplate, loanRepository, savingsAccountRepository);
     }
 
     @Bean
-    @ConditionalOnMissingBean(ChargeWritePlatformService.class)
-    public ChargeWritePlatformService chargeWritePlatformService(PlatformSecurityContext context,
-            ChargeDefinitionCommandFromApiJsonDeserializer fromApiJsonDeserializer, ChargeRepository chargeRepository,
-            LoanProductRepository loanProductRepository, JdbcTemplate jdbcTemplate, FineractEntityAccessUtil fineractEntityAccessUtil,
+    @ConditionalOnMissingBean(ChargeWriteService.class)
+    public ChargeWriteService chargeWriteService(Validator validator, ChargeRepository chargeRepository,
+            LoanProductRepository loanProductRepository, FineractEntityAccessUtil fineractEntityAccessUtil,
             GLAccountRepositoryWrapper glAccountRepository, TaxGroupRepositoryWrapper taxGroupRepository,
-            PaymentTypeRepositoryWrapper paymentTyperepositoryWrapper) {
-        return new ChargeWritePlatformServiceJpaRepositoryImpl(context, fromApiJsonDeserializer, chargeRepository, loanProductRepository,
-                jdbcTemplate, fineractEntityAccessUtil, glAccountRepository, taxGroupRepository, paymentTyperepositoryWrapper);
+            PaymentTypeRepository paymentTypeRepository) {
+        return new ChargeWriteServiceImpl(validator, chargeRepository, loanProductRepository, fineractEntityAccessUtil, glAccountRepository,
+                taxGroupRepository, paymentTypeRepository);
     }
 }

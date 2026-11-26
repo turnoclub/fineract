@@ -92,6 +92,14 @@ public final class WorkingCapitalLoanProductApiResourceSwagger {
         // Core product parameters (related detail: amortization, repayment defaults)
         @Schema(example = "EIR", allowableValues = { "EIR", "FLAT" })
         public String amortizationType;
+        @Schema(example = "TPV", allowableValues = { "TPV", "ANNUAL_EIR",
+                "PAYMENT_AMOUNT" }, description = "Payment amount calculation strategy: TPV (default), ANNUAL_EIR or PAYMENT_AMOUNT")
+        public String paymentAmountCalculationStrategy;
+        @Schema(example = "43.7562", description = "Annual EIR percentage (6 decimal places max). Required when strategy is ANNUAL_EIR.")
+        public BigDecimal annualEir;
+        @Schema(example = "47.22", description = "Payment amount per repayment period, at most the currency's decimal precision. "
+                + "Required when strategy is PAYMENT_AMOUNT.")
+        public BigDecimal paymentAmount;
         @Schema(example = "1")
         public Long delinquencyBucketId;
         @Schema(example = "365")
@@ -113,11 +121,20 @@ public final class WorkingCapitalLoanProductApiResourceSwagger {
         public BigDecimal periodPaymentRate;
         @Schema(example = "2.0")
         public BigDecimal maxPeriodPaymentRate;
+        @Schema(example = "20.0", description = "Minimum annual EIR percentage. Optional; only for ANNUAL_EIR strategy.")
+        public BigDecimal minAnnualEir;
+        @Schema(example = "50.0", description = "Maximum annual EIR percentage. Optional; only for ANNUAL_EIR strategy.")
+        public BigDecimal maxAnnualEir;
+        @Schema(example = "10.0", description = "Minimum payment amount per repayment period. Optional; only for PAYMENT_AMOUNT strategy.")
+        public BigDecimal minPaymentAmount;
+        @Schema(example = "100.0", description = "Maximum payment amount per repayment period. Optional; only for PAYMENT_AMOUNT strategy.")
+        public BigDecimal maxPaymentAmount;
         @Schema(example = "0.0")
         public BigDecimal discount;
         @Schema(example = "30")
         public Integer repaymentEvery;
-        @Schema(example = "DAYS", allowableValues = { "DAYS", "MONTHS", "YEARS" })
+        @Schema(example = "DAYS", allowableValues = { "DAYS", "WEEKS", "MONTHS", "YEARS" }, description = "Unit of the repayment "
+                + "period, which is repaymentEvery of these. DAYS, WEEKS and MONTHS are supported; YEARS is rejected.")
         public String repaymentFrequencyType;
         @Schema(example = "1")
         public Long breachId;
@@ -127,12 +144,16 @@ public final class WorkingCapitalLoanProductApiResourceSwagger {
         public String delinquencyStartType;
         @Schema(example = "1")
         public Long nearBreachId;
+        @Schema(example = "0", description = "Number of days to shift the start of the first breach schedule period after disbursement")
+        public Integer breachGraceDays;
+        @Schema(example = "DISBURSEMENT", description = "Breach start type: LOAN_CREATION or DISBURSEMENT")
+        public String breachStartType;
 
         // Configurable attributes
         public PostAllowAttributeOverrides allowAttributeOverrides;
 
         // Accounting
-        @Schema(example = "CASH_BASED", description = "NONE or CASH_BASED", allowableValues = { "NONE", "CASH_BASED" })
+        @Schema(example = "ACC_DEF_REV_AM", description = "NONE or ACC_DEF_REV_AM", allowableValues = { "NONE", "ACC_DEF_REV_AM" })
         public String accountingRule;
         @Schema(example = "1")
         public Long fundSourceAccountId;
@@ -188,9 +209,8 @@ public final class WorkingCapitalLoanProductApiResourceSwagger {
 
             private PostPaymentAllocation() {}
 
-            @Schema(example = "DEFAULT", allowableValues = { "DEFAULT", "REPAYMENT", "DOWN_PAYMENT", "MERCHANT_ISSUED_REFUND",
-                    "PAYOUT_REFUND", "GOODWILL_CREDIT", "CHARGE_REFUND", "CHARGE_ADJUSTMENT", "WAIVE_INTEREST", "CHARGE_PAYMENT",
-                    "REFUND_FOR_ACTIVE_LOAN", "INTEREST_PAYMENT_WAIVER", "INTEREST_REFUND", "CAPITALIZED_INCOME_ADJUSTMENT" })
+            @Schema(example = "DEFAULT", allowableValues = { "DEFAULT", "REPAYMENT", "PAYOUT_REFUND", "GOODWILL_CREDIT",
+                    "CHARGE_ADJUSTMENT" })
             public String transactionType;
             public List<PaymentAllocationOrder> paymentAllocationOrder;
 
@@ -318,6 +338,21 @@ public final class WorkingCapitalLoanProductApiResourceSwagger {
         public BigDecimal periodPaymentRate;
         @Schema(example = "2.0")
         public BigDecimal maxPeriodPaymentRate;
+        @Schema(example = "20.0", description = "Minimum annual EIR percentage. Optional; only for ANNUAL_EIR strategy.")
+        public BigDecimal minAnnualEir;
+        @Schema(example = "50.0", description = "Maximum annual EIR percentage. Optional; only for ANNUAL_EIR strategy.")
+        public BigDecimal maxAnnualEir;
+        @Schema(example = "10.0", description = "Minimum payment amount per repayment period. Optional; only for PAYMENT_AMOUNT strategy.")
+        public BigDecimal minPaymentAmount;
+        @Schema(example = "100.0", description = "Maximum payment amount per repayment period. Optional; only for PAYMENT_AMOUNT strategy.")
+        public BigDecimal maxPaymentAmount;
+        @Schema(example = "47.22", description = "Configured payment amount per repayment period. Only for PAYMENT_AMOUNT strategy.")
+        public BigDecimal paymentAmount;
+        @Schema(example = "43.7562", description = "Configured annual EIR percentage. Only for ANNUAL_EIR strategy.")
+        public BigDecimal annualEir;
+        @Schema(description = "Payment amount calculation strategy: TPV, ANNUAL_EIR or PAYMENT_AMOUNT. Decides which of "
+                + "periodPaymentRate, annualEir and paymentAmount (with their min/max) apply.")
+        public StringEnumOptionData paymentAmountCalculationStrategy;
         @Schema(example = "0.0")
         public BigDecimal discount;
         @Schema(example = "30")
@@ -329,6 +364,9 @@ public final class WorkingCapitalLoanProductApiResourceSwagger {
         @Schema(example = "1")
         public Integer delinquencyGraceDays;
         public StringEnumOptionData delinquencyStartType;
+        @Schema(example = "0", description = "Number of days to shift the start of the first breach schedule period after disbursement")
+        public Integer breachGraceDays;
+        public StringEnumOptionData breachStartType;
 
         // Configurable attributes
         public GetConfigurableAttributes allowAttributeOverrides;
@@ -351,6 +389,8 @@ public final class WorkingCapitalLoanProductApiResourceSwagger {
             public Long id;
             @Schema(example = "Bucket 1")
             public String name;
+            @Schema(example = "WORKING_CAPITAL")
+            public String bucketType;
             public List<GetDelinquencyRange> ranges;
 
             @Schema(description = "GetDelinquencyRange")
@@ -436,22 +476,27 @@ public final class WorkingCapitalLoanProductApiResourceSwagger {
         public List<ChargeData> penaltyOptions;
         public List<CurrencyData> currencyOptions;
         public List<StringEnumOptionData> amortizationTypeOptions;
+        @Schema(description = "Payment amount calculation strategies a product can be created with")
+        public List<StringEnumOptionData> paymentAmountCalculationStrategyOptions;
         public List<StringEnumOptionData> periodFrequencyTypeOptions;
         public List<WorkingCapitalBreachData> breachOptions;
         public List<WorkingCapitalNearBreachData> nearBreachOptions;
         public List<StringEnumOptionData> advancedPaymentAllocationTypes;
         public List<StringEnumOptionData> delinquencyStartTypeOptions;
+        public List<StringEnumOptionData> breachStartTypeOptions;
         public List<StringEnumOptionData> delinquencyMinimumPaymentTypeOptions;
         public List<EnumOptionData> advancedPaymentAllocationTransactionTypes;
         public List<GetWorkingCapitalLoanProductsResponse.GetDelinquencyBucket> delinquencyBucketOptions;
         public List<StringEnumOptionData> accountingRuleOptions;
-        public Map<String, Object> accountingMappingOptions;
+        public Map<String, List<GLAccountData>> accountingMappingOptions;
         public List<CodeValueData> chargeOffReasonOptions;
         public List<CodeValueData> writeOffReasonOptions;
     }
 
     @Schema(description = "GetWorkingCapitalLoanProductsProductIdResponse")
     public static final class GetWorkingCapitalLoanProductsProductIdResponse {
+
+        public Map<String, List<GLAccountData>> accountingMappingOptions;
 
         private GetWorkingCapitalLoanProductsProductIdResponse() {}
 
@@ -499,6 +544,21 @@ public final class WorkingCapitalLoanProductApiResourceSwagger {
         public BigDecimal periodPaymentRate;
         @Schema(example = "2.0")
         public BigDecimal maxPeriodPaymentRate;
+        @Schema(example = "20.0", description = "Minimum annual EIR percentage. Optional; only for ANNUAL_EIR strategy.")
+        public BigDecimal minAnnualEir;
+        @Schema(example = "50.0", description = "Maximum annual EIR percentage. Optional; only for ANNUAL_EIR strategy.")
+        public BigDecimal maxAnnualEir;
+        @Schema(example = "10.0", description = "Minimum payment amount per repayment period. Optional; only for PAYMENT_AMOUNT strategy.")
+        public BigDecimal minPaymentAmount;
+        @Schema(example = "100.0", description = "Maximum payment amount per repayment period. Optional; only for PAYMENT_AMOUNT strategy.")
+        public BigDecimal maxPaymentAmount;
+        @Schema(example = "47.22", description = "Configured payment amount per repayment period. Only for PAYMENT_AMOUNT strategy.")
+        public BigDecimal paymentAmount;
+        @Schema(example = "43.7562", description = "Configured annual EIR percentage. Only for ANNUAL_EIR strategy.")
+        public BigDecimal annualEir;
+        @Schema(description = "Payment amount calculation strategy: TPV, ANNUAL_EIR or PAYMENT_AMOUNT. Decides which of "
+                + "periodPaymentRate, annualEir and paymentAmount (with their min/max) apply.")
+        public StringEnumOptionData paymentAmountCalculationStrategy;
         @Schema(example = "0.0")
         public BigDecimal discount;
         @Schema(example = "30")
@@ -510,6 +570,9 @@ public final class WorkingCapitalLoanProductApiResourceSwagger {
         public Integer delinquencyGraceDays;
         public StringEnumOptionData delinquencyStartType;
         public GetWorkingCapitalLoanNearBreach nearBreach;
+        @Schema(example = "0", description = "Number of days to shift the start of the first breach schedule period after disbursement")
+        public Integer breachGraceDays;
+        public StringEnumOptionData breachStartType;
 
         // Configurable attributes
         public GetWorkingCapitalLoanProductsResponse.GetConfigurableAttributes allowAttributeOverrides;
@@ -577,11 +640,29 @@ public final class WorkingCapitalLoanProductApiResourceSwagger {
         public BigDecimal periodPaymentRate;
         @Schema(example = "2.0")
         public BigDecimal maxPeriodPaymentRate;
+        @Schema(example = "20.0", description = "Minimum annual EIR percentage. Optional; only for ANNUAL_EIR strategy.")
+        public BigDecimal minAnnualEir;
+        @Schema(example = "50.0", description = "Maximum annual EIR percentage. Optional; only for ANNUAL_EIR strategy.")
+        public BigDecimal maxAnnualEir;
+        @Schema(example = "10.0", description = "Minimum payment amount per repayment period. Optional; only for PAYMENT_AMOUNT strategy.")
+        public BigDecimal minPaymentAmount;
+        @Schema(example = "100.0", description = "Maximum payment amount per repayment period. Optional; only for PAYMENT_AMOUNT strategy.")
+        public BigDecimal maxPaymentAmount;
+        @Schema(example = "47.22", description = "Payment amount per repayment period, at most the currency's decimal precision. "
+                + "Required when strategy is PAYMENT_AMOUNT.")
+        public BigDecimal paymentAmount;
+        @Schema(example = "43.7562", description = "Annual EIR percentage (6 decimal places max). Required when strategy is ANNUAL_EIR.")
+        public BigDecimal annualEir;
+        @Schema(example = "PAYMENT_AMOUNT", allowableValues = { "TPV", "ANNUAL_EIR", "PAYMENT_AMOUNT" }, description = "Switches the "
+                + "payment amount calculation strategy. The inputs of the other strategies (periodPaymentRate, annualEir, paymentAmount "
+                + "and their min/max) are cleared, so the request must carry the new strategy's input.")
+        public String paymentAmountCalculationStrategy;
         @Schema(example = "0.0")
         public BigDecimal discount;
         @Schema(example = "30")
         public Integer repaymentEvery;
-        @Schema(example = "DAYS", allowableValues = { "DAYS", "MONTHS", "YEARS" })
+        @Schema(example = "DAYS", allowableValues = { "DAYS", "WEEKS", "MONTHS", "YEARS" }, description = "Unit of the repayment "
+                + "period, which is repaymentEvery of these. DAYS, WEEKS and MONTHS are supported; YEARS is rejected.")
         public String repaymentFrequencyType;
         @Schema(example = "1")
         public Long breachId;
@@ -591,12 +672,16 @@ public final class WorkingCapitalLoanProductApiResourceSwagger {
         public String delinquencyStartType;
         @Schema(example = "1")
         public Long nearBreachId;
+        @Schema(example = "0", description = "Number of days to shift the start of the first breach schedule period after disbursement")
+        public Integer breachGraceDays;
+        @Schema(example = "DISBURSEMENT", description = "Breach start type: LOAN_CREATION or DISBURSEMENT")
+        public String breachStartType;
 
         // Configurable attributes
         public PostWorkingCapitalLoanProductsRequest.PostAllowAttributeOverrides allowAttributeOverrides;
 
         // Accounting
-        @Schema(example = "CASH_BASED", description = "NONE or CASH_BASED", allowableValues = { "NONE", "CASH_BASED" })
+        @Schema(example = "ACC_DEF_REV_AM", description = "NONE or ACC_DEF_REV_AM", allowableValues = { "NONE", "ACC_DEF_REV_AM" })
         public String accountingRule;
         @Schema(example = "1")
         public Long fundSourceAccountId;

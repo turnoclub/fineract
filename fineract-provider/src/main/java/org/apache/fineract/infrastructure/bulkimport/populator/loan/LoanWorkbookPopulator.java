@@ -18,7 +18,10 @@
  */
 package org.apache.fineract.infrastructure.bulkimport.populator.loan;
 
+import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 import org.apache.fineract.infrastructure.bulkimport.constants.LoanConstants;
 import org.apache.fineract.infrastructure.bulkimport.constants.TemplatePopulateImportConstants;
 import org.apache.fineract.infrastructure.bulkimport.populator.AbstractWorkbookPopulator;
@@ -472,28 +475,41 @@ public class LoanWorkbookPopulator extends AbstractWorkbookPopulator {
         officeGroup.setRefersToFormula(TemplatePopulateImportConstants.OFFICE_SHEET_NAME + "!$B$2:$B$" + (officeNames.size() + 1));
 
         // Client and Loan Officer Names for each office
+        // Guard against duplicate office-keyed defined names (Staff_/Client_/Group_<office name>) — POI rejects a
+        // duplicate and 500s the whole template whenever two office names match case-insensitively after sanitising
+        // (e.g. "Head Office" and "head office"). Same guard as the charge/product loops below; each Name is created
+        // only once its name is known to be new, so a skipped entry leaves no orphan Name in the workbook.
+        Set<String> seenOfficeScopedNames = new HashSet<>();
         for (Integer i = 0; i < officeNames.size(); i++) {
             Integer[] officeNameToBeginEndIndexesOfClients = clientSheetPopulator.getOfficeNameToBeginEndIndexesOfClients().get(i);
             Integer[] officeNameToBeginEndIndexesOfStaff = personnelSheetPopulator.getOfficeNameToBeginEndIndexesOfStaff().get(i);
             Integer[] officeNameToBeginEndIndexesOfGroups = groupSheetPopulator.getOfficeNameToBeginEndIndexesOfGroups().get(i);
-            Name clientName = loanWorkbook.createName();
-            Name loanOfficerName = loanWorkbook.createName();
-            Name groupName = loanWorkbook.createName();
-
             if (officeNameToBeginEndIndexesOfStaff != null) {
-                setSanitized(loanOfficerName, "Staff_" + officeNames.get(i));
-                loanOfficerName.setRefersToFormula(TemplatePopulateImportConstants.STAFF_SHEET_NAME + "!$B$"
-                        + officeNameToBeginEndIndexesOfStaff[0] + ":$B$" + officeNameToBeginEndIndexesOfStaff[1]);
+                String staffName = "Staff_" + officeNames.get(i);
+                if (seenOfficeScopedNames.add(sanitizeName(staffName).toUpperCase(Locale.ROOT))) {
+                    Name loanOfficerName = loanWorkbook.createName();
+                    setSanitized(loanOfficerName, staffName);
+                    loanOfficerName.setRefersToFormula(TemplatePopulateImportConstants.STAFF_SHEET_NAME + "!$B$"
+                            + officeNameToBeginEndIndexesOfStaff[0] + ":$B$" + officeNameToBeginEndIndexesOfStaff[1]);
+                }
             }
             if (officeNameToBeginEndIndexesOfClients != null) {
-                setSanitized(clientName, "Client_" + officeNames.get(i));
-                clientName.setRefersToFormula(TemplatePopulateImportConstants.CLIENT_SHEET_NAME + "!$B$"
-                        + officeNameToBeginEndIndexesOfClients[0] + ":$B$" + officeNameToBeginEndIndexesOfClients[1]);
+                String clientNameStr = "Client_" + officeNames.get(i);
+                if (seenOfficeScopedNames.add(sanitizeName(clientNameStr).toUpperCase(Locale.ROOT))) {
+                    Name clientName = loanWorkbook.createName();
+                    setSanitized(clientName, clientNameStr);
+                    clientName.setRefersToFormula(TemplatePopulateImportConstants.CLIENT_SHEET_NAME + "!$B$"
+                            + officeNameToBeginEndIndexesOfClients[0] + ":$B$" + officeNameToBeginEndIndexesOfClients[1]);
+                }
             }
             if (officeNameToBeginEndIndexesOfGroups != null) {
-                setSanitized(groupName, "Group_" + officeNames.get(i));
-                groupName.setRefersToFormula(TemplatePopulateImportConstants.GROUP_SHEET_NAME + "!$B$"
-                        + officeNameToBeginEndIndexesOfGroups[0] + ":$B$" + officeNameToBeginEndIndexesOfGroups[1]);
+                String groupNameStr = "Group_" + officeNames.get(i);
+                if (seenOfficeScopedNames.add(sanitizeName(groupNameStr).toUpperCase(Locale.ROOT))) {
+                    Name groupName = loanWorkbook.createName();
+                    setSanitized(groupName, groupNameStr);
+                    groupName.setRefersToFormula(TemplatePopulateImportConstants.GROUP_SHEET_NAME + "!$B$"
+                            + officeNameToBeginEndIndexesOfGroups[0] + ":$B$" + officeNameToBeginEndIndexesOfGroups[1]);
+                }
             }
         }
 
@@ -516,12 +532,22 @@ public class LoanWorkbookPopulator extends AbstractWorkbookPopulator {
                 TemplatePopulateImportConstants.CHARGE_SHEET_NAME + "!$B$2:$B$" + (chargeSheetPopulator.getChargesSize() + 1));
 
         // Default Charge Name, Charge Amount, Charge Amount Type, Charge Due Date
+        Set<String> seenChargeNames = new HashSet<>();
         for (Integer i = 0; i < charges.size(); i++) {
+            // sanitizeName() strips every character Excel disallows in a defined name (POI only permits
+            // letter/digit/period/underscore) - the previous "[ )(]" regex left characters like '%' or '-'
+            // in place, which crashed the whole template download the moment a charge name contained one
+            // (e.g. "Service Fee 5%-10% (VAT)").
+            String chargeName = sanitizeName(charges.get(i).getName());
+            // Guard against duplicate charge-keyed defined names — POI rejects a duplicate and 500s the whole
+            // template. Excel defined names are case-insensitive, so upper-case the key. The names are resolved
+            // before any createName() call so a skipped charge leaves no orphan Name in the workbook.
+            if (!seenChargeNames.add(chargeName.toUpperCase(Locale.ROOT))) {
+                continue;
+            }
             Name chargeColName = loanWorkbook.createName();
             Name chargeAmount = loanWorkbook.createName();
             Name chargeAmountType = loanWorkbook.createName();
-
-            String chargeName = charges.get(i).getName().trim().replaceAll("[ )(]", "_");
 
             chargeColName.setNameName("CHARGE_NAME_" + chargeName);
             chargeColName.setRefersToFormula(TemplatePopulateImportConstants.CHARGE_SHEET_NAME + "!$B$" + (i + 2));
@@ -548,7 +574,14 @@ public class LoanWorkbookPopulator extends AbstractWorkbookPopulator {
         // Interest Calculation Period, Transaction Processing Strategy, Arrears
         // Tolerance, GraceOnPrincipalPayment, GraceOnInterestPayment,
         // GraceOnInterestCharged, StartDate Names for each loan product
+        Set<String> seenProductNames = new HashSet<>();
         for (Integer i = 0; i < products.size(); i++) {
+            String productName = products.get(i).getName().replaceAll("[ ]", "_");
+            // Guard against duplicate product-keyed defined names — POI rejects a duplicate and 500s the whole
+            // template. Excel defined names are case-insensitive, so key on the sanitised, upper-cased name.
+            if (!seenProductNames.add(sanitizeName(productName).toUpperCase(Locale.ROOT))) {
+                continue;
+            }
             Name fundName = loanWorkbook.createName();
             Name principalName = loanWorkbook.createName();
             Name minPrincipalName = loanWorkbook.createName();
@@ -571,7 +604,6 @@ public class LoanWorkbookPopulator extends AbstractWorkbookPopulator {
             Name graceOnInterestPaymentName = loanWorkbook.createName();
             Name graceOnInterestChargedName = loanWorkbook.createName();
             Name startDateName = loanWorkbook.createName();
-            String productName = products.get(i).getName().replaceAll("[ ]", "_");
             setSanitized(fundName, "FUND_" + productName);
             setSanitized(principalName, "PRINCIPAL_" + productName);
             setSanitized(minPrincipalName, "MIN_PRINCIPAL_" + productName);

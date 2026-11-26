@@ -22,16 +22,25 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import feign.Headers;
+import feign.Param;
+import feign.RequestLine;
 import java.math.BigDecimal;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import org.apache.fineract.client.feign.util.CallFailedRuntimeException;
+import org.apache.fineract.client.feign.util.FeignCalls;
 import org.apache.fineract.client.models.DeleteWorkingCapitalLoanProductsProductIdResponse;
+import org.apache.fineract.client.models.EnumOptionData;
 import org.apache.fineract.client.models.GetDelinquencyBucket;
 import org.apache.fineract.client.models.GetDelinquencyRange;
 import org.apache.fineract.client.models.GetWorkingCapitalLoanProductsProductIdResponse;
@@ -47,20 +56,26 @@ import org.apache.fineract.client.models.WorkingCapitalBreachData;
 import org.apache.fineract.client.models.WorkingCapitalBreachRequest;
 import org.apache.fineract.client.models.WorkingCapitalNearBreachData;
 import org.apache.fineract.client.models.WorkingCapitalNearBreachRequest;
+import org.apache.fineract.integrationtests.client.feign.helpers.FeignDelinquencyHelper;
+import org.apache.fineract.integrationtests.common.FineractFeignClientHelper;
 import org.apache.fineract.integrationtests.common.Utils;
 import org.apache.fineract.integrationtests.common.workingcapitalloanbreach.WorkingCapitalBreachHelper;
 import org.apache.fineract.integrationtests.common.workingcapitalloannearbreach.WorkingCapitalNearBreachHelper;
 import org.apache.fineract.integrationtests.common.workingcapitalloanproduct.WorkingCapitalLoanProductHelper;
 import org.apache.fineract.integrationtests.common.workingcapitalloanproduct.WorkingCapitalLoanProductTestBuilder;
+import org.apache.fineract.portfolio.workingcapitalloanproduct.domain.WorkingCapitalLoanBreachStartType;
 import org.apache.fineract.portfolio.workingcapitalloanproduct.domain.WorkingCapitalLoanDelinquencyStartType;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 public class WorkingCapitalLoanProductCRUDTest {
 
     private WorkingCapitalLoanProductHelper wclProductHelper;
     private final WorkingCapitalBreachHelper breachHelper = new WorkingCapitalBreachHelper();
     private final WorkingCapitalNearBreachHelper nearBreachHelper = new WorkingCapitalNearBreachHelper();
+    private final FeignDelinquencyHelper delinquencyHelper = new FeignDelinquencyHelper(FineractFeignClientHelper.getFineractFeignClient());
 
     @BeforeEach
     public void setup() {
@@ -83,6 +98,49 @@ public class WorkingCapitalLoanProductCRUDTest {
         assertNotNull(response.getResourceId());
         final Long productId = response.getResourceId();
         wclProductHelper.deleteWorkingCapitalLoanProductById(productId);
+    }
+
+    // Raw request bodies allow testing values excluded by the generated client's enum.
+    @Headers({ "Accept: application/json", "Content-Type: application/json" })
+    public interface PaymentAllocationValidationApi {
+
+        @RequestLine("POST /v1/working-capital-loan-products")
+        PostWorkingCapitalLoanProductsResponse create(Map<String, Object> request);
+
+        @RequestLine("PUT /v1/working-capital-loan-products/{productId}")
+        PutWorkingCapitalLoanProductsProductIdResponse update(@Param("productId") Long productId, Map<String, Object> request);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = { "DOWN_PAYMENT", "INTEREST_REFUND", "MERCHANT_ISSUED_REFUND", "default", " REPAYMENT " })
+    public void testRejectUnsupportedPaymentAllocationOnCreateAndUpdate(final String transactionType) {
+        final WorkingCapitalLoanProductTestBuilder builder = new WorkingCapitalLoanProductTestBuilder()
+                .withName("Test wcl Product " + UUID.randomUUID().toString().substring(0, 8))
+                .withShortName(Utils.uniqueRandomStringGenerator("", 4));
+        final Long productId = wclProductHelper.createWorkingCapitalLoanProduct(builder.build()).getResourceId();
+        try {
+            final PaymentAllocationValidationApi api = FineractFeignClientHelper.getFineractFeignClient()
+                    .create(PaymentAllocationValidationApi.class);
+            final Map<String, Object> request = new ObjectMapper()
+                    .convertValue(builder.withName("Rejected wcl " + UUID.randomUUID().toString().substring(0, 8))
+                            .withShortName(Utils.uniqueRandomStringGenerator("", 4)).build(), new TypeReference<>() {});
+            final List<PaymentAllocationOrder> allocationOrder = builder.build().getPaymentAllocation().getFirst()
+                    .getPaymentAllocationOrder();
+            request.put("paymentAllocation", List.of(Map.of("transactionType", "DEFAULT", "paymentAllocationOrder", allocationOrder),
+                    Map.of("transactionType", transactionType, "paymentAllocationOrder", allocationOrder)));
+            final CallFailedRuntimeException createError = assertThrows(CallFailedRuntimeException.class,
+                    () -> FeignCalls.ok(() -> api.create(request)));
+            assertThat(createError.getStatus()).isEqualTo(400);
+            assertThat(createError.getResponseBody()).contains("wc-payment-allocation.with.not.valid.transaction.type");
+
+            final Map<String, Object> updateRequest = Map.of("paymentAllocation", request.get("paymentAllocation"));
+            final CallFailedRuntimeException updateError = assertThrows(CallFailedRuntimeException.class,
+                    () -> FeignCalls.ok(() -> api.update(productId, updateRequest)));
+            assertThat(updateError.getStatus()).isEqualTo(400);
+            assertThat(updateError.getResponseBody()).contains("wc-payment-allocation.with.not.valid.transaction.type");
+        } finally {
+            wclProductHelper.deleteWorkingCapitalLoanProductById(productId);
+        }
     }
 
     @Test
@@ -171,12 +229,24 @@ public class WorkingCapitalLoanProductCRUDTest {
         assertFalse(response.getAmortizationTypeOptions().isEmpty(), "Amortization type options should not be empty");
         assertNotNull(response.getPeriodFrequencyTypeOptions());
         assertFalse(response.getPeriodFrequencyTypeOptions().isEmpty(), "Period frequency type options should not be empty");
+        assertThat(response.getPeriodFrequencyTypeOptions()).extracting("id").containsExactly("DAYS", "WEEKS", "MONTHS");
         assertNotNull(response.getBreachOptions());
         assertNotNull(response.getAdvancedPaymentAllocationTypes());
         assertFalse(response.getAdvancedPaymentAllocationTypes().isEmpty(), "Payment allocation type options should not be empty");
         assertNotNull(response.getAdvancedPaymentAllocationTransactionTypes());
         assertFalse(response.getAdvancedPaymentAllocationTransactionTypes().isEmpty(),
                 "Payment allocation transaction type options should not be empty");
+        // Verify Payment allocation transaction types contains expected values
+        final List<String> expectedPaymentAllocationTransactionTypes = List.of("DEFAULT", "REPAYMENT", "PAYOUT_REFUND", "GOODWILL_CREDIT",
+                "CHARGE_ADJUSTMENT");
+        final List<String> actualPaymentAllocationTransactionTypes = response.getAdvancedPaymentAllocationTransactionTypes().stream()
+                .map(EnumOptionData::getCode).toList();
+        assertTrue(actualPaymentAllocationTransactionTypes.containsAll(expectedPaymentAllocationTransactionTypes),
+                "Payment allocation transaction types should contain all expected types");
+        assertEquals(expectedPaymentAllocationTransactionTypes, actualPaymentAllocationTransactionTypes);
+        assertEquals(List.of(1L, 2L, 5L, 6L, 8L),
+                response.getAdvancedPaymentAllocationTransactionTypes().stream().map(EnumOptionData::getId).toList());
+
         // Verify payment allocation types contain expected values
         final List<String> expectedPaymentAllocationTypes = List.of("DUE_PENALTY", "DUE_FEE", "DUE_PRINCIPAL", "IN_ADVANCE_PENALTY",
                 "IN_ADVANCE_FEE", "IN_ADVANCE_PRINCIPAL");
@@ -208,6 +278,33 @@ public class WorkingCapitalLoanProductCRUDTest {
         assertEquals(productId, updateResponse.getResourceId());
         final GetWorkingCapitalLoanProductsProductIdResponse retrieved = wclProductHelper.retrieveWorkingCapitalLoanProductById(productId);
         assertEquals(updatedName, retrieved.getName());
+        wclProductHelper.deleteWorkingCapitalLoanProductById(productId);
+    }
+
+    @Test
+    public void testUpdateWorkingCapitalLoanProductBreachGraceDays() {
+        // Given - product created with default breachGraceDays = 0
+        final GetWorkingCapitalLoanProductsTemplateResponse template = wclProductHelper.retrieveTemplate();
+        final WorkingCapitalBreachData breach = getBreachData(template);
+        assertNotNull(breach);
+        final String uniqueName = "Test wcl Product " + UUID.randomUUID().toString().substring(0, 8);
+        final String uniqueShortName = Utils.uniqueRandomStringGenerator("", 4);
+        final PostWorkingCapitalLoanProductsRequest createRequest = new WorkingCapitalLoanProductTestBuilder().withName(uniqueName)
+                .withShortName(uniqueShortName).withBreachId(breach.getId()).build();
+        final Long productId = wclProductHelper.createWorkingCapitalLoanProduct(createRequest).getResourceId();
+        final GetWorkingCapitalLoanProductsProductIdResponse afterCreate = wclProductHelper
+                .retrieveWorkingCapitalLoanProductById(productId);
+        assertEquals(0, afterCreate.getBreachGraceDays());
+
+        // When - update breachGraceDays to 7
+        final PutWorkingCapitalLoanProductsProductIdRequest updateRequest = new WorkingCapitalLoanProductTestBuilder().withName(uniqueName)
+                .withShortName(uniqueShortName).withBreachId(breach.getId()).withBreachGraceDays(7).buildUpdateRequest();
+        wclProductHelper.updateWorkingCapitalLoanProductById(productId, updateRequest);
+
+        // Then
+        final GetWorkingCapitalLoanProductsProductIdResponse afterUpdate = wclProductHelper
+                .retrieveWorkingCapitalLoanProductById(productId);
+        assertEquals(7, afterUpdate.getBreachGraceDays());
         wclProductHelper.deleteWorkingCapitalLoanProductById(productId);
     }
 
@@ -282,19 +379,13 @@ public class WorkingCapitalLoanProductCRUDTest {
         final HashMap<String, Boolean> allowAttributeOverrides = new HashMap<>();
         allowAttributeOverrides.put("breach", true);
 
-        // Get fund and delinquency bucket from template
+        // Get fund and delinquency bucket from template (grace/start type require a WC bucket)
         final GetWorkingCapitalLoanProductsTemplateResponse template = wclProductHelper.retrieveTemplate();
         Long fundId = null;
         if (template.getFundOptions() != null && !template.getFundOptions().isEmpty()) {
             fundId = template.getFundOptions().getFirst().getId();
         }
-        Long delinquencyBucketId = null;
-        if (template.getDelinquencyBucketOptions() != null && !template.getDelinquencyBucketOptions().isEmpty()) {
-            final GetDelinquencyBucket firstBucket = template.getDelinquencyBucketOptions().getFirst();
-            if (firstBucket != null && firstBucket.getId() != null) {
-                delinquencyBucketId = firstBucket.getId();
-            }
-        }
+        final Long delinquencyBucketId = resolveWorkingCapitalDelinquencyBucketId(template);
 
         final PostWorkingCapitalLoanProductsRequest request = new WorkingCapitalLoanProductTestBuilder() //
                 .withName("Full wcl Product " + uniqueId) //
@@ -353,15 +444,14 @@ public class WorkingCapitalLoanProductCRUDTest {
             fundId = template.getFundOptions().getFirst().getId();
             fundName = template.getFundOptions().getFirst().getName();
         }
-        Long delinquencyBucketId = null;
-        final GetDelinquencyBucket expectedBucket = template.getDelinquencyBucketOptions() != null
-                && !template.getDelinquencyBucketOptions().isEmpty() ? template.getDelinquencyBucketOptions().getFirst() : null;
-        if (expectedBucket != null) {
-            delinquencyBucketId = expectedBucket.getId();
-        }
+        final Long delinquencyBucketId = resolveWorkingCapitalDelinquencyBucketId(template);
+        final GetDelinquencyBucket expectedBucket = Objects
+                .requireNonNull(wclProductHelper.retrieveTemplate().getDelinquencyBucketOptions()).stream()
+                .filter(bucket -> delinquencyBucketId.equals(bucket.getId())).findFirst().orElse(null);
+        assertNotNull(expectedBucket, "expected WC delinquency bucket should be available in template options");
 
         final WorkingCapitalBreachData expectedBreach = getBreachData(template);
-        final Long breachId = (expectedBreach != null) ? expectedBreach.getId() : null;
+        final Long breachId = expectedBreach.getId();
         // Create a near breach with default values
         final WorkingCapitalNearBreachRequest nearBreachRequest = new WorkingCapitalNearBreachRequest() //
                 .nearBreachName(Utils.randomStringGenerator("NearBreach", 20)) //
@@ -397,6 +487,7 @@ public class WorkingCapitalLoanProductCRUDTest {
                 .withPaymentAllocationTypes(paymentAllocationTypes) //
                 .withDelinquencyGraceDays(1) //
                 .withDelinquencyStartType(WorkingCapitalLoanDelinquencyStartType.DISBURSEMENT.getCode()) //
+                .withBreachGraceDays(5) //
                 // Term category
                 .withPrincipalAmountMin(BigDecimal.valueOf(1000)) //
                 .withPrincipalAmountDefault(BigDecimal.valueOf(5000)) //
@@ -440,10 +531,12 @@ public class WorkingCapitalLoanProductCRUDTest {
                 assertNotNull(retrieved.getDelinquencyBucket().getRanges(), "delinquencyBucket.ranges");
                 assertEquals(expectedBucket.getRanges().size(), retrieved.getDelinquencyBucket().getRanges().size(),
                         "delinquencyBucket.ranges.size");
-                for (int i = 0; i < expectedBucket.getRanges().size(); i++) {
-                    final GetDelinquencyRange expectedRange = expectedBucket.getRanges().get(i);
-                    final GetDelinquencyRange actualRange = retrieved.getDelinquencyBucket().getRanges().get(i);
-                    assertEquals(expectedRange.getId(), actualRange.getId());
+                // The API does not guarantee the order of a bucket's ranges, so each one is matched by id rather than
+                // by position.
+                for (final GetDelinquencyRange expectedRange : expectedBucket.getRanges()) {
+                    final GetDelinquencyRange actualRange = retrieved.getDelinquencyBucket().getRanges().stream()
+                            .filter(range -> Objects.equals(range.getId(), expectedRange.getId())).findFirst().orElse(null);
+                    assertNotNull(actualRange, "delinquencyBucket.ranges is missing range " + expectedRange.getId());
                     assertEquals(expectedRange.getClassification(), actualRange.getClassification());
                     assertEquals(expectedRange.getMinimumAgeDays(), actualRange.getMinimumAgeDays());
                     assertEquals(expectedRange.getMaximumAgeDays(), actualRange.getMaximumAgeDays());
@@ -463,6 +556,7 @@ public class WorkingCapitalLoanProductCRUDTest {
         assertEquals(365, retrieved.getNpvDayCount());
         assertEquals(1, retrieved.getDelinquencyGraceDays());
         assertEquals("DISBURSEMENT", retrieved.getDelinquencyStartType().getCode());
+        assertEquals(5, retrieved.getBreachGraceDays());
 
         // Verify Payment Allocation (if present)
         if (retrieved.getPaymentAllocation() != null && !retrieved.getPaymentAllocation().isEmpty()) {
@@ -523,10 +617,10 @@ public class WorkingCapitalLoanProductCRUDTest {
 
         // Verify Configurable Attributes (allowAttributeOverrides)
         if (retrieved.getAllowAttributeOverrides() != null) {
-            assertEquals(Boolean.FALSE, retrieved.getAllowAttributeOverrides().getDelinquencyBucketClassification());
-            assertEquals(Boolean.TRUE, retrieved.getAllowAttributeOverrides().getDiscountDefault());
-            assertEquals(Boolean.FALSE, retrieved.getAllowAttributeOverrides().getPeriodPaymentFrequency());
-            assertEquals(Boolean.TRUE, retrieved.getAllowAttributeOverrides().getPeriodPaymentFrequencyType());
+            assertEquals(Boolean.valueOf(false), retrieved.getAllowAttributeOverrides().getDelinquencyBucketClassification());
+            assertEquals(Boolean.valueOf(true), retrieved.getAllowAttributeOverrides().getDiscountDefault());
+            assertEquals(Boolean.valueOf(false), retrieved.getAllowAttributeOverrides().getPeriodPaymentFrequency());
+            assertEquals(Boolean.valueOf(true), retrieved.getAllowAttributeOverrides().getPeriodPaymentFrequencyType());
         }
 
         wclProductHelper.deleteWorkingCapitalLoanProductById(productId);
@@ -549,7 +643,7 @@ public class WorkingCapitalLoanProductCRUDTest {
 
         // Given
         final String uniqueName = "Test wcl Product " + UUID.randomUUID().toString().substring(0, 8);
-        final String uniqueShortName = "TW" + UUID.randomUUID().toString().substring(0, 2);
+        final String uniqueShortName = Utils.uniqueRandomStringGenerator("TW", 2);
         PostWorkingCapitalLoanProductsRequest requestFail1 = new WorkingCapitalLoanProductTestBuilder().withName(uniqueName)
                 .withShortName(uniqueShortName).withNearBreachId(nearBreachId).build();
 
@@ -592,6 +686,153 @@ public class WorkingCapitalLoanProductCRUDTest {
         assertThat(exception.getDeveloperMessage()).contains("near.breach.frequency.must.be.lower.than.breach.frequency");
     }
 
+    @Test
+    public void testCreateAndRetrieveBreachStartType() {
+        final GetWorkingCapitalLoanProductsTemplateResponse template = wclProductHelper.retrieveTemplate();
+        final WorkingCapitalBreachData breach = getBreachData(template);
+        assertNotNull(breach);
+        final String uniqueName = "Test wcl Product " + UUID.randomUUID().toString().substring(0, 8);
+        final String uniqueShortName = Utils.uniqueRandomStringGenerator("", 4);
+        final PostWorkingCapitalLoanProductsRequest request = new WorkingCapitalLoanProductTestBuilder().withName(uniqueName)
+                .withShortName(uniqueShortName).withBreachId(breach.getId())
+                .withBreachStartType(WorkingCapitalLoanBreachStartType.LOAN_CREATION.getCode()).build();
+
+        // When
+        final Long productId = wclProductHelper.createWorkingCapitalLoanProduct(request).getResourceId();
+        assertNotNull(productId);
+
+        // Then - retrieve must round-trip the anchor
+        final GetWorkingCapitalLoanProductsProductIdResponse retrieved = wclProductHelper.retrieveWorkingCapitalLoanProductById(productId);
+        assertNotNull(retrieved.getBreachStartType(), "breachStartType should be present on the retrieved product");
+        assertEquals("LOAN_CREATION", retrieved.getBreachStartType().getCode(),
+                "retrieved breachStartType.code should equal the configured LOAN_CREATION anchor");
+
+        wclProductHelper.deleteWorkingCapitalLoanProductById(productId);
+    }
+
+    @Test
+    public void testBreachStartTypeDefaultsToDisbursementWhenBreachProvidedButStartTypeOmitted() {
+        final GetWorkingCapitalLoanProductsTemplateResponse template = wclProductHelper.retrieveTemplate();
+        final WorkingCapitalBreachData breach = getBreachData(template);
+        assertNotNull(breach);
+        final String uniqueName = "Test wcl Product " + UUID.randomUUID().toString().substring(0, 8);
+        final String uniqueShortName = Utils.uniqueRandomStringGenerator("", 4);
+        // Breach present, breachStartType omitted → DISBURSEMENT
+        final PostWorkingCapitalLoanProductsRequest request = new WorkingCapitalLoanProductTestBuilder().withName(uniqueName)
+                .withShortName(uniqueShortName).withBreachId(breach.getId()).build();
+
+        // When
+        final Long productId = wclProductHelper.createWorkingCapitalLoanProduct(request).getResourceId();
+        assertNotNull(productId);
+
+        // Then
+        final GetWorkingCapitalLoanProductsProductIdResponse retrieved = wclProductHelper.retrieveWorkingCapitalLoanProductById(productId);
+        assertNotNull(retrieved.getBreachStartType(), "breachStartType should default when a breach is configured");
+        assertEquals("DISBURSEMENT", retrieved.getBreachStartType().getCode(),
+                "breachStartType should default to DISBURSEMENT when breach is set but start type is omitted");
+
+        wclProductHelper.deleteWorkingCapitalLoanProductById(productId);
+    }
+
+    @Test
+    public void testUpdateBreachStartType() {
+        final GetWorkingCapitalLoanProductsTemplateResponse template = wclProductHelper.retrieveTemplate();
+        final WorkingCapitalBreachData breach = getBreachData(template);
+        assertNotNull(breach);
+        final String uniqueName = "Test wcl Product " + UUID.randomUUID().toString().substring(0, 8);
+        final String uniqueShortName = Utils.uniqueRandomStringGenerator("", 4);
+        final PostWorkingCapitalLoanProductsRequest createRequest = new WorkingCapitalLoanProductTestBuilder().withName(uniqueName)
+                .withShortName(uniqueShortName).withBreachId(breach.getId()).build();
+        final Long productId = wclProductHelper.createWorkingCapitalLoanProduct(createRequest).getResourceId();
+
+        // When - update the breach start-date-type anchor to DISBURSEMENT
+        final PutWorkingCapitalLoanProductsProductIdRequest updateRequest = new WorkingCapitalLoanProductTestBuilder().withName(uniqueName)
+                .withShortName(uniqueShortName).withBreachId(breach.getId())
+                .withBreachStartType(WorkingCapitalLoanBreachStartType.DISBURSEMENT.getCode()).buildUpdateRequest();
+        final PutWorkingCapitalLoanProductsProductIdResponse updateResponse = wclProductHelper
+                .updateWorkingCapitalLoanProductById(productId, updateRequest);
+
+        // Then - update succeeds and the new anchor round-trips on retrieve
+        assertNotNull(updateResponse);
+        assertEquals(productId, updateResponse.getResourceId());
+        final GetWorkingCapitalLoanProductsProductIdResponse retrieved = wclProductHelper.retrieveWorkingCapitalLoanProductById(productId);
+        assertNotNull(retrieved.getBreachStartType(), "breachStartType should be present after update");
+        assertEquals("DISBURSEMENT", retrieved.getBreachStartType().getCode(),
+                "retrieved breachStartType.code should equal the updated DISBURSEMENT anchor");
+
+        wclProductHelper.deleteWorkingCapitalLoanProductById(productId);
+    }
+
+    @Test
+    public void testInvalidBreachStartTypeRejected() {
+        final String uniqueName = "Test wcl Product " + UUID.randomUUID().toString().substring(0, 8);
+        final String uniqueShortName = Utils.uniqueRandomStringGenerator("", 4);
+        final PostWorkingCapitalLoanProductsRequest request = new WorkingCapitalLoanProductTestBuilder().withName(uniqueName)
+                .withShortName(uniqueShortName).withBreachStartType("FOO").build();
+
+        // When
+        final CallFailedRuntimeException exception = assertThrows(CallFailedRuntimeException.class,
+                () -> wclProductHelper.createWorkingCapitalLoanProduct(request));
+
+        // Then
+        assertThat(exception.getStatus()).isEqualTo(400);
+        assertThat(exception.getDeveloperMessage()).contains("invalid.breach.start.type");
+    }
+
+    @Test
+    public void testCreateProductWithoutBreachLeavesDependentFieldsNull() {
+        // Given / When - product created without a breach
+        final String uniqueName = "Test wcl Product " + UUID.randomUUID().toString().substring(0, 8);
+        final String uniqueShortName = Utils.uniqueRandomStringGenerator("", 4);
+        final PostWorkingCapitalLoanProductsRequest createRequest = new WorkingCapitalLoanProductTestBuilder().withName(uniqueName)
+                .withShortName(uniqueShortName).build();
+        final Long productId = wclProductHelper.createWorkingCapitalLoanProduct(createRequest).getResourceId();
+        final GetWorkingCapitalLoanProductsProductIdResponse retrieved = wclProductHelper.retrieveWorkingCapitalLoanProductById(productId);
+
+        // Then - dependent fields stay unset
+        assertNull(retrieved.getBreachGraceDays());
+        assertNull(retrieved.getBreachStartType());
+
+        // And update without those fields still succeeds
+        final PutWorkingCapitalLoanProductsProductIdRequest updateRequest = new WorkingCapitalLoanProductTestBuilder().withName(uniqueName)
+                .withShortName(uniqueShortName).buildUpdateRequest();
+        final PutWorkingCapitalLoanProductsProductIdResponse updateResponse = wclProductHelper
+                .updateWorkingCapitalLoanProductById(productId, updateRequest);
+        assertNotNull(updateResponse);
+        assertEquals(productId, updateResponse.getResourceId());
+        wclProductHelper.deleteWorkingCapitalLoanProductById(productId);
+    }
+
+    @Test
+    public void testUpdateProductRejectsBreachGraceDaysWithoutBreach() {
+        final String uniqueName = "Test wcl Product " + UUID.randomUUID().toString().substring(0, 8);
+        final String uniqueShortName = Utils.uniqueRandomStringGenerator("", 4);
+        final PostWorkingCapitalLoanProductsRequest createRequest = new WorkingCapitalLoanProductTestBuilder().withName(uniqueName)
+                .withShortName(uniqueShortName).build();
+        final Long productId = wclProductHelper.createWorkingCapitalLoanProduct(createRequest).getResourceId();
+
+        final PutWorkingCapitalLoanProductsProductIdRequest updateRequest = new WorkingCapitalLoanProductTestBuilder().withName(uniqueName)
+                .withShortName(uniqueShortName).withBreachGraceDays(0).withBreachStartType("DISBURSEMENT").buildUpdateRequest();
+        final CallFailedRuntimeException exception = assertThrows(CallFailedRuntimeException.class,
+                () -> wclProductHelper.updateWorkingCapitalLoanProductById(productId, updateRequest));
+
+        assertThat(exception.getStatus()).isEqualTo(400);
+        assertThat(exception.getDeveloperMessage()).contains("cannot.enable.breach");
+        wclProductHelper.deleteWorkingCapitalLoanProductById(productId);
+    }
+
+    @Test
+    public void testTemplateExposesBreachStartTypeOptions() {
+        // When
+        final GetWorkingCapitalLoanProductsTemplateResponse response = wclProductHelper.retrieveTemplate();
+
+        // Then
+        assertNotNull(response.getBreachStartTypeOptions(), "template should expose a breachStartTypeOptions list");
+        final List<String> optionCodes = response.getBreachStartTypeOptions().stream().map(StringEnumOptionData::getCode).toList();
+        assertTrue(optionCodes.containsAll(List.of("LOAN_CREATION", "DISBURSEMENT")),
+                "breachStartTypeOptions should contain LOAN_CREATION and DISBURSEMENT; actual: " + optionCodes);
+    }
+
     private WorkingCapitalBreachData getBreachData(final GetWorkingCapitalLoanProductsTemplateResponse template) {
         WorkingCapitalBreachData breach = null;
         if (template.getBreachOptions() != null && !template.getBreachOptions().isEmpty()) {
@@ -610,5 +851,15 @@ public class WorkingCapitalLoanProductCRUDTest {
             breach = breachHelper.retrieveWorkingCapitalBreach(breachId);
         }
         return breach;
+    }
+
+    private Long resolveWorkingCapitalDelinquencyBucketId(final GetWorkingCapitalLoanProductsTemplateResponse template) {
+        if (template.getDelinquencyBucketOptions() != null && !template.getDelinquencyBucketOptions().isEmpty()) {
+            final GetDelinquencyBucket firstBucket = template.getDelinquencyBucketOptions().getFirst();
+            if (firstBucket != null && firstBucket.getId() != null) {
+                return firstBucket.getId();
+            }
+        }
+        return delinquencyHelper.createDefaultWorkingCapitalBucket();
     }
 }

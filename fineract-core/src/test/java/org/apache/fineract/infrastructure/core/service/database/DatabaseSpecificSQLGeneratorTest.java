@@ -18,6 +18,10 @@
  */
 package org.apache.fineract.infrastructure.core.service.database;
 
+import java.sql.Array;
+import java.sql.Connection;
+import java.sql.SQLException;
+import java.util.List;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -62,5 +66,54 @@ public class DatabaseSpecificSQLGeneratorTest {
         String sql = "SELECT 1 FROM test_table WHERE asd=2 OFFSET 2 LIMIT 50";
         String countQuery = databaseSpecificSQLGenerator.countQueryResult(sql);
         Assertions.assertEquals("SELECT COUNT(*) FROM (SELECT 1 FROM test_table WHERE asd=2) AS temp", countQuery);
+    }
+
+    @Test
+    public void testInParametersForOnPostgresReleasesConnectionAfterArrayCreation() throws SQLException {
+        Mockito.when(databaseTypeResolver.databaseType()).thenReturn(DatabaseType.POSTGRESQL);
+        final Connection connection = Mockito.mock(Connection.class);
+        final Array idArray = Mockito.mock(Array.class);
+        Mockito.when(dataSource.getConnection()).thenReturn(connection);
+        Mockito.when(connection.createArrayOf(Mockito.eq("bigint"), Mockito.any(Long[].class))).thenReturn(idArray);
+
+        final Object[] parameters = databaseSpecificSQLGenerator.inParametersFor(List.of(1L, 2L, 3L));
+
+        Assertions.assertArrayEquals(new Object[] { idArray }, parameters);
+        Mockito.verify(connection).createArrayOf("bigint", new Long[] { 1L, 2L, 3L });
+        Mockito.verify(connection).close();
+    }
+
+    @Test
+    public void testCountQueryResultOnSqlWithLowercaseLimit() {
+        String sql = "SELECT 1 FROM test_table WHERE asd=2 limit 25";
+        String countQuery = databaseSpecificSQLGenerator.countQueryResult(sql);
+        Assertions.assertEquals("SELECT COUNT(*) FROM (SELECT 1 FROM test_table WHERE asd=2) AS temp", countQuery);
+    }
+
+    @Test
+    public void testCountQueryResultOnSqlWithLowercaseLimitAndOffset() {
+        String sql = "SELECT 1 FROM test_table WHERE asd=2 limit 25 offset 180";
+        String countQuery = databaseSpecificSQLGenerator.countQueryResult(sql);
+        Assertions.assertEquals("SELECT COUNT(*) FROM (SELECT 1 FROM test_table WHERE asd=2) AS temp", countQuery);
+    }
+
+    @Test
+    public void testCastCharOnPostgresDoesNotTruncateToOneCharacter() {
+        Mockito.when(databaseTypeResolver.isPostgreSQL()).thenReturn(true);
+
+        // ::CHAR would be CHAR(1) on PostgreSQL, so code value id 12 would compare as '1'
+        Assertions.assertEquals("code.id::VARCHAR", databaseSpecificSQLGenerator.castChar("code.id"));
+    }
+
+    @Test
+    public void testCastCharOnMySql() {
+        Mockito.when(databaseTypeResolver.isMySQL()).thenReturn(true);
+
+        Assertions.assertEquals("CAST(code.id AS CHAR) COLLATE utf8mb4_unicode_ci", databaseSpecificSQLGenerator.castChar("code.id"));
+    }
+
+    @Test
+    public void testCastCharOnUnsupportedDatabaseThrows() {
+        Assertions.assertThrows(IllegalStateException.class, () -> databaseSpecificSQLGenerator.castChar("code.id"));
     }
 }

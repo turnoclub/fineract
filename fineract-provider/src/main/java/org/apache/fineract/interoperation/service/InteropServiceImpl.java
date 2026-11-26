@@ -44,7 +44,6 @@ import org.apache.commons.lang3.exception.ExceptionUtils;
 import org.apache.fineract.commands.domain.CommandWrapper;
 import org.apache.fineract.commands.service.CommandWrapperBuilder;
 import org.apache.fineract.commands.service.PortfolioCommandSourceWritePlatformService;
-import org.apache.fineract.infrastructure.configuration.domain.ConfigurationDomainService;
 import org.apache.fineract.infrastructure.core.api.JsonCommand;
 import org.apache.fineract.infrastructure.core.data.CommandProcessingResult;
 import org.apache.fineract.infrastructure.core.exception.ErrorHandler;
@@ -102,17 +101,15 @@ import org.apache.fineract.portfolio.savings.domain.SavingsAccount;
 import org.apache.fineract.portfolio.savings.domain.SavingsAccountRepository;
 import org.apache.fineract.portfolio.savings.domain.SavingsAccountTransaction;
 import org.apache.fineract.portfolio.savings.domain.SavingsAccountTransactionRepository;
-import org.apache.fineract.portfolio.savings.domain.SavingsAccountTransactionSummaryWrapper;
-import org.apache.fineract.portfolio.savings.domain.SavingsHelper;
 import org.apache.fineract.portfolio.savings.exception.InsufficientAccountBalanceException;
 import org.apache.fineract.portfolio.savings.exception.SavingsAccountNotFoundException;
 import org.apache.fineract.portfolio.savings.service.SavingsAccountDomainService;
 import org.apache.fineract.useradministration.domain.AppUser;
+import org.jspecify.annotations.NonNull;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
-import org.springframework.lang.NonNull;
 import org.springframework.orm.jpa.JpaSystemException;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -131,11 +128,7 @@ public class InteropServiceImpl implements InteropService {
     private final InteropIdentifierRepository identifierRepository;
     private final LoanRepositoryWrapper loanRepositoryWrapper;
 
-    private final SavingsHelper savingsHelper;
-    private final SavingsAccountTransactionSummaryWrapper savingsAccountTransactionSummaryWrapper;
-
     private final SavingsAccountDomainService savingsAccountService;
-    private final ConfigurationDomainService configurationDomainService;
 
     private final JdbcTemplate jdbcTemplate;
 
@@ -152,7 +145,7 @@ public class InteropServiceImpl implements InteropService {
             this.sqlGenerator = sqlGenerator;
         }
 
-        public String schema() {
+        private String schema() {
             return " country.code_value as nationality, c.date_of_birth as dateOfBirth, c.mobile_no as contactPhone, gender.code_value as gender, c.email_address as email, "
                     + "kyc.code_value as idType, ci.document_key as idNo, ci." + sqlGenerator.escape("description") + " as description, "
                     + "country.code_value as country, a.`address_line_1`, a.`address_line_2`, "
@@ -224,7 +217,7 @@ public class InteropServiceImpl implements InteropService {
         InteropTransactionsData interopTransactionsData = InteropTransactionsData.build(savingsAccount, transFilter);
         for (InteropTransactionData interopTransactionData : interopTransactionsData.getTransactions()) {
             final List<Note> transactionNotes = noteRepository
-                    .findBySavingsTransactionId(Long.valueOf(interopTransactionData.getTransactionId()));
+                    .findBySavingsTransactionId(Long.valueOf(interopTransactionData.getSavingTransactionId()));
             StringBuilder sb = new StringBuilder();
             for (final Note note : transactionNotes) {
                 String s = note.getNote();
@@ -396,8 +389,7 @@ public class InteropServiceImpl implements InteropService {
             SavingsAccountTransaction holdTransaction = SavingsAccountTransaction.holdAmount(savingsAccount, savingsAccount.office(),
                     paymentDetail, transactionDate, Money.of(savingsAccount.getCurrency(), total), false);
             MonetaryCurrency accountCurrency = savingsAccount.getCurrency().copy();
-            holdTransaction.setRunningBalance(
-                    Money.of(accountCurrency, savingsAccount.getWithdrawableBalance().subtract(holdTransaction.getAmount())));
+            holdTransaction.setRunningBalance(Money.of(accountCurrency, savingsAccount.getAccountBalance()));
             holdTransaction.updateCumulativeBalanceAndDates(accountCurrency, transactionDate);
 
             savingsAccount.holdAmount(total);
@@ -487,8 +479,7 @@ public class InteropServiceImpl implements InteropService {
         if (holdTransaction != null && holdTransaction.getReleaseIdOfHoldAmountTransaction() == null) {
             SavingsAccountTransaction releaseTransaction = releaseAmount(holdTransaction, transactionDate);
             MonetaryCurrency accountCurrency = savingsAccount.getCurrency().copy();
-            releaseTransaction
-                    .setRunningBalance(Money.of(accountCurrency, savingsAccount.getWithdrawableBalance().add(holdTransaction.getAmount())));
+            releaseTransaction.setRunningBalance(Money.of(accountCurrency, savingsAccount.getAccountBalance()));
             releaseTransaction.updateCumulativeBalanceAndDates(accountCurrency, transactionDate);
             releaseTransaction = savingsAccountTransactionRepository.saveAndFlush(releaseTransaction);
             holdTransaction.updateReleaseId(releaseTransaction.getId());
@@ -568,7 +559,6 @@ public class InteropServiceImpl implements InteropService {
     private SavingsAccount validateAndGetSavingAccount(@NonNull InteropRequestData request) {
         // TODO: error handling
         SavingsAccount savingsAccount = validateAndGetSavingAccount(request.getAccountId());
-        savingsAccount.setHelpers(savingsAccountTransactionSummaryWrapper, savingsHelper, configurationDomainService);
 
         ApplicationCurrency requestCurrency = currencyRepository.findOneByCode(request.getAmount().getCurrency());
         if (!savingsAccount.getCurrency().getCode().equals(requestCurrency.getCode())) {
@@ -654,7 +644,7 @@ public class InteropServiceImpl implements InteropService {
                     "idType", idType.name(), accountId);
         }
 
-        log.error("Error occured.", dve);
+        log.error("Error occurred.", dve);
         throw ErrorHandler.getMappable(dve, "error.msg.interop.unknown.data.integrity.issue",
                 "Unknown data integrity issue with resource: " + realCause.getMessage());
     }

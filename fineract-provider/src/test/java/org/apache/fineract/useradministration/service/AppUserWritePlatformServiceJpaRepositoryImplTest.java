@@ -22,14 +22,17 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -37,7 +40,9 @@ import org.apache.fineract.commands.domain.CommandWrapper;
 import org.apache.fineract.infrastructure.configuration.domain.ConfigurationDomainService;
 import org.apache.fineract.infrastructure.core.api.JsonCommand;
 import org.apache.fineract.infrastructure.core.data.CommandProcessingResult;
+import org.apache.fineract.infrastructure.core.domain.DefaultPlatformPasswordEncoder;
 import org.apache.fineract.infrastructure.core.domain.FineractPlatformTenant;
+import org.apache.fineract.infrastructure.core.serialization.FromJsonHelper;
 import org.apache.fineract.infrastructure.core.service.ThreadLocalContextUtil;
 import org.apache.fineract.infrastructure.security.service.PlatformPasswordEncoder;
 import org.apache.fineract.infrastructure.security.service.PlatformSecurityContext;
@@ -51,6 +56,7 @@ import org.apache.fineract.useradministration.domain.AppUserPreviousPasswordRepo
 import org.apache.fineract.useradministration.domain.AppUserRepository;
 import org.apache.fineract.useradministration.domain.RoleRepository;
 import org.apache.fineract.useradministration.domain.UserDomainService;
+import org.apache.fineract.useradministration.exception.PasswordMustBeDifferentException;
 import org.apache.fineract.useradministration.exception.PasswordPreviouslyUsedException;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -58,20 +64,27 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.security.core.userdetails.User;
+import org.springframework.security.crypto.factory.PasswordEncoderFactories;
+import org.springframework.security.crypto.password.PasswordEncoder;
 
 @ExtendWith(MockitoExtension.class)
 public class AppUserWritePlatformServiceJpaRepositoryImplTest {
 
     private static final Long USER_ID = 1L;
+    private static final String RAW_PASSWORD = "QwE!5rTy#9uP0";
+    private static final String OTHER_RAW_PASSWORD = "pX268-4Pfv|kF6";
+    private static final PasswordEncoder PASSWORD_ENCODER = PasswordEncoderFactories.createDelegatingPasswordEncoder();
 
     @Mock
     private PlatformSecurityContext context;
     @Mock
     private UserDomainService userDomainService;
-    @Mock
-    private PlatformPasswordEncoder platformPasswordEncoder;
+    @Spy
+    private PlatformPasswordEncoder platformPasswordEncoder = new DefaultPlatformPasswordEncoder(PASSWORD_ENCODER);
     @Mock
     private AppUserRepository appUserRepository;
     @Mock
@@ -103,7 +116,7 @@ public class AppUserWritePlatformServiceJpaRepositoryImplTest {
         user = mock(AppUser.class);
         authenticatedUser = mock(AppUser.class);
 
-        when(command.json()).thenReturn("{}");
+        lenient().when(command.json()).thenReturn("{}");
         when(appUserRepository.findById(USER_ID)).thenReturn(Optional.of(user));
         when(context.authenticatedUser(any(CommandWrapper.class))).thenReturn(authenticatedUser);
         doNothing().when(fromApiJsonDeserializer).validateForChangePassword(anyString(), nullable(AppUser.class));
@@ -148,4 +161,134 @@ public class AppUserWritePlatformServiceJpaRepositoryImplTest {
         verify(appUserRepository).saveAndFlush(user);
         verify(appUserPreviewPasswordRepository).save(any(AppUserPreviousPassword.class));
     }
+
+    @Test
+    void changeUserPasswordThrowsWhenRawPasswordMatchesPreviousPasswordHash() {
+        stubRawPasswordCommand(RAW_PASSWORD);
+        when(user.getId()).thenReturn(USER_ID);
+        when(configurationDomainService.getPasswordReuseRestrictionCount()).thenReturn(3);
+
+        AppUserPreviousPassword previousPassword = mock(AppUserPreviousPassword.class);
+        when(previousPassword.getPassword()).thenReturn(PASSWORD_ENCODER.encode(RAW_PASSWORD));
+        when(appUserPreviewPasswordRepository.findByUserId(eq(USER_ID), any(PageRequest.class))).thenReturn(List.of(previousPassword));
+
+        assertThrows(PasswordPreviouslyUsedException.class, () -> underTest.changeUserPassword(USER_ID, command));
+
+        verify(appUserRepository, never()).saveAndFlush(user);
+        verify(appUserPreviewPasswordRepository, never()).save(any(AppUserPreviousPassword.class));
+    }
+
+    @Test
+    void changeUserPasswordAcceptsRawPasswordNotUsedBefore() {
+        stubOffice();
+        stubRawPasswordCommand(RAW_PASSWORD);
+        when(user.getId()).thenReturn(USER_ID);
+        when(user.getPassword()).thenReturn(PASSWORD_ENCODER.encode(OTHER_RAW_PASSWORD));
+        when(user.changePassword(command, platformPasswordEncoder)).thenReturn(Map.of("password", true));
+        when(configurationDomainService.getPasswordReuseRestrictionCount()).thenReturn(3);
+
+        AppUserPreviousPassword previousPassword = mock(AppUserPreviousPassword.class);
+        when(previousPassword.getPassword()).thenReturn(PASSWORD_ENCODER.encode("Zx7#vB2!nM5@q"));
+        when(appUserPreviewPasswordRepository.findByUserId(eq(USER_ID), any(PageRequest.class))).thenReturn(List.of(previousPassword));
+
+        CommandProcessingResult result = underTest.changeUserPassword(USER_ID, command);
+
+        assertEquals(USER_ID, result.getResourceId());
+        verify(appUserRepository).saveAndFlush(user);
+        verify(appUserPreviewPasswordRepository).save(any(AppUserPreviousPassword.class));
+    }
+
+    @Test
+    void changeUserPasswordIgnoresPreviousPasswordWithoutEncoderPrefix() {
+        stubOffice();
+        stubRawPasswordCommand(RAW_PASSWORD);
+        when(user.getId()).thenReturn(USER_ID);
+        when(user.getPassword()).thenReturn(PASSWORD_ENCODER.encode(OTHER_RAW_PASSWORD));
+        when(user.changePassword(command, platformPasswordEncoder)).thenReturn(Map.of("password", true));
+        when(configurationDomainService.getPasswordReuseRestrictionCount()).thenReturn(3);
+
+        String legacyHashWithoutPrefix = "5787039480429368bf94732aacc771cd0a3ea02bcf504ffe1185ab94213bc63a";
+        AppUserPreviousPassword previousPassword = mock(AppUserPreviousPassword.class);
+        when(previousPassword.getPassword()).thenReturn(legacyHashWithoutPrefix);
+        when(appUserPreviewPasswordRepository.findByUserId(eq(USER_ID), any(PageRequest.class))).thenReturn(List.of(previousPassword));
+
+        CommandProcessingResult result = underTest.changeUserPassword(USER_ID, command);
+
+        assertEquals(USER_ID, result.getResourceId());
+        verify(appUserRepository).saveAndFlush(user);
+        verify(appUserPreviewPasswordRepository).save(any(AppUserPreviousPassword.class));
+    }
+
+    @Test
+    void changeUserPasswordThrowsWhenPasswordIsTheCurrentOne() {
+        when(command.hasParameter(AppUserConstants.PASSWORD)).thenReturn(true);
+        when(user.changePassword(command, platformPasswordEncoder)).thenReturn(Map.of());
+
+        assertThrows(PasswordMustBeDifferentException.class, () -> underTest.changeUserPassword(USER_ID, command));
+
+        verify(user, never()).updatePasswordResetRequired(false);
+        verify(appUserRepository, never()).saveAndFlush(user);
+        verify(appUserPreviewPasswordRepository, never()).save(any(AppUserPreviousPassword.class));
+    }
+
+    @Test
+    void changeUserPasswordThrowsWhenRealUserSubmitsCurrentPassword() {
+        String currentPassword = PASSWORD_ENCODER.encode(RAW_PASSWORD);
+        AppUser realUser = new AppUser(mock(Office.class), new User("user", currentPassword, List.of()), new HashSet<>(),
+                "user@example.com", "First", "Last", null, false, false);
+        when(appUserRepository.findById(USER_ID)).thenReturn(Optional.of(realUser));
+        FromJsonHelper fromJsonHelper = new FromJsonHelper();
+        JsonCommand realCommand = new JsonCommand(USER_ID,
+                fromJsonHelper.parse("{\"password\": \"" + RAW_PASSWORD + "\", \"repeatPassword\": \"" + RAW_PASSWORD + "\"}"),
+                fromJsonHelper);
+
+        assertThrows(PasswordMustBeDifferentException.class, () -> underTest.changeUserPassword(USER_ID, realCommand));
+
+        assertEquals(currentPassword, realUser.getPassword());
+        verify(appUserRepository, never()).saveAndFlush(realUser);
+        verify(appUserPreviewPasswordRepository, never()).save(any(AppUserPreviousPassword.class));
+    }
+
+    @Test
+    void changeUserPasswordChangesNothingWhenPasswordIsMissing() {
+        stubOffice();
+        when(user.changePassword(command, platformPasswordEncoder)).thenReturn(Map.of());
+
+        CommandProcessingResult result = underTest.changeUserPassword(USER_ID, command);
+
+        assertEquals(USER_ID, result.getResourceId());
+        verify(appUserRepository, never()).saveAndFlush(user);
+        verify(appUserPreviewPasswordRepository, never()).save(any(AppUserPreviousPassword.class));
+    }
+
+    @Test
+    void changeUserPasswordAllowsReuseWhenReuseCheckDisabled() {
+        stubOffice();
+        String currentPassword = PASSWORD_ENCODER.encode(RAW_PASSWORD);
+        when(user.getEncodedPassword(command, platformPasswordEncoder)).thenReturn(PASSWORD_ENCODER.encode(RAW_PASSWORD));
+        when(user.getPassword()).thenReturn(currentPassword);
+        when(user.changePassword(command, platformPasswordEncoder)).thenReturn(Map.of("password", true));
+        when(configurationDomainService.getPasswordReuseRestrictionCount()).thenReturn(null);
+
+        CommandProcessingResult result = underTest.changeUserPassword(USER_ID, command);
+
+        assertEquals(USER_ID, result.getResourceId());
+        verify(appUserRepository).saveAndFlush(user);
+        verify(appUserPreviewPasswordRepository)
+                .save(argThat((AppUserPreviousPassword saved) -> currentPassword.equals(saved.getPassword())));
+        verify(appUserPreviewPasswordRepository, never()).findByUserId(any(), any(PageRequest.class));
+    }
+
+    private void stubRawPasswordCommand(String rawPassword) {
+        String encodedPassword = PASSWORD_ENCODER.encode(rawPassword);
+        when(command.stringValueOfParameterNamedAllowingNull(AppUserConstants.PASSWORD)).thenReturn(rawPassword);
+        when(user.getEncodedPassword(command, platformPasswordEncoder)).thenReturn(encodedPassword);
+    }
+
+    private void stubOffice() {
+        Office office = mock(Office.class);
+        when(office.getId()).thenReturn(7L);
+        when(user.getOffice()).thenReturn(office);
+    }
+
 }

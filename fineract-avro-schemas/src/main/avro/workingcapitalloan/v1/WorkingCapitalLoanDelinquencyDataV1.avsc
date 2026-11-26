@@ -1,0 +1,33 @@
+{
+    "name": "WorkingCapitalLoanDelinquencyDataV1",
+    "namespace": "org.apache.fineract.avro.workingcapitalloan.v1",
+    "type": "record",
+    "fields": [
+        {
+            "default": null,
+            "name": "delinquencyStartType",
+            "doc": "What starts the delinquency clock.",
+            "type": [
+                "null",
+                "org.apache.fineract.avro.generic.v1.StringEnumOptionDataV1"
+            ]
+        },
+        {
+            "default": null,
+            "name": "delinquencyStartDate",
+            "type": [
+                "null",
+                "string"
+            ]
+        },
+        {
+            "default": null,
+            "name": "delinquencyEffectiveStartDate",
+            "doc": "delinquencyStartDate shifted by the delinquency grace days; only set for the first delinquency period.",
+            "type": [
+                "null",
+                "string"
+            ]
+        }
+    ]
+}

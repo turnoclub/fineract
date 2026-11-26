@@ -22,6 +22,9 @@ import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.RETURNS_MOCKS;
 import static org.mockito.Mockito.mock;
 
+import com.querydsl.sql.PostgreSQLTemplates;
+import com.querydsl.sql.SQLQueryFactory;
+import com.querydsl.sql.SQLTemplates;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 import java.util.List;
@@ -47,23 +50,22 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 import org.springframework.batch.core.configuration.JobRegistry;
-import org.springframework.batch.core.explore.JobExplorer;
-import org.springframework.batch.core.launch.JobLauncher;
 import org.springframework.batch.core.launch.JobOperator;
 import org.springframework.batch.core.repository.JobRepository;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
-import org.springframework.boot.autoconfigure.batch.BatchAutoConfiguration;
-import org.springframework.boot.autoconfigure.gson.GsonAutoConfiguration;
-import org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration;
-import org.springframework.boot.autoconfigure.jdbc.DataSourceTransactionManagerAutoConfiguration;
-import org.springframework.boot.autoconfigure.jdbc.JdbcTemplateAutoConfiguration;
-import org.springframework.boot.autoconfigure.liquibase.LiquibaseAutoConfiguration;
-import org.springframework.boot.autoconfigure.liquibase.LiquibaseProperties;
-import org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration;
+import org.springframework.boot.batch.autoconfigure.BatchAutoConfiguration;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.boot.gson.autoconfigure.GsonAutoConfiguration;
+import org.springframework.boot.hibernate.autoconfigure.HibernateJpaAutoConfiguration;
+import org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration;
+import org.springframework.boot.jdbc.autoconfigure.DataSourceTransactionManagerAutoConfiguration;
+import org.springframework.boot.jdbc.autoconfigure.JdbcTemplateAutoConfiguration;
+import org.springframework.boot.liquibase.autoconfigure.LiquibaseAutoConfiguration;
+import org.springframework.boot.liquibase.autoconfigure.LiquibaseProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.FilterType;
 import org.springframework.context.annotation.Primary;
 import org.springframework.context.annotation.PropertySource;
 import org.springframework.core.env.Environment;
@@ -83,7 +85,7 @@ import org.springframework.transaction.annotation.EnableTransactionManagement;
 @EnableTransactionManagement
 @EnableWebSecurity
 @EnableConfigurationProperties({ FineractProperties.class, LiquibaseProperties.class })
-@ComponentScan(basePackages = "org.apache.fineract")
+@ComponentScan(basePackages = "org.apache.fineract", excludeFilters = @ComponentScan.Filter(type = FilterType.REGEX, pattern = "org\\.apache\\.fineract\\..*\\$TestConfig"))
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
 @PropertySource("classpath:application-test.properties")
@@ -183,18 +185,6 @@ public class TestConfiguration {
 
     @Primary
     @Bean
-    public JobExplorer jobExplorer() {
-        return mock(JobExplorer.class, RETURNS_MOCKS);
-    }
-
-    @Primary
-    @Bean
-    public JobLauncher jobLauncher() {
-        return mock(JobLauncher.class, RETURNS_MOCKS);
-    }
-
-    @Primary
-    @Bean
     public JobRegistry jobRegistry() {
         return mock(JobRegistry.class, RETURNS_MOCKS);
     }
@@ -221,5 +211,17 @@ public class TestConfiguration {
     @Bean
     public GenericDataService genericDataService() {
         return mock(GenericDataService.class, RETURNS_MOCKS);
+    }
+
+    @Primary
+    @Bean
+    public SQLTemplates sqlTemplates() {
+        return PostgreSQLTemplates.builder().build();
+    }
+
+    @Primary
+    @Bean
+    public SQLQueryFactory sqlQueryFactory() {
+        return mock(SQLQueryFactory.class, RETURNS_MOCKS);
     }
 }

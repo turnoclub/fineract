@@ -20,13 +20,21 @@ package org.apache.fineract.investor.service;
 
 import static org.apache.fineract.investor.data.attribute.SettlementModelExternalAssetOwnerLoanProductAttribute.DEFAULT_SETTLEMENT;
 import static org.apache.fineract.investor.data.attribute.SettlementModelExternalAssetOwnerLoanProductAttribute.DELAYED_SETTLEMENT;
+import static org.apache.fineract.investor.service.LoanAccountOwnerTransferServiceImpl.FUTURE_DATE_9999_12_31;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.stream.Stream;
-import org.apache.fineract.infrastructure.core.service.Page;
 import org.apache.fineract.investor.data.ExternalTransferLoanProductAttributesData;
+import org.apache.fineract.investor.data.ExternalTransferStatus;
+import org.apache.fineract.investor.domain.ExternalAssetOwnerTransfer;
+import org.apache.fineract.investor.domain.ExternalAssetOwnerTransferRepository;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -36,6 +44,7 @@ import org.mockito.MockitoAnnotations;
 
 public class DelayedSettlementAttributeServiceImplTest {
 
+    private static final Long LOAN_ID = 2L;
     private static final Long LOAN_PRODUCT_ID = 1L;
 
     private static Stream<Arguments> attributesDataProvider() {
@@ -45,30 +54,73 @@ public class DelayedSettlementAttributeServiceImplTest {
         ExternalTransferLoanProductAttributesData disabledAttributesData = new ExternalTransferLoanProductAttributesData();
         disabledAttributesData.setAttributeValue(DEFAULT_SETTLEMENT.getAttributeValue());
 
-        return Stream.of(Arguments.of(new Page(List.of(enabledAttributesData), 1), true),
-                Arguments.of(new Page(List.of(disabledAttributesData), 1), false), Arguments.of(new Page(List.of(), 0), false));
+        ExternalTransferLoanProductAttributesData lowerCaseEnabledAttributesData = new ExternalTransferLoanProductAttributesData();
+        lowerCaseEnabledAttributesData.setAttributeValue("delayed_settlement");
+
+        return Stream.of(Arguments.of(enabledAttributesData.getAttributeValue(), true),
+                Arguments.of(lowerCaseEnabledAttributesData.getAttributeValue(), true),
+                Arguments.of(disabledAttributesData.getAttributeValue(), false), Arguments.of(null, false));
     }
 
     @ParameterizedTest
     @MethodSource("attributesDataProvider")
-    void isEnabled(final Page<ExternalTransferLoanProductAttributesData> attributesDataPage, final boolean expectedResult) {
+    void isEnabled(final String attributeValue, final boolean expectedResult) {
         // given
         TestContext testContext = new TestContext();
 
-        when(testContext.externalAssetOwnerLoanProductAttributesReadService.retrieveAllLoanProductAttributesByLoanProductId(LOAN_PRODUCT_ID,
-                DELAYED_SETTLEMENT.getAttributeKey())).thenReturn(attributesDataPage);
+        when(testContext.externalAssetOwnerLoanAttributesReadService.resolveAttributeValue(LOAN_ID, LOAN_PRODUCT_ID,
+                DELAYED_SETTLEMENT.getAttributeKey())).thenReturn(Optional.ofNullable(attributeValue));
 
         // when
-        boolean result = testContext.testSubject.isEnabled(LOAN_PRODUCT_ID);
+        boolean result = testContext.testSubject.isEnabled(LOAN_ID, LOAN_PRODUCT_ID);
 
         // then
         assertEquals(expectedResult, result);
     }
 
+    @Test
+    void intermediarySaleIsUnderDelayedSettlement() {
+        TestContext testContext = new TestContext();
+
+        assertTrue(testContext.testSubject.isSaleUnderDelayedSettlement(saleTransfer(ExternalTransferStatus.PENDING_INTERMEDIATE)));
+        verifyNoInteractions(testContext.externalAssetOwnerTransferRepository, testContext.externalAssetOwnerLoanAttributesReadService);
+    }
+
+    @Test
+    void saleFollowingAnActiveIntermediarySaleIsUnderDelayedSettlement() {
+        TestContext testContext = new TestContext();
+        when(testContext.externalAssetOwnerTransferRepository.findAllByLoanIdAndStatusInAndEffectiveDateTo(LOAN_ID,
+                List.of(ExternalTransferStatus.ACTIVE_INTERMEDIATE), FUTURE_DATE_9999_12_31))
+                .thenReturn(List.of(new ExternalAssetOwnerTransfer()));
+
+        assertTrue(testContext.testSubject.isSaleUnderDelayedSettlement(saleTransfer(ExternalTransferStatus.PENDING)));
+        verifyNoInteractions(testContext.externalAssetOwnerLoanAttributesReadService);
+    }
+
+    @Test
+    void saleWithoutAnActiveIntermediarySaleIsUnderDefaultSettlement() {
+        TestContext testContext = new TestContext();
+        when(testContext.externalAssetOwnerTransferRepository.findAllByLoanIdAndStatusInAndEffectiveDateTo(LOAN_ID,
+                List.of(ExternalTransferStatus.ACTIVE_INTERMEDIATE), FUTURE_DATE_9999_12_31)).thenReturn(List.of());
+
+        assertFalse(testContext.testSubject.isSaleUnderDelayedSettlement(saleTransfer(ExternalTransferStatus.PENDING)));
+        verifyNoInteractions(testContext.externalAssetOwnerLoanAttributesReadService);
+    }
+
+    private static ExternalAssetOwnerTransfer saleTransfer(final ExternalTransferStatus status) {
+        ExternalAssetOwnerTransfer transfer = new ExternalAssetOwnerTransfer();
+        transfer.setLoanId(LOAN_ID);
+        transfer.setStatus(status);
+        return transfer;
+    }
+
     private static class TestContext {
 
         @Mock
-        private ExternalAssetOwnerLoanProductAttributesReadService externalAssetOwnerLoanProductAttributesReadService;
+        private ExternalAssetOwnerLoanAttributesReadService externalAssetOwnerLoanAttributesReadService;
+
+        @Mock
+        private ExternalAssetOwnerTransferRepository externalAssetOwnerTransferRepository;
 
         @InjectMocks
         private DelayedSettlementAttributeServiceImpl testSubject;

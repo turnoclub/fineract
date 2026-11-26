@@ -21,17 +21,23 @@ package org.apache.fineract.infrastructure.jobs.service;
 import com.google.common.base.Splitter;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import java.text.ParseException;
+import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.Collections;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Properties;
 import java.util.Set;
 import java.util.TimeZone;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.fineract.infrastructure.core.config.FineractProperties;
 import org.apache.fineract.infrastructure.core.domain.FineractPlatformTenant;
 import org.apache.fineract.infrastructure.core.exception.JobIsNotFoundOrNotEnabledException;
 import org.apache.fineract.infrastructure.core.exception.PlatformInternalServerException;
+import org.apache.fineract.infrastructure.core.service.DateUtils;
 import org.apache.fineract.infrastructure.core.service.ThreadLocalContextUtil;
 import org.apache.fineract.infrastructure.jobs.data.JobParameterDTO;
 import org.apache.fineract.infrastructure.jobs.domain.ScheduledJobDetail;
@@ -40,6 +46,7 @@ import org.apache.fineract.infrastructure.jobs.exception.JobNodeIdMismatchingExc
 import org.apache.fineract.infrastructure.jobs.exception.JobNotFoundException;
 import org.apache.fineract.infrastructure.jobs.service.jobname.JobNameData;
 import org.apache.fineract.infrastructure.jobs.service.jobname.JobNameService;
+import org.quartz.CronTrigger;
 import org.quartz.JobDataMap;
 import org.quartz.JobDetail;
 import org.quartz.JobKey;
@@ -48,10 +55,8 @@ import org.quartz.Scheduler;
 import org.quartz.SchedulerException;
 import org.quartz.Trigger;
 import org.quartz.TriggerListener;
-import org.springframework.batch.core.Job;
-import org.springframework.batch.core.configuration.JobLocator;
-import org.springframework.batch.core.launch.NoSuchJobException;
-import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.batch.core.configuration.JobRegistry;
+import org.springframework.batch.core.job.Job;
 import org.springframework.context.ApplicationListener;
 import org.springframework.context.event.ContextClosedEvent;
 import org.springframework.scheduling.quartz.CronTriggerFactoryBean;
@@ -63,37 +68,23 @@ import org.springframework.stereotype.Service;
  * Service class to create and load batch jobs to Scheduler using {@link SchedulerFactoryBean}
  * ,{@link MethodInvokingJobDetailFactoryBean} and {@link CronTriggerFactoryBean}
  */
+@RequiredArgsConstructor
 @Service
 @Slf4j
 public class JobRegisterServiceImpl implements JobRegisterService, ApplicationListener<ContextClosedEvent> {
 
     private static final String JOB_EXECUTION_FAILED_MESSAGE = "Job execution failed for job with name: ";
 
-    @Autowired
-    private SchedularWritePlatformService schedularWritePlatformService;
-
-    @Autowired
-    private SchedulerJobListener schedulerJobListener;
-
-    @Autowired
-    private SchedulerTriggerListener globalSchedulerTriggerListener;
-
     private static final HashMap<String, Scheduler> SCHEDULERS = new HashMap<>(4);
 
-    @Autowired
-    private FineractProperties fineractProperties;
-
-    @Autowired
-    private JobLocator jobLocator;
-
-    @Autowired
-    private JobStarter jobStarter;
-
-    @Autowired
-    private JobParameterDataParser dataParser;
-
-    @Autowired
-    private JobNameService jobNameService;
+    private final SchedulerWritePlatformService schedulerWritePlatformService;
+    private final SchedulerJobListener schedulerJobListener;
+    private final SchedulerTriggerListener globalSchedulerTriggerListener;
+    private final FineractProperties fineractProperties;
+    private final JobRegistry jobRegistry;
+    private final JobStarter jobStarter;
+    private final JobNameService jobNameService;
+    private final ScheduledJobReadService scheduledJobReadService;
 
     private static final String JOB_STARTER_METHOD_NAME = "run";
 
@@ -143,37 +134,47 @@ public class JobRegisterServiceImpl implements JobRegisterService, ApplicationLi
             if (scheduler != null) {
                 scheduler.deleteJob(jobKey);
             }
-            scheduleJob(scheduledJobDetail);
-            this.schedularWritePlatformService.saveOrUpdate(scheduledJobDetail);
+            scheduleJob(scheduledJobDetail, false);
+            this.schedulerWritePlatformService.saveOrUpdate(scheduledJobDetail);
         } catch (final Exception throwable) {
             final String stackTrace = getStackTraceAsString(throwable);
             scheduledJobDetail.setErrorLog(stackTrace);
-            this.schedularWritePlatformService.saveOrUpdate(scheduledJobDetail);
+            this.schedulerWritePlatformService.saveOrUpdate(scheduledJobDetail);
         }
     }
 
     @Override
     public void pauseScheduler() {
-        final SchedulerDetail schedulerDetail = this.schedularWritePlatformService.retriveSchedulerDetail();
+        final SchedulerDetail schedulerDetail = this.scheduledJobReadService.retrieveSchedulerDetail();
         if (!schedulerDetail.isSuspended()) {
             schedulerDetail.setSuspended(true);
-            this.schedularWritePlatformService.updateSchedulerDetail(schedulerDetail);
+            this.schedulerWritePlatformService.updateSchedulerDetail(schedulerDetail);
         }
     }
 
     @Override
     public void startScheduler() {
-        final SchedulerDetail schedulerDetail = this.schedularWritePlatformService.retriveSchedulerDetail();
+        final SchedulerDetail schedulerDetail = this.scheduledJobReadService.retrieveSchedulerDetail();
         if (schedulerDetail.isSuspended()) {
             schedulerDetail.setSuspended(false);
-            this.schedularWritePlatformService.updateSchedulerDetail(schedulerDetail);
-            if (schedulerDetail.isExecuteInstructionForMisfiredJobs()) {
-                final List<ScheduledJobDetail> scheduledJobDetails = this.schedularWritePlatformService
+            this.schedulerWritePlatformService.updateSchedulerDetail(schedulerDetail);
+            if (fineractProperties.getJob().isExecuteMissedRuns()) {
+                replayMissedRuns();
+            } else if (schedulerDetail.isExecuteInstructionForMisfiredJobs()) {
+                final List<ScheduledJobDetail> scheduledJobDetails = this.scheduledJobReadService
                         .retrieveAllJobs(fineractProperties.getNodeId());
                 for (final ScheduledJobDetail jobDetail : scheduledJobDetails) {
                     if (jobDetail.isTriggerMisfired()) {
                         if (jobDetail.isActiveSchedular()) {
-                            executeJob(jobDetail, SchedulerServiceConstants.TRIGGER_TYPE_CRON, Collections.emptySet());
+                            // Fire the misfire replay as a "misfire" trigger, not "cron":
+                            // processJobDetailForExecution()
+                            // vetoes a "cron" fire whose nextRunTime is in the future, and nextRunTime is advanced to
+                            // the future by this very method right below, racing the async veto check on another
+                            // thread. Any non-cron trigger type bypasses that specific veto condition without
+                            // weakening it for genuinely-not-due cron fires; "misfire" (rather than reusing
+                            // "application", the manual /jobs/{id}?command=executeJob API's type) keeps the two
+                            // distinguishable in job run history.
+                            executeJob(jobDetail, SchedulerServiceConstants.TRIGGER_TYPE_MISFIRE, Collections.emptySet());
                             jobDetail.setMismatchedJob(false);
                         }
                         final String schedulerName = getSchedulerName(jobDetail);
@@ -184,39 +185,69 @@ public class JobRegisterServiceImpl implements JobRegisterService, ApplicationLi
                             try {
                                 final List<? extends Trigger> triggers = scheduler.getTriggersOfJob(jobKey);
                                 for (final Trigger trigger : triggers) {
-                                    if (trigger.getNextFireTime() != null && trigger.getNextFireTime().after(jobDetail.getNextRunTime())) {
-                                        jobDetail.setNextRunTime(trigger.getNextFireTime());
+                                    if (trigger.getNextFireTime() != null
+                                            && trigger.getNextFireTime().toInstant().isAfter(jobDetail.getNextRunTime())) {
+                                        jobDetail.setNextRunTime(trigger.getNextFireTime().toInstant());
                                     }
                                 }
                             } catch (final SchedulerException e) {
-                                log.error("Error occured.", e);
+                                log.error("Error occurred.", e);
                             }
                         }
                         jobDetail.setTriggerMisfired(false);
-                        this.schedularWritePlatformService.saveOrUpdate(jobDetail);
+                        this.schedulerWritePlatformService.saveOrUpdate(jobDetail);
                     }
                 }
             }
         }
     }
 
+    /**
+     * A fire that was vetoed because the scheduler was suspended never advanced next_run_time, so it still names the
+     * first run that did not happen. Registering the job again with that time as the trigger's start makes Quartz
+     * replay what was missed, in the same way as on boot.
+     */
+    private void replayMissedRuns() {
+        for (final ScheduledJobDetail jobDetail : this.scheduledJobReadService.retrieveAllJobs(fineractProperties.getNodeId())) {
+            if (jobDetail.isActiveSchedular() && isInThePast(jobDetail.getNextRunTime())) {
+                final boolean currentlyRunning = jobDetail.isCurrentlyRunning();
+                deleteFromScheduler(jobDetail);
+                scheduleJob(jobDetail, true);
+                // a manually started run may be in progress: keep the veto that stops a second one
+                jobDetail.setCurrentlyRunning(currentlyRunning);
+            }
+            jobDetail.setTriggerMisfired(false);
+            this.schedulerWritePlatformService.saveOrUpdate(jobDetail);
+        }
+    }
+
+    private void deleteFromScheduler(final ScheduledJobDetail scheduledJobDetail) {
+        final Scheduler scheduler = SCHEDULERS.get(getSchedulerName(scheduledJobDetail));
+        if (scheduler != null && scheduledJobDetail.getJobKey() != null) {
+            try {
+                scheduler.deleteJob(constructJobKey(scheduledJobDetail.getJobKey()));
+            } catch (final SchedulerException e) {
+                log.error("Error occurred.", e);
+            }
+        }
+    }
+
     @Override
     public void rescheduleJob(final Long jobId) {
-        final ScheduledJobDetail scheduledJobDetail = this.schedularWritePlatformService.findByJobId(jobId);
+        final ScheduledJobDetail scheduledJobDetail = this.scheduledJobReadService.findByJobId(jobId);
         final String nodeIdStored = scheduledJobDetail.getNodeId().toString();
         if (nodeIdStored.equals(fineractProperties.getNodeId()) || nodeIdStored.equals("0")) {
             rescheduleJob(scheduledJobDetail);
         } else {
             scheduledJobDetail.setMismatchedJob(true);
-            this.schedularWritePlatformService.saveOrUpdate(scheduledJobDetail);
+            this.schedulerWritePlatformService.saveOrUpdate(scheduledJobDetail);
             throw new JobNodeIdMismatchingException(nodeIdStored, fineractProperties.getNodeId());
         }
     }
 
     @Override
-    public void executeJobWithParameters(final Long jobId, String jobParametersJson) {
-        Set<JobParameterDTO> jobParameterDTOSet = dataParser.parseExecution(jobParametersJson);
-        final ScheduledJobDetail scheduledJobDetail = this.schedularWritePlatformService.findByJobId(jobId);
+    public void executeJobWithParameters(final Long jobId, Set<JobParameterDTO> jobParameterDTOSet) {
+        final ScheduledJobDetail scheduledJobDetail = this.scheduledJobReadService.findByJobId(jobId);
         if (scheduledJobDetail == null) {
             throw new JobNotFoundException(String.valueOf(jobId));
         }
@@ -226,14 +257,14 @@ public class JobRegisterServiceImpl implements JobRegisterService, ApplicationLi
             executeJob(scheduledJobDetail, null, jobParameterDTOSet);
         } else {
             scheduledJobDetail.setMismatchedJob(true);
-            this.schedularWritePlatformService.saveOrUpdate(scheduledJobDetail);
+            this.schedulerWritePlatformService.saveOrUpdate(scheduledJobDetail);
             throw new JobNodeIdMismatchingException(nodeIdStored, fineractProperties.getNodeId());
         }
     }
 
     @Override
     public boolean isSchedulerRunning() {
-        return !this.schedularWritePlatformService.retriveSchedulerDetail().isSuspended();
+        return !this.scheduledJobReadService.retrieveSchedulerDetail().isSuspended();
     }
 
     /**
@@ -248,6 +279,10 @@ public class JobRegisterServiceImpl implements JobRegisterService, ApplicationLi
 
     @Override
     public void scheduleJob(final ScheduledJobDetail scheduledJobDetails) {
+        scheduleJob(scheduledJobDetails, fineractProperties.getJob().isExecuteMissedRuns());
+    }
+
+    private void scheduleJob(final ScheduledJobDetail scheduledJobDetails, final boolean replayMissedRuns) {
         try {
             final JobDetail jobDetail = createJobDetail(scheduledJobDetails, Collections.emptySet());
             scheduledJobDetails.setJobKey(getJobKeyAsString(jobDetail.getKey()));
@@ -257,10 +292,10 @@ public class JobRegisterServiceImpl implements JobRegisterService, ApplicationLi
                 return;
             }
 
-            final Trigger trigger = createTrigger(scheduledJobDetails, jobDetail);
+            final Trigger trigger = createTrigger(scheduledJobDetails, jobDetail, replayMissedRuns);
             final Scheduler scheduler = getScheduler(scheduledJobDetails);
             scheduler.scheduleJob(jobDetail, trigger);
-            scheduledJobDetails.setNextRunTime(trigger.getNextFireTime());
+            scheduledJobDetails.setNextRunTime(trigger.getNextFireTime().toInstant());
             scheduledJobDetails.setErrorLog(null);
         } catch (final Exception throwable) {
             scheduledJobDetails.setNextRunTime(null);
@@ -277,7 +312,7 @@ public class JobRegisterServiceImpl implements JobRegisterService, ApplicationLi
             try {
                 scheduler.shutdown();
             } catch (final SchedulerException e) {
-                log.error("Error occured.", e);
+                log.error("Error occurred.", e);
             }
         }
     }
@@ -335,11 +370,9 @@ public class JobRegisterServiceImpl implements JobRegisterService, ApplicationLi
         final FineractPlatformTenant tenant = ThreadLocalContextUtil.getTenant();
 
         JobNameData jobName = jobNameService.getJobByHumanReadableName(scheduledJobDetail.getJobName());
-        Job job;
-        try {
-            job = jobLocator.getJob(jobName.getEnumStyleName());
-        } catch (NoSuchJobException e) {
-            throw new JobIsNotFoundOrNotEnabledException(e, jobName.getEnumStyleName());
+        Job job = jobRegistry.getJob(jobName.getEnumStyleName());
+        if (job == null) {
+            throw new JobIsNotFoundOrNotEnabledException(jobName.getEnumStyleName());
         }
 
         final MethodInvokingJobDetailFactoryBean jobDetailFactoryBean = new MethodInvokingJobDetailFactoryBean();
@@ -354,7 +387,8 @@ public class JobRegisterServiceImpl implements JobRegisterService, ApplicationLi
         return jobDetailFactoryBean.getObject();
     }
 
-    private Trigger createTrigger(final ScheduledJobDetail scheduledJobDetails, final JobDetail jobDetail) throws ParseException {
+    private Trigger createTrigger(final ScheduledJobDetail scheduledJobDetails, final JobDetail jobDetail, final boolean replayMissedRuns)
+            throws ParseException {
         final FineractPlatformTenant tenant = ThreadLocalContextUtil.getTenant();
         final CronTriggerFactoryBean cronTriggerFactoryBean = new CronTriggerFactoryBean();
         cronTriggerFactoryBean.setName(scheduledJobDetails.getJobName() + "Trigger" + tenant.getId());
@@ -367,8 +401,27 @@ public class JobRegisterServiceImpl implements JobRegisterService, ApplicationLi
         cronTriggerFactoryBean.setGroup(scheduledJobDetails.getGroupName());
         cronTriggerFactoryBean.setCronExpression(scheduledJobDetails.getCronExpression());
         cronTriggerFactoryBean.setPriority(scheduledJobDetails.getTaskPriority());
+        // Other jobs keep Quartz's default (fire once, now). The business date has to move one day per missed run.
+        if (fineractProperties.getJob().isExecuteMissedRuns() && JobName.INCREASE_BUSINESS_DATE_BY_1_DAY.name()
+                .equals(jobNameService.getJobByHumanReadableName(scheduledJobDetails.getJobName()).getEnumStyleName())) {
+            cronTriggerFactoryBean.setMisfireInstruction(CronTrigger.MISFIRE_INSTRUCTION_IGNORE_MISFIRE_POLICY);
+        }
+        if (replayMissedRuns && isInThePast(scheduledJobDetails.getNextRunTime())) {
+            // The first run that never happened: Quartz applies the misfire instruction to it and what follows.
+            // The cron itself is still evaluated in the tenant's time zone.
+            cronTriggerFactoryBean.setStartTime(Date.from(scheduledJobDetails.getNextRunTime()));
+        }
         cronTriggerFactoryBean.afterPropertiesSet();
         return cronTriggerFactoryBean.getObject();
+    }
+
+    /**
+     * next_run_time is represented as an Instant, which identifies an absolute point on the timeline. It is compared as
+     * an instant. Neither the tenant's nor the system default zone takes part in it.
+     */
+    private static boolean isInThePast(final Instant nextRunTime) {
+        return nextRunTime != null
+                && DateUtils.isBefore(OffsetDateTime.ofInstant(nextRunTime, ZoneOffset.UTC), DateUtils.getAuditOffsetDateTime());
     }
 
     private String getStackTraceAsString(final Throwable throwable) {

@@ -18,28 +18,24 @@
  */
 package org.apache.fineract.infrastructure.jobs.handler;
 
+import lombok.RequiredArgsConstructor;
 import org.apache.fineract.commands.annotation.CommandType;
 import org.apache.fineract.commands.handler.NewCommandSourceHandler;
 import org.apache.fineract.infrastructure.core.api.JsonCommand;
 import org.apache.fineract.infrastructure.core.data.CommandProcessingResult;
-import org.apache.fineract.infrastructure.jobs.service.SchedularWritePlatformService;
-import org.springframework.beans.factory.annotation.Autowired;
+import org.apache.fineract.infrastructure.jobs.service.SchedulerWritePlatformService;
 import org.springframework.stereotype.Service;
 
 @Service
 @CommandType(entity = "SCHEDULER", action = "UPDATE")
+@RequiredArgsConstructor
 public class UpdateJobDetailCommandhandler implements NewCommandSourceHandler {
 
-    private final SchedularWritePlatformService schedularWritePlatformService;
-
-    @Autowired
-    public UpdateJobDetailCommandhandler(final SchedularWritePlatformService schedularWritePlatformService) {
-        this.schedularWritePlatformService = schedularWritePlatformService;
-    }
+    private final SchedulerWritePlatformService schedulerWritePlatformService;
 
     @Override
     public CommandProcessingResult processCommand(final JsonCommand command) {
-        return this.schedularWritePlatformService.updateJobDetail(command.entityId(), command);
+        return this.schedulerWritePlatformService.updateJobDetail(command.entityId(), command);
     }
 
 }

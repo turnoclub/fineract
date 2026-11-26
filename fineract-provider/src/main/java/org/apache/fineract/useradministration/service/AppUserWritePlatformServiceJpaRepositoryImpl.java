@@ -23,6 +23,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Predicate;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.exception.ExceptionUtils;
@@ -50,6 +51,7 @@ import org.apache.fineract.useradministration.domain.AppUserRepository;
 import org.apache.fineract.useradministration.domain.Role;
 import org.apache.fineract.useradministration.domain.RoleRepository;
 import org.apache.fineract.useradministration.domain.UserDomainService;
+import org.apache.fineract.useradministration.exception.PasswordMustBeDifferentException;
 import org.apache.fineract.useradministration.exception.PasswordPreviouslyUsedException;
 import org.apache.fineract.useradministration.exception.RoleNotFoundException;
 import org.apache.fineract.useradministration.exception.UserNotFoundException;
@@ -149,6 +151,9 @@ public class AppUserWritePlatformServiceJpaRepositoryImpl implements AppUserWrit
             final AppUser userToUpdate = this.appUserRepository.findById(userId).orElseThrow(() -> new UserNotFoundException(userId));
             final AppUserPreviousPassword currentPasswordToSaveAsPreview = getCurrentPasswordToSaveAsPreview(userToUpdate, command);
             final Map<String, Object> changes = userToUpdate.changePassword(command, this.platformPasswordEncoder);
+            if (changes.isEmpty() && command.hasParameter(AppUserConstants.PASSWORD)) {
+                throw new PasswordMustBeDifferentException();
+            }
             if (!changes.isEmpty()) {
                 userToUpdate.updatePasswordResetRequired(false);
                 this.appUserRepository.saveAndFlush(userToUpdate);
@@ -199,6 +204,10 @@ public class AppUserWritePlatformServiceJpaRepositoryImpl implements AppUserWrit
                             .orElseThrow(() -> new StaffNotFoundException(staffId));
                 }
                 userToUpdate.changeStaff(linkedStaff);
+            } else if (changes.containsKey("officeId") && userToUpdate.getStaffId() != null) {
+                final Long staffId = userToUpdate.getStaffId();
+                this.staffRepository.findByOffice(staffId, userToUpdate.getOffice().getId())
+                        .orElseThrow(() -> new StaffNotFoundException(staffId));
             }
 
             if (changes.containsKey("roles")) {
@@ -236,8 +245,16 @@ public class AppUserWritePlatformServiceJpaRepositoryImpl implements AppUserWrit
     }
 
     /**
-     * Encode the new submitted password and retrieve the last N used passwords to check if the current submitted
-     * password matches with one of them.
+     * Check the submitted password against the last N used passwords, and return the current password to save in the
+     * password history.
+     * <p>
+     * A plain-text password is checked with {@link PlatformPasswordEncoder#matches}, which runs one bcrypt verification
+     * per history row. With a reuse count of 0 (the whole history), the cost grows with the size of the history. That
+     * is accepted because passwords change rarely.
+     * <p>
+     * A {@code passwordEncoded} value (a password the client has already hashed) has no plain text, so it is compared
+     * with {@code equals}. Stored hashes are salted, so such a value is practically never matched and reuse is not
+     * detected on that path.
      */
     private AppUserPreviousPassword getCurrentPasswordToSaveAsPreview(final AppUser user, final JsonCommand command) {
         final String passWordEncodedValue = user.getEncodedPassword(command, this.platformPasswordEncoder);
@@ -247,6 +264,10 @@ public class AppUserWritePlatformServiceJpaRepositoryImpl implements AppUserWrit
         if (passWordEncodedValue != null) {
             final Integer passwordReuseRestrictionCount = this.configurationDomainService.getPasswordReuseRestrictionCount();
             if (passwordReuseRestrictionCount != null) {
+                final String rawPassword = command.stringValueOfParameterNamedAllowingNull(AppUserConstants.PASSWORD);
+                final Predicate<String> matchesSubmittedPassword = rawPassword != null
+                        ? storedPassword -> this.platformPasswordEncoder.matches(rawPassword, storedPassword)
+                        : passWordEncodedValue::equals;
                 List<AppUserPreviousPassword> previousPasswords;
                 if (passwordReuseRestrictionCount == 0) {
                     previousPasswords = this.appUserPreviewPasswordRepository.findByUserId(user.getId(),
@@ -256,7 +277,7 @@ public class AppUserWritePlatformServiceJpaRepositoryImpl implements AppUserWrit
                     previousPasswords = this.appUserPreviewPasswordRepository.findByUserId(user.getId(), pageRequest);
                 }
                 for (AppUserPreviousPassword aPreviewPassword : previousPasswords) {
-                    if (aPreviewPassword.getPassword().equals(passWordEncodedValue)) {
+                    if (matchesSubmittedPassword.test(aPreviewPassword.getPassword())) {
                         throw new PasswordPreviouslyUsedException();
                     }
                 }
@@ -311,7 +332,7 @@ public class AppUserWritePlatformServiceJpaRepositoryImpl implements AppUserWrit
             final String defaultMessage = "User with username " + username + " already exists.";
             return new PlatformDataIntegrityException("error.msg.user.duplicate.username", defaultMessage, "username", username);
         }
-        log.error("handleDataIntegrityIssues: Neither duplicate username nor existing user; unknown error occured", dve);
+        log.error("handleDataIntegrityIssues: Neither duplicate username nor existing user; unknown error occurred", dve);
         return ErrorHandler.getMappable(dve, "error.msg.unknown.data.integrity.issue", "Unknown data integrity issue with resource.");
     }
 }

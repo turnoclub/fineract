@@ -22,9 +22,13 @@ apply plugin: 'java'
 apply plugin: 'com.google.cloud.tools.jib'
 apply from: "${rootDir}/buildSrc/src/main/groovy/org.apache.fineract.dependencies.gradle"
 
+tasks.withType(com.google.cloud.tools.jib.gradle.JibTask).configureEach {
+    notCompatibleWithConfigurationCache('jib 3.5.x keeps a Project reference in its tasks')
+}
+
 jib {
     from {
-        image = 'azul/zulu-openjdk-alpine:21'
+        image = 'azul/zulu-openjdk-alpine:25-jre-headless'
         platforms {
             platform {
                 architecture = System.getProperty("os.arch").equals("aarch64")?"arm64":"amd64"
@@ -66,7 +70,7 @@ jib {
                 file("${rootDir}/custom/${companyDir.name}").eachDir { categoryDir ->
                     if('build' != categoryDir.name) {
                         file("${rootDir}/custom/${companyDir.name}/${categoryDir.name}").eachDir { moduleDir ->
-                            if('build' != moduleDir.name) {
+                            if('build' != moduleDir.name && file("${moduleDir}/build.gradle").exists()) {
                                 implementation project(":custom:${companyDir.name}:${categoryDir.name}:${moduleDir.name}")
                             }
                         }

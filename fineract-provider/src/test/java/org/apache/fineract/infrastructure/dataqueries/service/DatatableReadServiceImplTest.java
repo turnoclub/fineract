@@ -39,11 +39,15 @@ import org.apache.fineract.infrastructure.core.service.database.DatabaseTypeReso
 import org.apache.fineract.infrastructure.dataqueries.data.ResultsetColumnHeaderData;
 import org.apache.fineract.infrastructure.dataqueries.exception.DatatableNotFoundException;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.Mock;
 import org.mockito.Mockito;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.junit.jupiter.MockitoSettings;
+import org.mockito.quality.Strictness;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -52,7 +56,8 @@ import org.springframework.test.context.ContextConfiguration;
 
 @SpringBootTest
 @ContextConfiguration(classes = TestConfiguration.class)
-
+@ExtendWith(MockitoExtension.class)
+@MockitoSettings(strictness = Strictness.LENIENT)
 public class DatatableReadServiceImplTest {
 
     @Autowired
@@ -103,7 +108,7 @@ public class DatatableReadServiceImplTest {
         when(sqlGenerator.alias(anyString(), nullable(String.class))).thenReturn("\"cf1\"");
         when(databaseTypeResolver.isPostgreSQL()).thenReturn(true);
         when(databaseTypeResolver.databaseType()).thenReturn(DatabaseType.POSTGRESQL);
-        DatabaseType dialect = databaseTypeResolver.databaseType();
+        DatabaseType dialect = DatabaseType.POSTGRESQL;
 
         ResultsetColumnHeaderData cf1 = ResultsetColumnHeaderData.detailed("cf1", "text", 10L, false, false, emptyList(), null, false,
                 false, dialect);
@@ -141,7 +146,7 @@ public class DatatableReadServiceImplTest {
         when(jdbcTemplate.queryForObject(anyString(), eq(Integer.class), anyString())).thenReturn(1);
         when(databaseTypeResolver.databaseType()).thenReturn(DatabaseType.POSTGRESQL);
 
-        DatabaseType dialect = databaseTypeResolver.databaseType();
+        DatabaseType dialect = DatabaseType.POSTGRESQL;
         ResultsetColumnHeaderData cf1 = ResultsetColumnHeaderData.detailed("cf1", columnType, 10L, false, false, emptyList(), null, false,
                 false, dialect);
         ResultsetColumnHeaderData rc1 = ResultsetColumnHeaderData.detailed("rc1", "text", 10L, false, false, emptyList(), null, false,

@@ -53,6 +53,7 @@ import org.apache.fineract.portfolio.charge.domain.Charge;
 import org.apache.fineract.portfolio.common.domain.DaysInMonthType;
 import org.apache.fineract.portfolio.common.domain.DaysInYearCustomStrategyType;
 import org.apache.fineract.portfolio.common.domain.DaysInYearType;
+import org.apache.fineract.portfolio.common.domain.MonthEndDueDateStrategy;
 import org.apache.fineract.portfolio.common.domain.PeriodFrequencyType;
 import org.apache.fineract.portfolio.delinquency.domain.DelinquencyBucket;
 import org.apache.fineract.portfolio.floatingrates.data.FloatingRateDTO;
@@ -254,7 +255,8 @@ public class LoanProduct extends AbstractPersistableCustom<Long> {
             final BigDecimal defaultMaxNominalInterestRatePerPeriod, final PeriodFrequencyType interestPeriodFrequencyType,
             final BigDecimal defaultAnnualNominalInterestRate, final InterestMethod interestMethod,
             final InterestCalculationPeriodMethod interestCalculationPeriodMethod, final boolean considerPartialPeriodInterest,
-            final Integer repayEvery, final PeriodFrequencyType repaymentFrequencyType, final Integer defaultNumberOfInstallments,
+            final Integer repayEvery, final PeriodFrequencyType repaymentFrequencyType, final Integer firstRepaymentDayOfMonth,
+            final Integer secondRepaymentDayOfMonth, final Integer defaultNumberOfInstallments,
             final Integer defaultMinNumberOfInstallments, final Integer defaultMaxNumberOfInstallments,
             final Integer graceOnPrincipalPayment, final Integer recurringMoratoriumOnPrincipalPeriods,
             final Integer graceOnInterestPayment, final Integer graceOnInterestCharged, final AmortizationMethod amortizationMethod,
@@ -282,13 +284,14 @@ public class LoanProduct extends AbstractPersistableCustom<Long> {
             final boolean enableInstallmentLevelDelinquency, final LoanScheduleType loanScheduleType,
             final LoanScheduleProcessingType loanScheduleProcessingType, final Integer fixedLength,
             final boolean enableAccrualActivityPosting, final List<LoanSupportedInterestRefundTypes> supportedInterestRefundTypes,
-            final LoanChargeOffBehaviour chargeOffBehaviour, final boolean isInterestRecognitionOnDisbursementDate,
-            final DaysInYearCustomStrategyType daysInYearCustomStrategy, final boolean enableIncomeCapitalization,
-            final LoanCapitalizedIncomeCalculationType capitalizedIncomeCalculationType,
+            final List<LoanSupportedFeeRefundTypes> supportedFeeRefundTypes, final LoanChargeOffBehaviour chargeOffBehaviour,
+            final boolean isInterestRecognitionOnDisbursementDate, final DaysInYearCustomStrategyType daysInYearCustomStrategy,
+            final boolean enableIncomeCapitalization, final LoanCapitalizedIncomeCalculationType capitalizedIncomeCalculationType,
             final LoanCapitalizedIncomeStrategy capitalizedIncomeStrategy, final LoanCapitalizedIncomeType capitalizedIncomeType,
             final boolean enableBuyDownFee, final LoanBuyDownFeeCalculationType buyDownFeeCalculationType,
             final LoanBuyDownFeeStrategy buyDownFeeStrategy, final LoanBuyDownFeeIncomeType buyDownFeeIncomeType,
-            final boolean merchantBuyDownFee, final boolean allowFullTermForTranche) {
+            final boolean merchantBuyDownFee, final boolean allowFullTermForTranche,
+            final MonthEndDueDateStrategy monthEndDueDateStrategy) {
         this.fund = fund;
         this.transactionProcessingStrategyCode = transactionProcessingStrategyCode;
 
@@ -333,15 +336,16 @@ public class LoanProduct extends AbstractPersistableCustom<Long> {
 
         this.loanProductRelatedDetail = new LoanProductRelatedDetail(currency, defaultPrincipal, defaultNominalInterestRatePerPeriod,
                 interestPeriodFrequencyType, defaultAnnualNominalInterestRate, interestMethod, interestCalculationPeriodMethod,
-                considerPartialPeriodInterest, repayEvery, repaymentFrequencyType, defaultNumberOfInstallments, graceOnPrincipalPayment,
-                recurringMoratoriumOnPrincipalPeriods, graceOnInterestPayment, graceOnInterestCharged, amortizationMethod,
-                inArrearsTolerance, graceOnArrearsAgeing, daysInMonthType.getValue(), daysInYearType.getValue(),
-                isInterestRecalculationEnabled, isEqualAmortization, enableDownPayment, disbursedAmountPercentageForDownPayment,
-                enableAutoRepaymentForDownPayment, loanScheduleType, loanScheduleProcessingType, fixedLength, enableAccrualActivityPosting,
-                supportedInterestRefundTypes, chargeOffBehaviour, isInterestRecognitionOnDisbursementDate, daysInYearCustomStrategy,
-                enableIncomeCapitalization, capitalizedIncomeCalculationType, capitalizedIncomeStrategy, capitalizedIncomeType,
-                installmentAmountInMultiplesOf, enableBuyDownFee, buyDownFeeCalculationType, buyDownFeeStrategy, buyDownFeeIncomeType,
-                merchantBuyDownFee);
+                considerPartialPeriodInterest, repayEvery, repaymentFrequencyType, firstRepaymentDayOfMonth, secondRepaymentDayOfMonth,
+                defaultNumberOfInstallments, graceOnPrincipalPayment, recurringMoratoriumOnPrincipalPeriods, graceOnInterestPayment,
+                graceOnInterestCharged, amortizationMethod, inArrearsTolerance, graceOnArrearsAgeing, daysInMonthType.getValue(),
+                daysInYearType.getValue(), isInterestRecalculationEnabled, isEqualAmortization, enableDownPayment,
+                disbursedAmountPercentageForDownPayment, enableAutoRepaymentForDownPayment, loanScheduleType, loanScheduleProcessingType,
+                fixedLength, enableAccrualActivityPosting, supportedInterestRefundTypes, supportedFeeRefundTypes, chargeOffBehaviour,
+                isInterestRecognitionOnDisbursementDate, daysInYearCustomStrategy, enableIncomeCapitalization,
+                capitalizedIncomeCalculationType, capitalizedIncomeStrategy, capitalizedIncomeType, installmentAmountInMultiplesOf,
+                enableBuyDownFee, buyDownFeeCalculationType, buyDownFeeStrategy, buyDownFeeIncomeType, merchantBuyDownFee,
+                monthEndDueDateStrategy);
 
         this.loanProductMinMaxConstraints = new LoanProductMinMaxConstraints(defaultMinPrincipal, defaultMaxPrincipal,
                 defaultMinNominalInterestRatePerPeriod, defaultMaxNominalInterestRatePerPeriod, defaultMinNumberOfInstallments,
@@ -683,15 +687,15 @@ public class LoanProduct extends AbstractPersistableCustom<Long> {
                 } else if (cycleVariation.getBorrowerCycleNumber() < cycleNumber
                         && cycleVariation.getValueConditionType().equals(LoanProductValueConditionType.GREATERTHAN)) {
                     switch (cycleVariation.getParamType()) {
-                        case PRINCIPAL:
+                        case PRINCIPAL -> {
                             if (principalCycleUsed < cycleVariation.getBorrowerCycleNumber()) {
                                 borrowerCycleVariations.put(LoanProductConstants.PRINCIPAL, cycleVariation.getDefaultValue());
                                 borrowerCycleVariations.put(LoanProductConstants.MIN_PRINCIPAL, cycleVariation.getMinValue());
                                 borrowerCycleVariations.put(LoanProductConstants.MAX_PRINCIPAL, cycleVariation.getMaxValue());
                                 principalCycleUsed = cycleVariation.getBorrowerCycleNumber();
                             }
-                        break;
-                        case INTERESTRATE:
+                        }
+                        case INTERESTRATE -> {
                             if (interestCycleUsed < cycleVariation.getBorrowerCycleNumber()) {
                                 borrowerCycleVariations.put(LoanProductConstants.INTEREST_RATE_PER_PERIOD,
                                         cycleVariation.getDefaultValue());
@@ -701,8 +705,8 @@ public class LoanProduct extends AbstractPersistableCustom<Long> {
                                         cycleVariation.getMaxValue());
                                 interestCycleUsed = cycleVariation.getBorrowerCycleNumber();
                             }
-                        break;
-                        case REPAYMENT:
+                        }
+                        case REPAYMENT -> {
                             if (repaymentCycleUsed < cycleVariation.getBorrowerCycleNumber()) {
                                 borrowerCycleVariations.put(LoanProductConstants.MAX_INTEREST_RATE_PER_PERIOD,
                                         cycleVariation.getDefaultValue());
@@ -710,9 +714,9 @@ public class LoanProduct extends AbstractPersistableCustom<Long> {
                                 borrowerCycleVariations.put(LoanProductConstants.MAX_NUMBER_OF_REPAYMENTS, cycleVariation.getMaxValue());
                                 repaymentCycleUsed = cycleVariation.getBorrowerCycleNumber();
                             }
-                        break;
-                        default:
-                        break;
+                        }
+                        default -> {
+                        }
                     }
                 }
             }
@@ -766,6 +770,11 @@ public class LoanProduct extends AbstractPersistableCustom<Long> {
 
     public boolean isAllowFullTermForTranche() {
         return this.loanProductTrancheDetails != null && this.loanProductTrancheDetails.isAllowFullTermForTranche();
+    }
+
+    public boolean supportsDownPaymentCharges() {
+        return this.loanProductRelatedDetail.isEnableDownPayment()
+                && LoanScheduleType.PROGRESSIVE.equals(this.loanProductRelatedDetail.getLoanScheduleType());
     }
 
 }

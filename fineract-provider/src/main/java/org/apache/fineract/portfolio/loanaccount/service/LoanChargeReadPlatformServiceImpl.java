@@ -47,8 +47,10 @@ import org.apache.fineract.portfolio.loanaccount.domain.LoanTransactionType;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
+import org.springframework.transaction.annotation.Transactional;
 
 @RequiredArgsConstructor
+@Transactional(readOnly = true)
 public class LoanChargeReadPlatformServiceImpl implements LoanChargeReadPlatformService {
 
     private final JdbcTemplate jdbcTemplate;
@@ -58,7 +60,7 @@ public class LoanChargeReadPlatformServiceImpl implements LoanChargeReadPlatform
 
     private static final class LoanChargeMapper implements RowMapper<LoanChargeData> {
 
-        public String schema() {
+        private String schema() {
             return "lc.id as id, lc.external_id as externalId, c.id as chargeId, c.name as name, lc.submitted_on_date as submittedOnDate, " //
                     + "lc.amount as amountDue, lc.amount_paid_derived as amountPaid, lc.amount_waived_derived as amountWaived, " //
                     + "lc.amount_writtenoff_derived as amountWrittenOff, lc.amount_outstanding_derived as amountOutstanding, " //
@@ -71,7 +73,13 @@ public class LoanChargeReadPlatformServiceImpl implements LoanChargeReadPlatform
                     + "date(coalesce(dd.disbursedon_date,dd.expected_disburse_date)) as disbursementDate, " //
                     + "oc.decimal_places as currencyDecimalPlaces, oc.currency_multiplesof as inMultiplesOf, oc.display_symbol as currencyDisplaySymbol, " //
                     + "oc.internationalized_name_code as currencyNameCode, l.external_id as externalLoanId from m_charge c " //
-                    + "join m_organisation_currency oc on c.currency_code = oc.code join m_loan_charge lc on lc.charge_id = c.id " //
+                    // Resolve the currency against the reference table, like the loan mappers do: a charge in a
+                    // currency
+                    // that is not registered as an organisation currency must still be readable (external event
+                    // serializers
+                    // call this query inside the command transaction, so a miss here fails the whole command with a
+                    // 404).
+                    + "join m_currency oc on c.currency_code = oc.code join m_loan_charge lc on lc.charge_id = c.id " //
                     + "left join m_loan_tranche_disbursement_charge dc on dc.loan_charge_id=lc.id left join m_loan_disbursement_detail dd on dd.id=dc.disbursement_detail_id " //
                     + " join m_loan l on lc.loan_id = l.id";
         }
@@ -185,7 +193,7 @@ public class LoanChargeReadPlatformServiceImpl implements LoanChargeReadPlatform
 
     private static final class LoanChargeMapperWithLoanId implements RowMapper<LoanChargeData> {
 
-        public String schema() {
+        private String schema() {
             return " lc.id as id, lc.due_for_collection_as_of_date as dueAsOfDate, lc.amount_outstanding_derived as amountOutstanding, lc.submitted_on_date as submittedOnDate, "
                     + " lc.charge_time_enum as chargeTime, loan.id as loanId, loan.external_id as externalLoanId, lc.external_id as externalId from  m_loan_charge lc "
                     + " join m_loan loan on loan.id = lc.loan_id ";
@@ -224,7 +232,7 @@ public class LoanChargeReadPlatformServiceImpl implements LoanChargeReadPlatform
 
     private static final class LoanInstallmentChargeMapper implements RowMapper<LoanInstallmentChargeData> {
 
-        public String schema() {
+        private String schema() {
             return " lsi.installment as installmentNumber, lsi.duedate as dueAsOfDate, "
                     + "lic.amount_outstanding_derived as amountOutstanding, lic.amount as  amount, lic.is_paid_derived as paid, "
                     + "lic.amount_waived_derived as amountWaived, lic.waived as waived from  m_loan_installment_charge lic "
@@ -305,7 +313,7 @@ public class LoanChargeReadPlatformServiceImpl implements LoanChargeReadPlatform
             schemaSql = sb.toString();
         }
 
-        public String schema() {
+        private String schema() {
             return this.schemaSql;
         }
 

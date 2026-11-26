@@ -20,6 +20,7 @@ package org.apache.fineract.portfolio.savings.domain.interest;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.YearMonth;
 import java.time.temporal.ChronoField;
 import java.time.temporal.TemporalAdjusters;
 import java.util.ArrayList;
@@ -69,6 +70,10 @@ public final class PostingPeriod {
     private Integer financialYearBeginningMonth;
 
     private boolean overdraftInterest = false;
+
+    // the other period the overdraft split builds for the same posting interval. It starts from the closing balance
+    // of this one, and the two are calculated together
+    private PostingPeriod secondPartOfInterval;
 
     public void setOverdraftInterestRateAsFraction(BigDecimal overdraftInterestRateAsFraction) {
         this.overdraftInterestRateAsFraction = overdraftInterestRateAsFraction;
@@ -291,32 +296,76 @@ public final class PostingPeriod {
         // for each compounding period accumulate the amount of interest
         // to be applied to the balanced for interest calculation
         for (final CompoundingPeriod compoundingPeriod : this.compoundingPeriods) {
-
-            final BigDecimal interestUnrounded = compoundingPeriod.calculateInterest(this.interestCompoundingType,
-                    this.interestCalculationType, compoundInterestValues.getcompoundedInterest(), this.interestRateAsFraction,
-                    this.daysInYear, this.minBalanceForInterestCalculation.getAmount(), this.overdraftInterestRateAsFraction,
-                    this.minOverdraftForInterestCalculation.getAmount());
-            BigDecimal unCompoundedInterest = compoundInterestValues.getuncompoundedInterest().add(interestUnrounded);
-            compoundInterestValues.setuncompoundedInterest(unCompoundedInterest);
-            LocalDate compoundingPeriodEndDate = compoundingPeriod.getPeriodInterval().endDate();
-            if (!SavingsCompoundingInterestPeriodType.DAILY.equals(this.interestCompoundingType)) {
-                compoundingPeriodEndDate = determineInterestPeriodEndDateFrom(compoundingPeriod.getPeriodInterval().startDate(),
-                        this.interestCompoundingType, compoundingPeriod.getPeriodInterval().endDate(),
-                        this.getFinancialYearBeginningMonth());
-            }
-
-            if (compoundingPeriodEndDate.equals(compoundingPeriod.getPeriodInterval().endDate())) {
-                BigDecimal interestCompounded = compoundInterestValues.getcompoundedInterest().add(unCompoundedInterest);
-                compoundInterestValues.setCompoundedInterest(interestCompounded);
-                compoundInterestValues.setZeroForInterestToBeUncompounded();
-            }
+            final BigDecimal interestUnrounded = interestOn(compoundingPeriod, compoundInterestValues.getcompoundedInterest());
+            compound(compoundingPeriod, interestUnrounded, compoundInterestValues);
             interestEarned = interestEarned.add(interestUnrounded);
         }
 
+        updateInterestEarned(interestEarned);
+        return interestEarned;
+    }
+
+    /**
+     * Calculates the interest of the two periods that the overdraft split builds for one posting interval, one for the
+     * days in credit and one for the overdrawn days. They cover different days of the same compounding periods, so they
+     * are calculated one compounding period at a time and the interest of both is compounded at its end, as it is when
+     * the interval is not split. Calculated one after the other, the second period would get the interest of the first
+     * compounded into all its days, before the end of the compounding period it was earned in.
+     */
+    public static void calculateInterestForSplitInterval(final PostingPeriod first, final PostingPeriod second,
+            final CompoundInterestValues compoundInterestValues) {
+        // both are built from the same interval and compounding type, so they have the same compounding periods
+        if (first.compoundingPeriods.size() != second.compoundingPeriods.size()) {
+            throw new IllegalArgumentException("The periods of a split posting interval must have the same compounding periods, got "
+                    + first.compoundingPeriods.size() + " and " + second.compoundingPeriods.size());
+        }
+        BigDecimal firstInterestEarned = BigDecimal.ZERO;
+        BigDecimal secondInterestEarned = BigDecimal.ZERO;
+        for (int i = 0; i < first.compoundingPeriods.size(); i++) {
+            final CompoundingPeriod compoundingPeriod = first.compoundingPeriods.get(i);
+            final BigDecimal compoundedInterest = compoundInterestValues.getcompoundedInterest();
+            final BigDecimal firstInterest = first.interestOn(compoundingPeriod, compoundedInterest);
+            // daily compounding adds the interest of each day to the balance of the next, so the interest of the first
+            // period already counts for the days of the second, which starts after it
+            final BigDecimal secondInterest = second.interestOn(second.compoundingPeriods.get(i),
+                    SavingsCompoundingInterestPeriodType.DAILY.equals(first.interestCompoundingType) ? compoundedInterest.add(firstInterest)
+                            : compoundedInterest);
+            first.compound(compoundingPeriod, firstInterest.add(secondInterest), compoundInterestValues);
+            firstInterestEarned = firstInterestEarned.add(firstInterest);
+            secondInterestEarned = secondInterestEarned.add(secondInterest);
+        }
+
+        first.updateInterestEarned(firstInterestEarned);
+        second.updateInterestEarned(secondInterestEarned);
+    }
+
+    private BigDecimal interestOn(final CompoundingPeriod compoundingPeriod, final BigDecimal compoundedInterest) {
+        return compoundingPeriod.calculateInterest(this.interestCompoundingType, this.interestCalculationType, compoundedInterest,
+                this.interestRateAsFraction, this.daysInYear, this.minBalanceForInterestCalculation.getAmount(),
+                this.overdraftInterestRateAsFraction, this.minOverdraftForInterestCalculation.getAmount());
+    }
+
+    // adds the interest to the interest not yet compounded, and compounds it all when the compounding period ends
+    private void compound(final CompoundingPeriod compoundingPeriod, final BigDecimal interestUnrounded,
+            final CompoundInterestValues compoundInterestValues) {
+        BigDecimal unCompoundedInterest = compoundInterestValues.getuncompoundedInterest().add(interestUnrounded);
+        compoundInterestValues.setuncompoundedInterest(unCompoundedInterest);
+        LocalDate compoundingPeriodEndDate = compoundingPeriod.getPeriodInterval().endDate();
+        if (!SavingsCompoundingInterestPeriodType.DAILY.equals(this.interestCompoundingType)) {
+            compoundingPeriodEndDate = determineInterestPeriodEndDateFrom(compoundingPeriod.getPeriodInterval().startDate(),
+                    this.interestCompoundingType, compoundingPeriod.getPeriodInterval().endDate(), this.getFinancialYearBeginningMonth());
+        }
+
+        if (compoundingPeriodEndDate.equals(compoundingPeriod.getPeriodInterval().endDate())) {
+            BigDecimal interestCompounded = compoundInterestValues.getcompoundedInterest().add(unCompoundedInterest);
+            compoundInterestValues.setCompoundedInterest(interestCompounded);
+            compoundInterestValues.setZeroForInterestToBeUncompounded();
+        }
+    }
+
+    private void updateInterestEarned(final BigDecimal interestEarned) {
         this.interestEarnedUnrounded = interestEarned;
         this.interestEarnedRounded = Money.of(this.currency, this.interestEarnedUnrounded);
-
-        return interestEarned;
     }
 
     public Money getInterestEarned() {
@@ -492,7 +541,7 @@ public final class PostingPeriod {
                 periodEndDate = periodStartDate.withMonth(previousMonth);
                 periodEndDate = periodEndDate.with(TemporalAdjusters.lastDayOfMonth());
                 if (DateUtils.isBefore(periodEndDate, periodStartDate)) {
-                    periodEndDate = periodEndDate.plusYears(1);
+                    periodEndDate = periodEndDate.plusYears(1).with(TemporalAdjusters.lastDayOfMonth());
                 }
             break;
 
@@ -527,14 +576,13 @@ public final class PostingPeriod {
 
         for (Integer month : monthSet) {
             if (monthofYear <= month.intValue()) {
-                periodEndDate = LocalDate.of(year, month, DateUtils.getBusinessLocalDate().withMonth(month).lengthOfMonth());
+                periodEndDate = LocalDate.of(year, month, YearMonth.of(year, month).lengthOfMonth());
                 notInRange = false;
                 break;
             }
         }
         if (notInRange) {
-            periodEndDate = LocalDate.of(year + 1, monthSet.first(),
-                    DateUtils.getBusinessLocalDate().withMonth(monthSet.first()).lengthOfMonth());
+            periodEndDate = LocalDate.of(year + 1, monthSet.first(), YearMonth.of(year + 1, monthSet.first()).lengthOfMonth());
         }
         return periodEndDate;
     }

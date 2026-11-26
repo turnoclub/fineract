@@ -27,6 +27,8 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
+import java.util.Objects;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import lombok.Getter;
@@ -131,6 +133,13 @@ public class DataValidatorBuilder {
         this.dataValidationErrors.add(error);
     }
 
+    public void failWithCodeAndMessage(final String errorCode, final String defaultEnglishMessage, final Object... defaultUserMessageArgs) {
+        String validationErrorCode = "validation.msg." + this.resource + "." + this.parameter + "." + errorCode;
+        final ApiParameterError error = ApiParameterError.parameterError(validationErrorCode, defaultEnglishMessage, this.parameter,
+                this.value, defaultUserMessageArgs);
+        this.dataValidationErrors.add(error);
+    }
+
     public void failWithCodeNoParameterAddedToErrorCode(final String errorCode, final Object... defaultUserMessageArgs) {
         String validationErrorCode = "validation.msg." + this.resource + "." + errorCode;
         String defaultEnglishMessage = "Failed data validation due to: " + errorCode + ".";
@@ -185,21 +194,26 @@ public class DataValidatorBuilder {
     public DataValidatorBuilder notNull() {
         if (this.value == null && !this.ignoreNullValue) {
 
-            String realParameterName = this.parameter;
-            final StringBuilder validationErrorCode = new StringBuilder("validation.msg.").append(this.resource).append(".")
-                    .append(this.parameter);
-            if (this.arrayIndex != null && StringUtils.isNotBlank(this.arrayPart)) {
-                validationErrorCode.append(".").append(this.arrayPart);
-                realParameterName = this.parameter + '[' + this.arrayIndex + "][" + this.arrayPart + ']';
-            }
-
-            validationErrorCode.append(".cannot.be.blank");
+            final String realParameterName = mandatoryParameterName();
             String defaultEnglishMessage = "The parameter `" + realParameterName + "` is mandatory.";
-            final ApiParameterError error = ApiParameterError.parameterError(validationErrorCode.toString(), defaultEnglishMessage,
-                    realParameterName, this.arrayIndex);
+            final ApiParameterError error = ApiParameterError.parameterError(mandatoryErrorCode(), defaultEnglishMessage, realParameterName,
+                    this.arrayIndex);
             this.dataValidationErrors.add(error);
         }
         return this;
+    }
+
+    private boolean isArrayElement() {
+        return this.arrayIndex != null && StringUtils.isNotBlank(this.arrayPart);
+    }
+
+    private String mandatoryParameterName() {
+        return isArrayElement() ? this.parameter + '[' + this.arrayIndex + "][" + this.arrayPart + ']' : this.parameter;
+    }
+
+    private String mandatoryErrorCode() {
+        return "validation.msg." + this.resource + "." + this.parameter + (isArrayElement() ? "." + this.arrayPart : "")
+                + ".cannot.be.blank";
     }
 
     public DataValidatorBuilder notBlank() {
@@ -208,18 +222,10 @@ public class DataValidatorBuilder {
         }
 
         if (this.value == null || StringUtils.isBlank(this.value.toString())) {
-            String realParameterName = this.parameter;
-            final StringBuilder validationErrorCode = new StringBuilder("validation.msg.").append(this.resource).append(".")
-                    .append(this.parameter);
-            if (this.arrayIndex != null && StringUtils.isNotBlank(this.arrayPart)) {
-                validationErrorCode.append(".").append(this.arrayPart);
-                realParameterName = this.parameter + '[' + this.arrayIndex + "][" + this.arrayPart + ']';
-            }
-
-            validationErrorCode.append(".cannot.be.blank");
+            final String realParameterName = mandatoryParameterName();
             String defaultEnglishMessage = "The parameter `" + realParameterName + "` is mandatory.";
-            final ApiParameterError error = ApiParameterError.parameterError(validationErrorCode.toString(), defaultEnglishMessage,
-                    realParameterName, this.arrayIndex);
+            final ApiParameterError error = ApiParameterError.parameterError(mandatoryErrorCode(), defaultEnglishMessage, realParameterName,
+                    this.arrayIndex);
             this.dataValidationErrors.add(error);
         }
         return this;
@@ -294,31 +300,17 @@ public class DataValidatorBuilder {
         return this;
     }
 
+    public DataValidatorBuilder isOneOfTheseValues(final Integer[] values) {
+        return isOneOfTheseValues((Object[]) values);
+    }
+
     public DataValidatorBuilder isOneOfEnumValues(Class<? extends Enum<?>> e) {
         final List<String> enumValuesList = Arrays.asList(Arrays.stream(e.getEnumConstants()).map(Enum::name).toArray(String[]::new));
         return isOneOfTheseStringValues(enumValuesList);
     }
 
     public DataValidatorBuilder isOneOfTheseStringValues(final Object... values) {
-        if (this.value == null && this.ignoreNullValue) {
-            return this;
-        }
-
-        final List<Object> rawValuesList = Arrays.asList(values);
-
-        if (this.value == null || !rawValuesList.contains(this.value.toString().toLowerCase())) {
-            final List<String> valuesList = Arrays.stream(values).map(Object::toString).toList();
-            final String valuesListStr = String.join(", ", valuesList);
-            String validationErrorCode = "validation.msg." + this.resource + "." + this.parameter + ".is.not.one.of.expected.enumerations";
-            String defaultEnglishMessage = "The parameter `" + this.parameter + "` must be one of [ " + valuesListStr + " ] " + ".";
-
-            final ApiParameterError error = ApiParameterError.parameterError(validationErrorCode, defaultEnglishMessage, this.parameter,
-                    this.value, values);
-
-            this.dataValidationErrors.add(error);
-        }
-
-        return this;
+        return isOneOfTheseStringValues(Arrays.stream(values).map(Object::toString).toList());
     }
 
     public DataValidatorBuilder isOneOfTheseStringValues(final List<String> valuesList) {
@@ -328,7 +320,7 @@ public class DataValidatorBuilder {
 
         List<String> valuesListLowercase = valuesList.stream().map(String::toLowerCase).toList();
 
-        if (this.value == null || !valuesListLowercase.contains(this.value.toString().toLowerCase())) {
+        if (this.value == null || !valuesListLowercase.contains(this.value.toString().toLowerCase(Locale.ROOT))) {
             final String valuesListStr = String.join(", ", valuesList);
             String validationErrorCode = "validation.msg." + this.resource + "." + this.parameter + ".is.not.one.of.expected.enumerations";
             String defaultEnglishMessage = "The parameter `" + this.parameter + "` must be one of [ " + valuesListStr + " ] " + ".";
@@ -949,7 +941,12 @@ public class DataValidatorBuilder {
     }
 
     private DataValidatorBuilder validateStringFor(final String validInputs) {
-        if (this.value == null && this.ignoreNullValue) {
+        if (this.value == null) {
+            // A null that was not marked optional is a missing mandatory value. Report it, unless notNull() or
+            // notBlank() earlier in the chain already did, so that the parameter gets one error and not two.
+            if (!this.ignoreNullValue && !isMandatoryErrorReported()) {
+                notNull();
+            }
             return this;
         }
         final Iterable<String> inputs = Splitter.onPattern(VALID_INPUT_SEPARATOR).split(validInputs);
@@ -968,6 +965,13 @@ public class DataValidatorBuilder {
             this.dataValidationErrors.add(error);
         }
         return this;
+    }
+
+    private boolean isMandatoryErrorReported() {
+        final String code = mandatoryErrorCode();
+        final String parameterName = mandatoryParameterName();
+        return this.dataValidationErrors.stream().anyMatch(
+                error -> code.equals(error.getUserMessageGlobalisationCode()) && Objects.equals(parameterName, error.getParameterName()));
     }
 
     public DataValidatorBuilder validateForBooleanValue() {
@@ -1104,8 +1108,10 @@ public class DataValidatorBuilder {
     }
 
     public DataValidatorBuilder scaleNotGreaterThan(Integer scale) {
-        final BigDecimal value = BigDecimal.valueOf(Double.parseDouble(this.value.toString()));
-        if (value.scale() > scale.intValue()) {
+        // Parsed exactly, not through a double: Double.toString gives a whole number a ".0" (scale 1), which would
+        // reject every whole value at scale 0; trailing zeros carry no precision so they do not count either.
+        final BigDecimal value = new BigDecimal(this.value.toString());
+        if (value.stripTrailingZeros().scale() > scale.intValue()) {
             String validationErrorCode = "validation.msg." + this.resource + "." + this.parameter + ".scale.is.greater.than." + scale;
             String defaultEnglishMessage = "The parameter `" + this.parameter + "` value " + value + " decimal place must not be more than "
                     + scale + " places";

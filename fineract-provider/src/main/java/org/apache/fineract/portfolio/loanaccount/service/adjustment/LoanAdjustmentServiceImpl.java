@@ -51,6 +51,8 @@ import org.apache.fineract.portfolio.loanaccount.domain.LoanLifecycleStateMachin
 import org.apache.fineract.portfolio.loanaccount.domain.LoanRepaymentScheduleInstallmentRepository;
 import org.apache.fineract.portfolio.loanaccount.domain.LoanRepositoryWrapper;
 import org.apache.fineract.portfolio.loanaccount.domain.LoanTransaction;
+import org.apache.fineract.portfolio.loanaccount.domain.LoanTransactionRelation;
+import org.apache.fineract.portfolio.loanaccount.domain.LoanTransactionRelationRepository;
 import org.apache.fineract.portfolio.loanaccount.domain.LoanTransactionRelationTypeEnum;
 import org.apache.fineract.portfolio.loanaccount.domain.LoanTransactionRepository;
 import org.apache.fineract.portfolio.loanaccount.domain.LoanTransactionType;
@@ -98,6 +100,7 @@ public class LoanAdjustmentServiceImpl implements LoanAdjustmentService {
     private final LoanCapitalizedIncomeBalanceRepository loanCapitalizedIncomeBalanceRepository;
     private final LoanBuyDownFeeBalanceRepository loanBuyDownFeeBalanceRepository;
     private final LoanScheduleService loanScheduleService;
+    private final LoanTransactionRelationRepository loanTransactionRelationRepository;
 
     @Override
     public CommandProcessingResult adjustLoanTransaction(Loan loan, LoanTransaction transactionToAdjust, LoanAdjustmentParameter parameter,
@@ -109,22 +112,10 @@ public class LoanAdjustmentServiceImpl implements LoanAdjustmentService {
         ExternalId reversalTxnExternalId = parameter.getReversalTxnExternalId();
         String noteText = parameter.getNoteText();
 
+        validateReplacement(loan, transactionToAdjust, transactionAmount, transactionDate);
         final Money transactionAmountAsMoney = Money.of(loan.getCurrency(), transactionAmount);
-        LoanTransaction newTransactionDetail = LoanTransaction.repaymentType(transactionToAdjust.getTypeOf(), loan.getOffice(),
-                transactionAmountAsMoney, paymentDetail, transactionDate, txnExternalId, transactionToAdjust.getChargeRefundChargeType());
-        if (transactionToAdjust.isInterestWaiver()) {
-            Money unrecognizedIncome = transactionAmountAsMoney.zero();
-            Money interestComponent = transactionAmountAsMoney;
-            if (loan.isPeriodicAccrualAccountingEnabledOnLoanProduct()) {
-                Money receivableInterest = loanBalanceService.getReceivableInterest(loan, transactionDate);
-                if (transactionAmountAsMoney.isGreaterThan(receivableInterest)) {
-                    interestComponent = receivableInterest;
-                    unrecognizedIncome = transactionAmountAsMoney.minus(receivableInterest);
-                }
-            }
-            newTransactionDetail = LoanTransaction.waiver(loan.getOffice(), loan, transactionAmountAsMoney, transactionDate,
-                    interestComponent, unrecognizedIncome, txnExternalId);
-        }
+        final LoanTransaction newTransactionDetail = buildReplacementTransaction(loan, transactionToAdjust, transactionAmountAsMoney,
+                paymentDetail, transactionDate, txnExternalId);
         if (transactionToAdjust.isChargesWaiver()) {
             transactionToAdjust.getLoanChargesPaid().forEach(loanChargePaidBy -> {
                 LoanCharge loanCharge = loanChargePaidBy.getLoanCharge();
@@ -213,6 +204,9 @@ public class LoanAdjustmentServiceImpl implements LoanAdjustmentService {
         loanTransactionValidator.validateRepaymentDateIsOnNonWorkingDay(newTransactionDetail.getTransactionDate(),
                 holidayDetailDTO.getWorkingDays(), holidayDetailDTO.isAllowTransactionsOnNonWorkingDay());
 
+        if (paymentDetail != null) {
+            paymentDetailWritePlatformService.persistPaymentDetail(paymentDetail);
+        }
         adjustExistingTransaction(loan, newTransactionDetail, transactionToAdjust, scheduleGeneratorDTO, reversalTxnExternalId);
 
         loanAccrualsProcessingService.reprocessExistingAccruals(loan, true);
@@ -289,10 +283,11 @@ public class LoanAdjustmentServiceImpl implements LoanAdjustmentService {
         if (!transactionForAdjustment.isAccrualRelated() && transactionForAdjustment.isNotRepaymentLikeType()
                 && transactionForAdjustment.isNotWaiver() && transactionForAdjustment.isNotCreditBalanceRefund()
                 && !transactionForAdjustment.isDeferredIncome() && !transactionForAdjustment.isCapitalizedIncomeAdjustment()
-                && !transactionForAdjustment.isBuyDownFeeAdjustment()) {
-            final String errorMessage = "Only (non-reversed) transactions of type repayment, waiver, accrual, credit balance refund, capitalized income, capitalized income adjustment, buy down fee or buy down fee adjustment can be adjusted.";
+                && !transactionForAdjustment.isBuyDownFeeAdjustment() && !transactionForAdjustment.isChargeback()
+                && !transactionForAdjustment.isRefund()) {
+            final String errorMessage = "Only (non-reversed) transactions of type repayment, waiver, accrual, credit balance refund, capitalized income, capitalized income adjustment, buy down fee, buy down fee adjustment, chargeback, goodwill credit, payout refund, merchant issued refund, charge adjustment or refund can be adjusted.";
             throw new InvalidLoanTransactionTypeException("transaction",
-                    "adjustment.is.only.allowed.to.repayment.or.waiver.or.creditbalancerefund.or.capitalizedIncome.or.capitalizedIncomeAdjustment.or.buyDownFee.or.buyDownFeeAdjustment.transactions",
+                    "adjustment.is.only.allowed.to.repayment.or.waiver.or.creditbalancerefund.or.capitalizedIncome.or.capitalizedIncomeAdjustment.or.buyDownFee.or.buyDownFeeAdjustment.or.chargeback.or.goodwillCredit.or.payoutRefund.or.merchantIssuedRefund.or.chargeAdjustment.or.refund.transactions",
                     errorMessage);
         }
 
@@ -303,20 +298,24 @@ public class LoanAdjustmentServiceImpl implements LoanAdjustmentService {
 
         if (transactionForAdjustment.getTypeOf().equals(LoanTransactionType.MERCHANT_ISSUED_REFUND)
                 || transactionForAdjustment.getTypeOf().equals(LoanTransactionType.PAYOUT_REFUND)) {
-            loan.getLoanTransactions().stream() //
-                    .filter(LoanTransaction::isNotReversed)
-                    .filter(loanTransaction -> loanTransaction.getLoanTransactionRelations().stream()
-                            .anyMatch(relation -> relation.getRelationType().equals(LoanTransactionRelationTypeEnum.RELATED)
-                                    && relation.getToTransaction().getId().equals(transactionForAdjustment.getId())))
-                    .forEach(loanTransaction -> {
-                        loanChargeValidator.validateRepaymentTypeTransactionNotBeforeAChargeRefund(loanTransaction.getLoan(),
-                                loanTransaction, "reversed");
-                        loanTransaction.reverse();
-                        loanTransaction.manuallyAdjustedOrReversed();
-                        journalEntryPoster.postJournalEntriesForLoanTransaction(loanTransaction, false, false);
-                        LoanAdjustTransactionBusinessEvent.Data eventData = new LoanAdjustTransactionBusinessEvent.Data(loanTransaction);
-                        businessEventNotifierService.notifyPostBusinessEvent(new LoanAdjustTransactionBusinessEvent(eventData));
-                    });
+            loanTransactionRelationRepository.findNonReversedInterestRefundsRelatedTo(transactionForAdjustment).forEach(loanTransaction -> {
+                loanChargeValidator.validateRepaymentTypeTransactionNotBeforeAChargeRefund(loanTransaction.getLoan(), loanTransaction,
+                        "reversed");
+                loanTransaction.reverse();
+                loanTransaction.manuallyAdjustedOrReversed();
+                journalEntryPoster.postJournalEntriesForLoanTransaction(loanTransaction, false, false);
+                LoanAdjustTransactionBusinessEvent.Data eventData = new LoanAdjustTransactionBusinessEvent.Data(loanTransaction);
+                businessEventNotifierService.notifyPostBusinessEvent(new LoanAdjustTransactionBusinessEvent(eventData));
+            });
+            loanTransactionRelationRepository.findNonReversedFeeRefundsRelatedTo(transactionForAdjustment).forEach(loanTransaction -> {
+                loanChargeValidator.validateRepaymentTypeTransactionNotBeforeAChargeRefund(loanTransaction.getLoan(), loanTransaction,
+                        "reversed");
+                loanTransaction.reverse();
+                loanTransaction.manuallyAdjustedOrReversed();
+                journalEntryPoster.postJournalEntriesForLoanTransaction(loanTransaction, false, false);
+                LoanAdjustTransactionBusinessEvent.Data eventData = new LoanAdjustTransactionBusinessEvent.Data(loanTransaction);
+                businessEventNotifierService.notifyPostBusinessEvent(new LoanAdjustTransactionBusinessEvent(eventData));
+            });
         }
 
         if (loan.isClosedWrittenOff()) {
@@ -335,6 +334,80 @@ public class LoanAdjustmentServiceImpl implements LoanAdjustmentService {
         if (transactionForAdjustment.getTypeOf().equals(LoanTransactionType.CAPITALIZED_INCOME)) {
             loanScheduleService.regenerateScheduleWithReprocessingTransactions(loan);
         }
+
+        if (transactionForAdjustment.getTypeOf().isChargeback()) {
+            loanTransactionRelationRepository
+                    .findByToTransactionAndRelationType(transactionForAdjustment, LoanTransactionRelationTypeEnum.CHARGEBACK)
+                    .forEach(relation -> relation.getFromTransaction().getLoanTransactionRelations().remove(relation));
+            loanScheduleService.regenerateRepaymentSchedule(loan, scheduleGeneratorDTO);
+            reprocessLoanTransactionsService.reprocessTransactions(loan);
+        }
+    }
+
+    /**
+     * Validates the replacement before it is built. A reversal (zero amount) creates no replacement, so it is always
+     * allowed.
+     */
+    public void validateReplacement(final Loan loan, final LoanTransaction transactionToAdjust, final BigDecimal transactionAmount,
+            final LocalDate transactionDate) {
+        if (!transactionToAdjust.isChargeAdjustment() || !MathUtil.isGreaterThanZero(transactionAmount)) {
+            return;
+        }
+        final LoanCharge adjustedCharge = loanChargeValidator.getAdjustedCharge(transactionToAdjust);
+        loanChargeValidator.validateLoanStatusForChargeAdjustment(loan);
+        loanChargeValidator.validateChargeAdjustmentDate(adjustedCharge, transactionDate);
+        loanChargeValidator.validateChargeAdjustmentAmount(adjustedCharge, transactionAmount, transactionToAdjust.getId());
+    }
+
+    /**
+     * Builds the transaction that replaces the adjusted one. Types that need more than a copy of the original type get
+     * their own branch here, so that everything specific to their construction stays in one place.
+     */
+    private LoanTransaction buildReplacementTransaction(final Loan loan, final LoanTransaction transactionToAdjust,
+            final Money transactionAmount, final PaymentDetail paymentDetail, final LocalDate transactionDate,
+            final ExternalId txnExternalId) {
+        return switch (transactionToAdjust.getTypeOf()) {
+            case WAIVE_INTEREST ->
+                buildInterestWaiverReplacement(loan, transactionToAdjust, transactionAmount, transactionDate, txnExternalId);
+            case CHARGE_ADJUSTMENT -> buildChargeAdjustmentReplacement(loan, transactionToAdjust, transactionAmount, paymentDetail,
+                    transactionDate, txnExternalId);
+            default -> LoanTransaction.repaymentType(transactionToAdjust.getTypeOf(), loan.getOffice(), transactionAmount, paymentDetail,
+                    transactionDate, txnExternalId, transactionToAdjust.getChargeRefundChargeType());
+        };
+    }
+
+    private LoanTransaction buildInterestWaiverReplacement(final Loan loan, final LoanTransaction transactionToAdjust,
+            final Money transactionAmount, final LocalDate transactionDate, final ExternalId txnExternalId) {
+        Money unrecognizedIncome = transactionAmount.zero();
+        Money interestComponent = transactionAmount;
+        if (loan.isPeriodicAccrualAccountingEnabledOnLoanProduct()) {
+            // The waiver being replaced is reversed only after this replacement is built: leave it out, or its interest
+            // would be netted against the receivable a second time.
+            Money receivableInterest = loanBalanceService.getReceivableInterest(loan, transactionDate, transactionToAdjust);
+            if (transactionAmount.isGreaterThan(receivableInterest)) {
+                interestComponent = receivableInterest;
+                unrecognizedIncome = transactionAmount.minus(receivableInterest);
+            }
+        }
+        return LoanTransaction.waiver(loan.getOffice(), loan, transactionAmount, transactionDate, interestComponent, unrecognizedIncome,
+                txnExternalId);
+    }
+
+    /**
+     * Charge adjustments stay linked to a specific charge. When replacing one via adjust, the new transaction must keep
+     * that link so JE posting and available-amount checks continue to resolve the charge. The replacement is validated
+     * beforehand in {@link #validateReplacement}.
+     */
+    private LoanTransaction buildChargeAdjustmentReplacement(final Loan loan, final LoanTransaction transactionToAdjust,
+            final Money transactionAmount, final PaymentDetail paymentDetail, final LocalDate transactionDate,
+            final ExternalId txnExternalId) {
+        final LoanTransaction replacement = LoanTransaction.repaymentType(transactionToAdjust.getTypeOf(), loan.getOffice(),
+                transactionAmount, paymentDetail, transactionDate, txnExternalId, transactionToAdjust.getChargeRefundChargeType());
+        if (replacement.isNotZero()) {
+            replacement.getLoanTransactionRelations().add(LoanTransactionRelation.linkToCharge(replacement,
+                    loanChargeValidator.getAdjustedCharge(transactionToAdjust), LoanTransactionRelationTypeEnum.CHARGE_ADJUSTMENT));
+        }
+        return replacement;
     }
 
     private Loan saveAndFlushLoanWithDataIntegrityViolationChecks(final Loan loan) {

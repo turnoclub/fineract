@@ -47,7 +47,7 @@ public interface SavingsAccountTransactionRepository
             @Param("transactionDate") LocalDate transactionDate);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
-    @Query("select st from SavingsAccountTransaction st where st.savingsAccount = :savingsAccount and st.dateOf = :date and st.reversalTransaction <> 1 and st.reversed <> 1 order by st.id")
+    @Query("select st from SavingsAccountTransaction st where st.savingsAccount = :savingsAccount and st.dateOf = :date and st.reversalTransaction = false and st.reversed = false order by st.id")
     List<SavingsAccountTransaction> findTransactionRunningBalanceBeforePivotDate(@Param("savingsAccount") SavingsAccount savingsAccount,
             @Param("date") LocalDate date);
 
@@ -59,4 +59,14 @@ public interface SavingsAccountTransactionRepository
     @Query("select sat from SavingsAccountTransaction sat where sat.savingsAccount.id = :savingsId and sat.dateOf <= :transactionDate and sat.reversed=false")
     List<SavingsAccountTransaction> findBySavingsAccountIdAndLessThanDateOfAndReversedIsFalse(@Param("savingsId") Long savingsId,
             @Param("transactionDate") LocalDate transactionDate, Pageable pageable);
+
+    @Query("""
+            SELECT MAX(sat.dateOf) FROM SavingsAccountTransaction sat
+            WHERE sat.savingsAccount.id = :savingsId
+              AND sat.typeOf IN :transactionTypes
+              AND sat.reversed = false
+              AND sat.reversalTransaction = false
+            """)
+    LocalDate findLastTransactionDateBySavingsIdAndTypes(@Param("savingsId") Long savingsId,
+            @Param("transactionTypes") List<Integer> transactionTypes);
 }

@@ -30,24 +30,20 @@ import org.apache.fineract.cob.service.RetrieveLoanIdService;
 import org.apache.fineract.infrastructure.core.config.FineractProperties;
 import org.apache.fineract.infrastructure.jobs.service.JobName;
 import org.apache.fineract.infrastructure.springbatch.PropertyService;
-import org.apache.fineract.portfolio.loanaccount.domain.Loan;
+import org.apache.fineract.infrastructure.springbatch.StepRetryPolicyFactory;
 import org.apache.fineract.portfolio.loanaccount.domain.LoanRepository;
 import org.apache.fineract.portfolio.loanaccount.service.ProgressiveLoanModelProcessingService;
 import org.apache.fineract.useradministration.domain.AppUserRepositoryWrapper;
-import org.springframework.batch.core.Step;
 import org.springframework.batch.core.configuration.annotation.StepScope;
-import org.springframework.batch.core.repository.JobRepository;
-import org.springframework.batch.core.step.builder.SimpleStepBuilder;
+import org.springframework.batch.core.step.Step;
+import org.springframework.batch.core.step.builder.ChunkOrientedStepBuilder;
 import org.springframework.batch.integration.partition.RemotePartitioningWorkerStepBuilderFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Conditional;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.core.task.SyncTaskExecutor;
-import org.springframework.core.task.TaskExecutor;
 import org.springframework.integration.channel.QueueChannel;
-import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -56,15 +52,13 @@ import org.springframework.transaction.support.TransactionTemplate;
 public class LoanCOBWorkerConfiguration {
 
     @Autowired
-    private JobRepository jobRepository;
-    @Autowired
     private PlatformTransactionManager transactionManager;
     @Autowired
-    @Qualifier("batchJdbcTransactionManager")
-    private PlatformTransactionManager batchJdbcTransactionManager;
+    @Qualifier("requiresNewTransactionJdbcTemplate")
+    private TransactionTemplate requiresNewTransactionJdbcTemplate;
     @Autowired
-    @Qualifier("batchJdbcTransactionTemplate")
-    private TransactionTemplate batchJdbcTransactionTemplate;
+    @Qualifier("requiresNewTransactionTemplate")
+    private TransactionTemplate requiresNewTransactionTemplate;
     @Autowired
     private RemotePartitioningWorkerStepBuilderFactory stepBuilderFactory;
 
@@ -92,41 +86,36 @@ public class LoanCOBWorkerConfiguration {
 
     @Bean(name = LoanCOBConstant.LOAN_COB_WORKER_STEP)
     public Step loanCOBWorkerStep() {
-        final SimpleStepBuilder<Loan, Loan> stepBuilder = stepBuilderFactory.get("Loan COB worker - Step").inputChannel(inboundRequests)
-                .<Loan, Loan>chunk(propertyService.getChunkSize(JobName.LOAN_COB.name()), transactionManager) //
+        final ChunkOrientedStepBuilder<Long, Long> stepBuilder = stepBuilderFactory.get("Loan COB worker - Step")
+                .inputChannel(inboundRequests) //
+                .<Long, Long>chunk(propertyService.getChunkSize(JobName.LOAN_COB.name())) //
                 .reader(cobWorkerItemReader()) //
-                .processor(cobWorkerItemProcessor()) //
+                // No processor: the business steps run in the writer, where a failure is recovered by scan mode
+                // (see AbstractCOBItemWriter). A retry would only run again inside the doomed chunk transaction.
                 .writer(cobWorkerItemWriter()) //
                 .faultTolerant() //
-                .retry(Exception.class) //
-                .retryLimit(propertyService.getRetryLimit(LoanCOBConstant.JOB_NAME)) //
+                .retryPolicy(StepRetryPolicyFactory.noRetryPolicy()) //
                 .skip(Exception.class) //
-                .skipLimit(propertyService.getChunkSize(LoanCOBConstant.JOB_NAME) + 1) //
+                .skipLimit(propertyService.getSkipLimit(LoanCOBConstant.JOB_NAME)) //
                 .listener(loanItemListener()) //
                 .listener(cobWorkerStepListener()) //
                 .transactionManager(transactionManager);
 
-        if (propertyService.getThreadPoolMaxPoolSize(LoanCOBConstant.JOB_NAME) > 1) {
-            stepBuilder.taskExecutor(cobTaskExecutor());
-        }
+        // No task executor is registered, deliberately and unconditionally.
+        //
+        // Batch 6's ChunkOrientedStep keeps the chunk transaction on the step thread and, when a task executor is
+        // present, submits the ITEMS of a chunk to it (ChunkOrientedStep.processChunkConcurrently) for processing. The
+        // business steps run in the writer, on the step thread and inside the chunk transaction, so an executor would
+        // parallelise nothing but the pass-through processor. Should the business steps ever move back into a
+        // processor, an executor would run them with no transaction of their own, committing independently of the
+        // chunk write; a chunk-write rollback, a skip in scan mode or a step restart would then leave their writes
+        // committed while the loan is not marked COB'd, and the next pass would re-run them over it.
+        //
+        // This is NOT configurable on purpose: the thread pool size reads like a throughput dial but decides
+        // transactional semantics, so it must not be reachable from configuration. Concurrency comes from
+        // partitioning instead - lower partition-size and add worker instances.
 
         return stepBuilder.build();
-    }
-
-    @Bean
-    public TaskExecutor cobTaskExecutor() {
-        if (propertyService.getThreadPoolMaxPoolSize(LoanCOBConstant.JOB_NAME) == 1) {
-            return new SyncTaskExecutor();
-        }
-        final ThreadPoolTaskExecutor taskExecutor = new ThreadPoolTaskExecutor();
-        taskExecutor.setThreadNamePrefix("COB-Thread-");
-        taskExecutor.setThreadGroupName("COB-Thread");
-        taskExecutor.setCorePoolSize(propertyService.getThreadPoolCorePoolSize(JobName.LOAN_COB.name()));
-        taskExecutor.setMaxPoolSize(propertyService.getThreadPoolMaxPoolSize(JobName.LOAN_COB.name()));
-        taskExecutor.setQueueCapacity(propertyService.getThreadPoolQueueCapacity(JobName.LOAN_COB.name()));
-        taskExecutor.setAllowCoreThreadTimeOut(true);
-        taskExecutor.setTaskDecorator(new ContextAwareTaskDecorator());
-        return taskExecutor;
     }
 
     @Bean
@@ -141,20 +130,12 @@ public class LoanCOBWorkerConfiguration {
 
     @Bean
     public ChunkProcessingLoanItemListener loanItemListener() {
-        return new ChunkProcessingLoanItemListener(loanLockingService, batchJdbcTransactionTemplate);
+        return new ChunkProcessingLoanItemListener(loanLockingService, requiresNewTransactionTemplate);
     }
 
     @Bean
     public ApplyLoanLockTasklet applyLock() {
-        return new ApplyLoanLockTasklet(fineractProperties, loanLockingService, retrieveIdService, batchJdbcTransactionTemplate);
-    }
-
-    @Bean
-    @StepScope
-    public Step applyLockStep(
-            @org.springframework.beans.factory.annotation.Value("#{stepExecutionContext['partition']}") String partitionName) {
-        return new org.springframework.batch.core.step.builder.StepBuilder("Apply lock - Step:" + partitionName, jobRepository)
-                .tasklet(applyLock(), batchJdbcTransactionManager).build();
+        return new ApplyLoanLockTasklet(fineractProperties, loanLockingService, retrieveIdService, requiresNewTransactionJdbcTemplate);
     }
 
     @Bean
@@ -165,20 +146,12 @@ public class LoanCOBWorkerConfiguration {
     @Bean
     @StepScope
     public LoanItemReader cobWorkerItemReader() {
-        return new LoanItemReader(loanRepository, new BeforeStepLockingItemReaderHelper(retrieveIdService, loanLockingService));
-    }
-
-    @Bean
-    @StepScope
-    public LoanItemProcessor cobWorkerItemProcessor() {
-        return new LoanItemProcessor(cobBusinessStepService, progressiveLoanModelProcessingService);
+        return new LoanItemReader(new BeforeStepLockingItemReaderHelper(retrieveIdService, loanLockingService));
     }
 
     @Bean
     @StepScope
     public LoanItemWriter cobWorkerItemWriter() {
-        LoanItemWriter repositoryItemWriter = new LoanItemWriter(loanLockingService);
-        repositoryItemWriter.setRepository(loanRepository);
-        return repositoryItemWriter;
+        return new LoanItemWriter(cobBusinessStepService, progressiveLoanModelProcessingService, loanLockingService, loanRepository);
     }
 }

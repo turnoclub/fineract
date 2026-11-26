@@ -33,13 +33,13 @@ import org.apache.fineract.accounting.glaccount.domain.GLAccountType;
 import org.apache.fineract.accounting.producttoaccountmapping.domain.ProductToGLAccountMapping;
 import org.apache.fineract.accounting.producttoaccountmapping.domain.ProductToGLAccountMappingRepository;
 import org.apache.fineract.accounting.producttoaccountmapping.exception.ProductToGLAccountMappingInvalidException;
+import org.apache.fineract.accounting.producttoaccountmapping.service.AccountingChargeReadService;
 import org.apache.fineract.accounting.producttoaccountmapping.service.ProductToGLAccountMappingHelper;
 import org.apache.fineract.infrastructure.codes.domain.CodeValueRepository;
 import org.apache.fineract.infrastructure.core.api.JsonCommand;
 import org.apache.fineract.infrastructure.core.serialization.FromJsonHelper;
 import org.apache.fineract.portfolio.PortfolioProductType;
-import org.apache.fineract.portfolio.charge.domain.ChargeRepositoryWrapper;
-import org.apache.fineract.portfolio.paymenttype.domain.PaymentTypeRepositoryWrapper;
+import org.apache.fineract.portfolio.paymenttype.domain.PaymentTypeRepository;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -47,10 +47,10 @@ public class LoanProductToGLAccountMappingHelper extends ProductToGLAccountMappi
 
     public LoanProductToGLAccountMappingHelper(final GLAccountRepository glAccountRepository,
             final ProductToGLAccountMappingRepository glAccountMappingRepository, final FromJsonHelper fromApiJsonHelper,
-            final ChargeRepositoryWrapper chargeRepositoryWrapper, final GLAccountRepositoryWrapper accountRepositoryWrapper,
-            final PaymentTypeRepositoryWrapper paymentTypeRepositoryWrapper, final CodeValueRepository codeValueRepository) {
-        super(glAccountRepository, glAccountMappingRepository, fromApiJsonHelper, chargeRepositoryWrapper, accountRepositoryWrapper,
-                paymentTypeRepositoryWrapper, codeValueRepository);
+            final AccountingChargeReadService accountingChargeReadService, final GLAccountRepositoryWrapper accountRepositoryWrapper,
+            final PaymentTypeRepository paymentTypeRepository, final CodeValueRepository codeValueRepository) {
+        super(glAccountRepository, glAccountMappingRepository, fromApiJsonHelper, accountingChargeReadService, accountRepositoryWrapper,
+                paymentTypeRepository, codeValueRepository);
     }
 
     /***
@@ -243,25 +243,19 @@ public class LoanProductToGLAccountMappingHelper extends ProductToGLAccountMappi
                 .extractLongNamed(LoanProductAccountingParams.PENALTIES_RECEIVABLE.getValue(), element);
 
         switch (accountingRuleType) {
-            case NONE:
-            break;
-            case CASH_BASED:
-                populateChangesForCashBasedAccounting(changes, fundAccountId, loanPortfolioAccountId, incomeFromInterestId, incomeFromFeeId,
-                        incomeFromPenaltyId, writeOffAccountId, overPaymentAccountId, transfersInSuspenseAccountId,
-                        incomeFromRecoveryAccountId);
-            break;
-            case ACCRUAL_PERIODIC:
-                populateChangesForAccrualBasedAccounting(changes, fundAccountId, loanPortfolioAccountId, incomeFromInterestId,
-                        incomeFromFeeId, incomeFromPenaltyId, writeOffAccountId, overPaymentAccountId, transfersInSuspenseAccountId,
-                        incomeFromRecoveryAccountId, incomeFromBuyDownFeesAccountId, receivableInterestAccountId, receivableFeeAccountId,
-                        receivablePenaltyAccountId);
-            break;
-            case ACCRUAL_UPFRONT:
-                populateChangesForAccrualBasedAccounting(changes, fundAccountId, loanPortfolioAccountId, incomeFromInterestId,
-                        incomeFromFeeId, incomeFromPenaltyId, writeOffAccountId, overPaymentAccountId, transfersInSuspenseAccountId,
-                        incomeFromRecoveryAccountId, incomeFromBuyDownFeesAccountId, receivableInterestAccountId, receivableFeeAccountId,
-                        receivablePenaltyAccountId);
-            break;
+            case NONE -> {
+            }
+            case CASH_BASED -> populateChangesForCashBasedAccounting(changes, fundAccountId, loanPortfolioAccountId, incomeFromInterestId,
+                    incomeFromFeeId, incomeFromPenaltyId, writeOffAccountId, overPaymentAccountId, transfersInSuspenseAccountId,
+                    incomeFromRecoveryAccountId);
+            case ACCRUAL_PERIODIC -> populateChangesForAccrualBasedAccounting(changes, fundAccountId, loanPortfolioAccountId,
+                    incomeFromInterestId, incomeFromFeeId, incomeFromPenaltyId, writeOffAccountId, overPaymentAccountId,
+                    transfersInSuspenseAccountId, incomeFromRecoveryAccountId, incomeFromBuyDownFeesAccountId, receivableInterestAccountId,
+                    receivableFeeAccountId, receivablePenaltyAccountId);
+            case ACCRUAL_UPFRONT -> populateChangesForAccrualBasedAccounting(changes, fundAccountId, loanPortfolioAccountId,
+                    incomeFromInterestId, incomeFromFeeId, incomeFromPenaltyId, writeOffAccountId, overPaymentAccountId,
+                    transfersInSuspenseAccountId, incomeFromRecoveryAccountId, incomeFromBuyDownFeesAccountId, receivableInterestAccountId,
+                    receivableFeeAccountId, receivablePenaltyAccountId);
         }
 
         return changes;
@@ -308,11 +302,11 @@ public class LoanProductToGLAccountMappingHelper extends ProductToGLAccountMappi
      */
     public void handleChangesToLoanProductToGLAccountMappings(final Long loanProductId, final Map<String, Object> changes,
             final JsonElement element, final AccountingRuleType accountingRuleType, final boolean enableIncomeCapitalization,
-            final boolean enableBuyDownFee, final boolean merchantBuyDownFee) {
+            final boolean enableBuyDownFee, final boolean merchantBuyDownFee, final boolean enableChargeAmortization) {
         switch (accountingRuleType) {
-            case NONE:
-            break;
-            case CASH_BASED:
+            case NONE -> {
+            }
+            case CASH_BASED -> {
                 // asset or liabilities
                 mergeLoanToAssetOrLiabilityAccountMappingChanges(element, LoanProductAccountingParams.FUND_SOURCE.getValue(), loanProductId,
                         CashAccountsForLoan.FUND_SOURCE.getValue(), CashAccountsForLoan.FUND_SOURCE.toString(), changes);
@@ -366,10 +360,8 @@ public class LoanProductToGLAccountMappingHelper extends ProductToGLAccountMappi
                 // liabilities
                 mergeLoanToLiabilityAccountMappingChanges(element, LoanProductAccountingParams.OVERPAYMENT.getValue(), loanProductId,
                         CashAccountsForLoan.OVERPAYMENT.getValue(), CashAccountsForLoan.OVERPAYMENT.toString(), changes);
-            break;
-            case ACCRUAL_UPFRONT:
-                // fall through to periodic accrual
-            case ACCRUAL_PERIODIC:
+            }
+            case ACCRUAL_UPFRONT, ACCRUAL_PERIODIC -> {
                 // asset or liabilities
                 mergeLoanToAssetOrLiabilityAccountMappingChanges(element, LoanProductAccountingParams.FUND_SOURCE.getValue(), loanProductId,
                         CashAccountsForLoan.FUND_SOURCE.getValue(), CashAccountsForLoan.FUND_SOURCE.toString(), changes);
@@ -461,7 +453,7 @@ public class LoanProductToGLAccountMappingHelper extends ProductToGLAccountMappi
                 // liabilities
                 mergeLoanToLiabilityAccountMappingChanges(element, LoanProductAccountingParams.OVERPAYMENT.getValue(), loanProductId,
                         CashAccountsForLoan.OVERPAYMENT.getValue(), CashAccountsForLoan.OVERPAYMENT.toString(), changes);
-                if (!enableBuyDownFee && !enableIncomeCapitalization) {
+                if (!enableBuyDownFee && !enableIncomeCapitalization && !enableChargeAmortization) {
                     deleteProductToGLAccountMapping(loanProductId, PortfolioProductType.LOAN,
                             AccrualAccountsForLoan.DEFERRED_INCOME_LIABILITY.getValue());
                 } else {
@@ -469,7 +461,7 @@ public class LoanProductToGLAccountMappingHelper extends ProductToGLAccountMappi
                             loanProductId, AccrualAccountsForLoan.DEFERRED_INCOME_LIABILITY.getValue(),
                             AccrualAccountsForLoan.DEFERRED_INCOME_LIABILITY.toString(), changes);
                 }
-            break;
+            }
         }
     }
 

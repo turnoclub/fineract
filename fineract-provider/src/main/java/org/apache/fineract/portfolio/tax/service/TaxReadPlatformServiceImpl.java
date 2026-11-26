@@ -18,12 +18,15 @@
  */
 package org.apache.fineract.portfolio.tax.service;
 
+import java.time.LocalDate;
 import java.util.Collection;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.apache.fineract.accounting.common.AccountingDropdownReadPlatformService;
+import org.apache.fineract.infrastructure.core.service.DateUtils;
 import org.apache.fineract.portfolio.tax.data.TaxComponentData;
 import org.apache.fineract.portfolio.tax.data.TaxGroupData;
+import org.apache.fineract.portfolio.tax.data.TaxGroupMappingsData;
 import org.apache.fineract.portfolio.tax.domain.TaxComponentRepository;
 import org.apache.fineract.portfolio.tax.domain.TaxComponentRepositoryWrapper;
 import org.apache.fineract.portfolio.tax.domain.TaxGroupRepository;
@@ -44,18 +47,23 @@ public class TaxReadPlatformServiceImpl implements TaxReadPlatformService {
 
     @Override
     public List<TaxComponentData> retrieveAllTaxComponents() {
-        return taxComponentMapper.map(taxComponentRepository.findAll());
+        return taxComponentMapper.map(taxComponentRepository.findAll()).stream().map(this::withEditable).toList();
     }
 
     @Override
     public TaxComponentData retrieveTaxComponentData(final Long id) {
-        return taxComponentMapper.map(taxComponentRepositoryWrapper.findOneWithNotFoundDetection(id));
+        return withEditable(taxComponentMapper.map(taxComponentRepositoryWrapper.findOneWithNotFoundDetection(id)));
+    }
+
+    private TaxComponentData withEditable(final TaxComponentData taxComponentData) {
+        return TaxComponentData.withEditable(taxComponentData, !taxComponentRepository.isLinked(taxComponentData.getId()));
     }
 
     @Override
     public TaxComponentData retrieveTaxComponentTemplate() {
-        return TaxComponentData.template(this.accountingDropdownReadPlatformService.retrieveAccountMappingOptions(),
-                this.accountingDropdownReadPlatformService.retrieveGLAccountTypeOptions());
+        return TaxComponentData
+                .withEditable(TaxComponentData.template(this.accountingDropdownReadPlatformService.retrieveAccountMappingOptions(),
+                        this.accountingDropdownReadPlatformService.retrieveGLAccountTypeOptions()), true);
     }
 
     @Override
@@ -65,14 +73,21 @@ public class TaxReadPlatformServiceImpl implements TaxReadPlatformService {
 
     @Override
     public TaxGroupData retrieveTaxGroupData(final Long id) {
-        return taxGroupMapper.map(taxGroupRepositoryWrapper.findOneWithNotFoundDetection(id));
+        final TaxGroupData taxGroupData = taxGroupMapper.map(taxGroupRepositoryWrapper.findOneWithNotFoundDetection(id));
+        return TaxGroupData.withBusinessDate(taxGroupData, DateUtils.getBusinessLocalDate());
     }
 
     @Override
     public TaxGroupData retrieveTaxGroupWithTemplate(final Long id) {
-        TaxGroupData taxGroupData = retrieveTaxGroupData(id);
-        taxGroupData = TaxGroupData.template(taxGroupData, retrieveTaxComponentsForLookUp());
-        return taxGroupData;
+        final TaxGroupData taxGroupData = retrieveTaxGroupData(id);
+        final boolean groupEditable = !taxGroupRepository.isLinked(id);
+        final LocalDate today = DateUtils.getBusinessLocalDate();
+        if (taxGroupData.getTaxAssociations() != null) {
+            for (TaxGroupMappingsData mapping : taxGroupData.getTaxAssociations()) {
+                mapping.setComponentEditable(groupEditable && DateUtils.isAfter(mapping.getStartDate(), today));
+            }
+        }
+        return TaxGroupData.template(taxGroupData, retrieveTaxComponentsForLookUp(), groupEditable);
     }
 
     @Override

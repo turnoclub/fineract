@@ -26,6 +26,7 @@ import org.apache.fineract.integrationtests.common.accounting.Account;
 public final class LoanTestData {
 
     public static final String DATETIME_PATTERN = FeignTestConstants.DATETIME_PATTERN;
+    public static final String ISO_DATE_PATTERN = FeignTestConstants.ISO_DATE_PATTERN;
     public static final String LOCALE = FeignTestConstants.LOCALE;
 
     private LoanTestData() {}
@@ -128,6 +129,9 @@ public final class LoanTestData {
     public static final class InterestRecalculationCompoundingMethod {
 
         public static final Integer NONE = 0;
+        public static final Integer INTEREST = 1;
+        public static final Integer FEE = 2;
+        public static final Integer INTEREST_AND_FEE = 3;
 
         private InterestRecalculationCompoundingMethod() {}
     }
@@ -140,6 +144,10 @@ public final class LoanTestData {
         public static final Integer DAYS = 0;
         public static final Long DAYS_L = 0L;
         public static final String DAYS_STRING = "DAYS";
+        public static final Integer WEEKS = 1;
+        public static final Long WEEKS_L = 1L;
+        public static final String WEEKS_STRING = "WEEKS";
+        public static final Integer YEARS = 3;
 
         private RepaymentFrequencyType() {}
     }
@@ -148,8 +156,29 @@ public final class LoanTestData {
 
         public static final Integer SAME_AS_REPAYMENT_PERIOD = 1;
         public static final Integer DAILY = 2;
+        public static final Integer WEEKLY = 3;
+        public static final Integer MONTHLY = 4;
 
         private RecalculationRestFrequencyType() {}
+    }
+
+    /** Shares the numeric domain of {@link RecalculationRestFrequencyType}, but names the compounding side. */
+    public static final class RecalculationCompoundingFrequencyType {
+
+        public static final Integer SAME_AS_REPAYMENT_PERIOD = 1;
+        public static final Integer DAILY = 2;
+        public static final Integer WEEKLY = 3;
+        public static final Integer MONTHLY = 4;
+
+        private RecalculationCompoundingFrequencyType() {}
+    }
+
+    public static final class PreClosureInterestCalculationStrategy {
+
+        public static final Integer TILL_PRE_CLOSE_DATE = 1;
+        public static final Integer TILL_REST_FREQUENCY_DATE = 2;
+
+        private PreClosureInterestCalculationStrategy() {}
     }
 
     public static final class InterestCalculationPeriodType {
@@ -172,6 +201,7 @@ public final class LoanTestData {
     public static final class TransactionProcessingStrategyCode {
 
         public static final String ADVANCED_PAYMENT_ALLOCATION_STRATEGY = "advanced-payment-allocation-strategy";
+        public static final String MIFOS_STANDARD_STRATEGY = "mifos-standard-strategy";
 
         private TransactionProcessingStrategyCode() {}
     }
@@ -179,6 +209,7 @@ public final class LoanTestData {
     public static final class RescheduleStrategyMethod {
 
         public static final Integer RESCHEDULE_NEXT_REPAYMENTS = 1;
+        public static final Integer REDUCE_NUMBER_OF_INSTALLMENTS = 2;
         public static final Integer REDUCE_EMI_AMOUNT = 3;
         public static final Integer ADJUST_LAST_UNPAID_PERIOD = 4;
 

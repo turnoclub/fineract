@@ -18,6 +18,7 @@
  */
 package org.apache.fineract.infrastructure.businessdate.service;
 
+import io.github.resilience4j.retry.annotation.Retry;
 import java.time.LocalDate;
 import java.util.HashMap;
 import java.util.List;
@@ -33,10 +34,12 @@ import org.apache.fineract.infrastructure.businessdate.mapper.BusinessDateMapper
 import org.apache.fineract.infrastructure.configuration.domain.ConfigurationDomainService;
 import org.apache.fineract.infrastructure.core.service.DateUtils;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 @Slf4j
 @Service
 @RequiredArgsConstructor
+@Transactional(readOnly = true)
 public class BusinessDateReadPlatformServiceImpl implements BusinessDateReadPlatformService {
 
     private final BusinessDateRepository repository;
@@ -45,7 +48,7 @@ public class BusinessDateReadPlatformServiceImpl implements BusinessDateReadPlat
 
     @Override
     public List<BusinessDateDTO> findAll() {
-        List<BusinessDate> businessDateList = repository.findAll();
+        List<BusinessDate> businessDateList = repository.findAllBusinessDates();
         return businessDateMapper.mapEntity(businessDateList);
     }
 
@@ -67,6 +70,7 @@ public class BusinessDateReadPlatformServiceImpl implements BusinessDateReadPlat
     }
 
     @Override
+    @Retry(name = "tenantContextLookup")
     public HashMap<BusinessDateType, LocalDate> getBusinessDates() {
         HashMap<BusinessDateType, LocalDate> businessDateMap = new HashMap<>();
         LocalDate tenantDate = DateUtils.getLocalDateOfTenant();

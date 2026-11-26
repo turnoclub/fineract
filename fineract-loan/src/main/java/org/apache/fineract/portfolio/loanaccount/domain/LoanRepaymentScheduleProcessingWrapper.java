@@ -24,11 +24,12 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.function.Predicate;
 import org.apache.fineract.infrastructure.core.service.DateUtils;
 import org.apache.fineract.organisation.monetary.domain.MonetaryCurrency;
 import org.apache.fineract.organisation.monetary.domain.Money;
-import org.springframework.lang.NonNull;
+import org.jspecify.annotations.NonNull;
 
 /**
  * A wrapper around loan schedule related data exposing needed behaviour by loan.
@@ -50,7 +51,13 @@ public class LoanRepaymentScheduleProcessingWrapper {
                 .filter(repaymentPeriod -> !repaymentPeriod.isDownPayment()).findFirst().orElseThrow();
         for (final LoanRepaymentScheduleInstallment period : repaymentPeriods) {
 
-            if (!period.isDownPayment()) {
+            if (period.isDownPayment()) {
+                final List<LoanCharge> downPaymentFees = DownPaymentFees.ofPeriod(loanCharges, period, repaymentPeriods);
+                final Money zero = Money.zero(currency);
+                period.updateChargePortion(sum(downPaymentFees, fee -> fee.getAmount(currency), zero),
+                        sum(downPaymentFees, fee -> fee.getAmountWaived(currency), zero),
+                        sum(downPaymentFees, fee -> fee.getAmountWrittenOff(currency), zero), zero, zero, zero);
+            } else {
 
                 boolean isFirstNonDownPaymentPeriod = period.equals(firstNormalPeriod);
 
@@ -81,13 +88,17 @@ public class LoanRepaymentScheduleProcessingWrapper {
         }
     }
 
+    private Money sum(final List<LoanCharge> loanCharges, final Function<LoanCharge, Money> amount, final Money zero) {
+        return loanCharges.stream().map(amount).reduce(zero, Money::plus);
+    }
+
     private Money cumulativeFeeChargesDueWithin(final LocalDate periodStart, final LocalDate periodEnd, final Set<LoanCharge> loanCharges,
             final MonetaryCurrency monetaryCurrency, LoanRepaymentScheduleInstallment period, final Money totalPrincipal,
             final Money totalInterest, boolean isInstallmentChargeApplicable, boolean isFirstPeriod) {
 
         Money cumulative = Money.zero(monetaryCurrency);
         for (final LoanCharge loanCharge : loanCharges) {
-            if (loanCharge.isFeeCharge() && !loanCharge.isDueAtDisbursement()) {
+            if (loanCharge.isFeeCharge() && !loanCharge.isDueAtDisbursementOrDownPayment()) {
                 boolean isDue = loanCharge.isDueInPeriod(periodStart, periodEnd, isFirstPeriod);
                 if (loanCharge.isInstalmentFee() && isInstallmentChargeApplicable) {
                     cumulative = cumulative.plus(getInstallmentFee(monetaryCurrency, period, loanCharge));
@@ -115,7 +126,9 @@ public class LoanRepaymentScheduleProcessingWrapper {
                             amount = amount.add(totalPrincipal.getAmount());
                         }
                     }
-                    BigDecimal loanChargeAmt = amount.multiply(loanCharge.getPercentage()).divide(BigDecimal.valueOf(100));
+                    // capped like the charge's own amount, so the installment never carries more than the charge
+                    BigDecimal loanChargeAmt = loanCharge
+                            .minimumAndMaximumCap(amount.multiply(loanCharge.getPercentage()).divide(BigDecimal.valueOf(100)));
                     cumulative = cumulative.plus(loanChargeAmt);
                 } else if (isDue) {
                     cumulative = cumulative.plus(loanCharge.amount());
@@ -173,7 +186,7 @@ public class LoanRepaymentScheduleProcessingWrapper {
     }
 
     private Predicate<LoanCharge> feeCharge() {
-        return loanCharge -> loanCharge.isFeeCharge() && !loanCharge.isDueAtDisbursement();
+        return loanCharge -> loanCharge.isFeeCharge() && !loanCharge.isDueAtDisbursementOrDownPayment();
     }
 
     private Money cumulativePenaltyChargesDueWithin(final LocalDate periodStart, final LocalDate periodEnd,
@@ -198,7 +211,8 @@ public class LoanRepaymentScheduleProcessingWrapper {
                     } else {
                         amount = amount.add(totalPrincipal.getAmount());
                     }
-                    BigDecimal loanChargeAmt = amount.multiply(loanCharge.getPercentage()).divide(BigDecimal.valueOf(100));
+                    BigDecimal loanChargeAmt = loanCharge
+                            .minimumAndMaximumCap(amount.multiply(loanCharge.getPercentage()).divide(BigDecimal.valueOf(100)));
                     cumulative = cumulative.plus(loanChargeAmt);
                 } else if (isDue) {
                     cumulative = cumulative.plus(loanCharge.amount());

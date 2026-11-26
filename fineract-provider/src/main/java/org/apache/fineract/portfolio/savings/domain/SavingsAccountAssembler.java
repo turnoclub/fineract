@@ -77,6 +77,7 @@ import org.apache.fineract.portfolio.savings.SavingsPostingInterestPeriodType;
 import org.apache.fineract.portfolio.savings.data.SavingsAccountData;
 import org.apache.fineract.portfolio.savings.data.SavingsAccountTransactionData;
 import org.apache.fineract.portfolio.savings.exception.SavingsProductNotFoundException;
+import org.apache.fineract.portfolio.savings.service.SavingsAccountAssemblerService;
 import org.apache.fineract.useradministration.domain.AppUser;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -85,10 +86,9 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 @Service
-public class SavingsAccountAssembler {
+public class SavingsAccountAssembler implements SavingsAccountAssemblerService {
 
     private static final Logger LOG = LoggerFactory.getLogger(SavingsAccountAssembler.class);
-    private final SavingsAccountTransactionSummaryWrapper savingsAccountTransactionSummaryWrapper;
     private final SavingsAccountTransactionDataSummaryWrapper savingsAccountTransactionDataSummaryWrapper;
     private final SavingsHelper savingsHelper;
     private final ClientRepositoryWrapper clientRepository;
@@ -103,15 +103,13 @@ public class SavingsAccountAssembler {
     private final ExternalIdFactory externalIdFactory;
 
     @Autowired
-    public SavingsAccountAssembler(final SavingsAccountTransactionSummaryWrapper savingsAccountTransactionSummaryWrapper,
-            final SavingsAccountTransactionDataSummaryWrapper savingsAccountTransactionDataSummaryWrapper,
+    public SavingsAccountAssembler(final SavingsAccountTransactionDataSummaryWrapper savingsAccountTransactionDataSummaryWrapper,
             final ClientRepositoryWrapper clientRepository, final GroupRepositoryWrapper groupRepository,
             final StaffRepositoryWrapper staffRepository, final SavingsProductRepository savingProductRepository,
             final SavingsAccountRepositoryWrapper savingsAccountRepository,
             final SavingsAccountChargeAssembler savingsAccountChargeAssembler, final FromJsonHelper fromApiJsonHelper,
             final AccountTransfersReadPlatformService accountTransfersReadPlatformService, final JdbcTemplate jdbcTemplate,
             final ConfigurationDomainService configurationDomainService, ExternalIdFactory externalIdFactory) {
-        this.savingsAccountTransactionSummaryWrapper = savingsAccountTransactionSummaryWrapper;
         this.savingsAccountTransactionDataSummaryWrapper = savingsAccountTransactionDataSummaryWrapper;
         this.clientRepository = clientRepository;
         this.groupRepository = groupRepository;
@@ -330,7 +328,6 @@ public class SavingsAccountAssembler {
                 minRequiredOpeningBalance, lockinPeriodFrequency, lockinPeriodFrequencyType, iswithdrawalFeeApplicableForTransfer, charges,
                 allowOverdraft, overdraftLimit, enforceMinRequiredBalance, minRequiredBalance, maxAllowedLienLimit, lienAllowed,
                 nominalAnnualInterestRateOverdraft, minOverdraftForInterestCalculation, withHoldTax);
-        account.setHelpers(this.savingsAccountTransactionSummaryWrapper, this.savingsHelper, this.configurationDomainService);
 
         account.validateNewApplicationState(SAVINGS_ACCOUNT_RESOURCE_NAME);
 
@@ -339,8 +336,18 @@ public class SavingsAccountAssembler {
         return account;
     }
 
+    public void lockInIdOrder(final Long... savingsIds) {
+        this.savingsAccountRepository.lockInIdOrder(savingsIds);
+    }
+
+    @Override
     public SavingsAccount assembleFrom(final Long savingsId, final boolean backdatedTxnsAllowedTill) {
         SavingsAccount account = this.savingsAccountRepository.findSavingsWithNotFoundDetection(savingsId, backdatedTxnsAllowedTill);
+        return loadTransactionsToSavingsAccount(account, backdatedTxnsAllowedTill);
+    }
+
+    public SavingsAccount assembleFromInUserScope(final Long savingsId, final boolean backdatedTxnsAllowedTill) {
+        SavingsAccount account = this.savingsAccountRepository.findOneInUserScope(savingsId, backdatedTxnsAllowedTill);
         return loadTransactionsToSavingsAccount(account, backdatedTxnsAllowedTill);
     }
 
@@ -357,8 +364,10 @@ public class SavingsAccountAssembler {
                     savingsAccountTransactions = this.savingsAccountRepository.findTransactionsAfterPivotDate(account,
                             interestPostedTillDate.minusDays(relaxingDaysForPivotDate));
 
-                    savingsAccountTransactions.get(0).getSavingsAccount()
-                            .setStartInterestCalculationDate(interestPostedTillDate.minusDays(relaxingDaysForPivotDate));
+                    if (savingsAccountTransactions != null && !savingsAccountTransactions.isEmpty()) {
+                        savingsAccountTransactions.get(0).getSavingsAccount()
+                                .setStartInterestCalculationDate(interestPostedTillDate.minusDays(relaxingDaysForPivotDate));
+                    }
                     List<SavingsAccountTransaction> pivotDateTransaction = this.savingsAccountRepository
                             .findTransactionRunningBalanceBeforePivotDate(account,
                                     interestPostedTillDate.minusDays(relaxingDaysForPivotDate + 1));
@@ -381,7 +390,6 @@ public class SavingsAccountAssembler {
             }
         }
 
-        account.setHelpers(this.savingsAccountTransactionSummaryWrapper, this.savingsHelper, this.configurationDomainService);
         return account;
     }
 
@@ -418,10 +426,6 @@ public class SavingsAccountAssembler {
 
     public boolean isRelaxingDaysConfigForPivotDateEnabled() {
         return this.configurationDomainService.isRelaxingDaysConfigForPivotDateEnabled();
-    }
-
-    public void setHelpers(final SavingsAccount account) {
-        account.setHelpers(this.savingsAccountTransactionSummaryWrapper, this.savingsHelper, this.configurationDomainService);
     }
 
     /**
@@ -465,17 +469,12 @@ public class SavingsAccountAssembler {
                 product.isMinRequiredBalanceEnforced(), product.minRequiredBalance(), product.maxAllowedLienLimit(),
                 product.isLienAllowed(), product.nominalAnnualInterestRateOverdraft(), product.minOverdraftForInterestCalculation(),
                 product.withHoldTax());
-        account.setHelpers(this.savingsAccountTransactionSummaryWrapper, this.savingsHelper, this.configurationDomainService);
 
         account.validateNewApplicationState(SAVINGS_ACCOUNT_RESOURCE_NAME);
 
         account.validateAccountValuesWithProduct();
 
         return account;
-    }
-
-    public void assignSavingAccountHelpers(final SavingsAccount savingsAccount) {
-        savingsAccount.setHelpers(this.savingsAccountTransactionSummaryWrapper, this.savingsHelper, this.configurationDomainService);
     }
 
     public void assignSavingAccountHelpers(final SavingsAccountData savingsAccountData) {

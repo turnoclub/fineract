@@ -22,9 +22,15 @@ import static org.apache.fineract.commands.domain.CommandProcessingResultType.UN
 
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
 import java.util.Locale;
 import java.util.Set;
+import java.util.function.BiConsumer;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.fineract.batch.exception.ErrorInfo;
 import org.apache.fineract.commands.domain.CommandSource;
 import org.apache.fineract.commands.domain.CommandSourceRepository;
@@ -39,25 +45,28 @@ import org.apache.fineract.infrastructure.core.exception.ErrorHandler;
 import org.apache.fineract.infrastructure.core.exception.GeneralPlatformDomainRuleException;
 import org.apache.fineract.infrastructure.core.exception.IdempotentCommandProcessUnderProcessingException;
 import org.apache.fineract.infrastructure.core.serialization.FromJsonHelper;
+import org.apache.fineract.infrastructure.core.service.DateUtils;
+import org.apache.fineract.infrastructure.core.service.IpAddressUtils;
 import org.apache.fineract.useradministration.domain.AppUser;
-import org.springframework.lang.NonNull;
+import org.jspecify.annotations.NonNull;
 import org.springframework.orm.jpa.JpaSystemException;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Isolation;
-import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * Two phase transactional command processing: save initial...work...finish/failed to handle idempotent requests. As the
- * default isolation level for MYSQL is REPEATABLE_READ and a lower value READ_COMMITED for postgres, we can force to
- * use the same for both database backends to be consistent.
+ * Command source persistence and transactional command execution helpers. The initial command source is persisted
+ * separately for idempotency, while command execution and successful result persistence run in one transaction.
  */
+@Slf4j
 @Component
 @RequiredArgsConstructor
 public class CommandSourceService {
 
     public static final String COMMAND_MASK_VALUE = "***";
     public static final String COMMAND_SANITIZE_ALL = "SANITIZE_ALL";
+    public static final String RECOVERABLE_ERROR_KEY_SUFFIX = "_RE";
+    // 40 + "_RE" + the 19 digits of the largest id = 62, so a hashed key always fits the column
+    static final int RECOVERABLE_KEY_HASH_LENGTH = 40;
 
     private final ConfigurationDomainService configurationDomainService;
     private final CommandSourceRepository commandSourceRepository;
@@ -65,43 +74,83 @@ public class CommandSourceService {
     private final FromJsonHelper fromApiJsonHelper;
 
     @NonNull
-    @Transactional(propagation = Propagation.REQUIRES_NEW, isolation = Isolation.REPEATABLE_READ)
-    public CommandSource saveInitialNewTransaction(CommandWrapper wrapper, JsonCommand jsonCommand, AppUser maker, String idempotencyKey) {
-        return saveInitial(wrapper, jsonCommand, maker, idempotencyKey);
-    }
-
-    @NonNull
-    @Transactional(propagation = Propagation.REQUIRED)
-    public CommandSource saveInitialSameTransaction(CommandWrapper wrapper, JsonCommand jsonCommand, AppUser maker, String idempotencyKey) {
-        return saveInitial(wrapper, jsonCommand, maker, idempotencyKey);
-    }
-
-    @NonNull
-    private CommandSource saveInitial(CommandWrapper wrapper, JsonCommand jsonCommand, AppUser maker, String idempotencyKey) {
+    public CommandSource saveInitial(CommandWrapper wrapper, JsonCommand jsonCommand, AppUser maker, String idempotencyKey) {
         try {
             CommandSource initialCommandSource = getInitialCommandSource(wrapper, jsonCommand, maker, idempotencyKey);
             return commandSourceRepository.saveAndFlush(initialCommandSource);
         } catch (JpaSystemException jse) {
-            final String message = (jse.getRootCause() != null) ? jse.getRootCause().getMessage() : null;
-            if (message != null && message.toUpperCase(Locale.ROOT).contains("UNIQUE_PORTFOLIO_COMMAND_SOURCE")) {
+            if (isIdempotencyKeyConflict(jse)) {
                 throw new IdempotentCommandProcessUnderProcessingException(wrapper, idempotencyKey, jse);
             }
             throw jse;
         }
     }
 
-    @Transactional(propagation = Propagation.REQUIRES_NEW, isolation = Isolation.REPEATABLE_READ)
-    public CommandSource saveResultNewTransaction(@NonNull CommandSource commandSource) {
-        return saveResult(commandSource);
+    /**
+     * Saves a command source that failed with a recoverable error under {@code <key>_RE<id>}, where {@code <id>} is the
+     * id of its own row. This frees the original idempotency key, so a retry with it executes the command again. When
+     * {@code <key>_RE<id>} does not fit the column, the key part is replaced by the first 40 hex characters of its
+     * SHA-256 hash, which always fits. When the row has no id yet, or a client already sent that exact key, the row is
+     * saved under its original key, as for any other failure.
+     */
+    @NonNull
+    public CommandSource saveRecoverableErrorResult(@NonNull CommandSource commandSource) {
+        String idempotencyKey = commandSource.getIdempotencyKey();
+        Long id = commandSource.getId();
+        if (id == null) {
+            log.debug("Command source with idempotency key {} has no id yet, storing the failure under the original key", idempotencyKey);
+            return commandSourceRepository.saveAndFlush(commandSource);
+        }
+        String renamedKey = renamedIdempotencyKey(idempotencyKey, id);
+        commandSource.setIdempotencyKey(renamedKey);
+        try {
+            return commandSourceRepository.saveAndFlush(commandSource);
+        } catch (JpaSystemException jse) {
+            commandSource.setIdempotencyKey(idempotencyKey);
+            if (!isIdempotencyKeyConflict(jse)) {
+                throw jse;
+            }
+            log.warn("Idempotency key {} is already taken, storing the failure under the original key {}", renamedKey, idempotencyKey);
+            return commandSourceRepository.saveAndFlush(commandSource);
+        } catch (RuntimeException e) {
+            commandSource.setIdempotencyKey(idempotencyKey);
+            throw e;
+        }
     }
 
-    @Transactional(propagation = Propagation.REQUIRED)
-    public CommandSource saveResultSameTransaction(@NonNull CommandSource commandSource) {
-        return saveResult(commandSource);
+    static String renamedIdempotencyKey(String idempotencyKey, long id) {
+        String suffix = RECOVERABLE_ERROR_KEY_SUFFIX + id;
+        if (idempotencyKey.length() + suffix.length() <= CommandSource.IDEMPOTENCY_KEY_LENGTH) {
+            return idempotencyKey + suffix;
+        }
+        return hashIdempotencyKey(idempotencyKey) + suffix;
+    }
+
+    private static String hashIdempotencyKey(String idempotencyKey) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(idempotencyKey.getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(digest).substring(0, RECOVERABLE_KEY_HASH_LENGTH);
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 is not available", e);
+        }
+    }
+
+    private static boolean isIdempotencyKeyConflict(JpaSystemException jse) {
+        final String message = (jse.getRootCause() != null) ? jse.getRootCause().getMessage() : null;
+        return message != null && message.toUpperCase(Locale.ROOT).contains("UNIQUE_PORTFOLIO_COMMAND_SOURCE");
+    }
+
+    @Transactional
+    public void saveResult(Long commandSourceId, Integer response, String body) {
+        commandSourceRepository.findById(commandSourceId).ifPresent(commandSource -> {
+            commandSource.setResultStatusCode(response);
+            commandSource.setResult(body);
+            saveResult(commandSource);
+        });
     }
 
     @NonNull
-    private CommandSource saveResult(@NonNull CommandSource commandSource) {
+    public CommandSource saveResult(@NonNull CommandSource commandSource) {
         return commandSourceRepository.saveAndFlush(commandSource);
     }
 
@@ -109,20 +158,41 @@ public class CommandSourceService {
         return errorHandler.handle(ErrorHandler.getMappable(t));
     }
 
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public CommandSource getCommandSource(Long commandSourceId) {
         return commandSourceRepository.findById(commandSourceId).orElseThrow(() -> new CommandNotFoundException(commandSourceId));
     }
 
-    @Transactional(propagation = Propagation.REQUIRED)
     public CommandSource findCommandSource(CommandWrapper wrapper, String idempotencyKey) {
         return commandSourceRepository.findByActionNameAndEntityNameAndIdempotencyKey(wrapper.actionName(), wrapper.entityName(),
                 idempotencyKey);
     }
 
     public CommandSource getInitialCommandSource(CommandWrapper wrapper, JsonCommand jsonCommand, AppUser maker, String idempotencyKey) {
-        CommandSource commandSourceResult = CommandSource.fullEntryFrom(wrapper, jsonCommand, maker, idempotencyKey,
-                UNDER_PROCESSING.getValue(), false);
+        CommandSource commandSourceResult = CommandSource.builder() //
+                .actionName(wrapper.actionName()) //
+                .entityName(wrapper.entityName()) //
+                .resourceGetUrl(wrapper.getHref()) //
+                .resourceId(jsonCommand.entityId()) //
+                .subResourceId(jsonCommand.subentityId()) //
+                .commandAsJson(jsonCommand.json()) //
+                .maker(maker) //
+                .madeOnDate(DateUtils.getAuditOffsetDateTime()) //
+                .status(UNDER_PROCESSING.getValue()) //
+                .idempotencyKey(idempotencyKey) //
+                .officeId(wrapper.getOfficeId()) //
+                .groupId(jsonCommand.getGroupId()) //
+                .clientId(jsonCommand.getClientId()) //
+                .loanId(jsonCommand.getLoanId()) //
+                .savingsId(jsonCommand.getSavingsId()) //
+                .productId(jsonCommand.getProductId()) //
+                .transactionId(jsonCommand.getTransactionId()) //
+                .creditBureauId(jsonCommand.getCreditBureauId()) //
+                .organisationCreditBureauId(jsonCommand.getOrganisationCreditBureauId()) //
+                .clientIp(IpAddressUtils.getClientIp()) //
+                .loanExternalId(jsonCommand.getLoanExternalId()) //
+                .sanitized(false) //
+                .submittedIdsKept(true) //
+                .build();
         sanitizeJson(commandSourceResult, wrapper.getSanitizeJsonKeys());
         if (commandSourceResult.getCommandAsJson() == null) {
             commandSourceResult.setCommandAsJson("{}");
@@ -131,10 +201,17 @@ public class CommandSourceService {
     }
 
     @Transactional
-    public CommandProcessingResult processCommand(NewCommandSourceHandler handler, JsonCommand command, CommandSource commandSource,
-            AppUser user, boolean isApprovedByChecker) {
+    public CommandExecutionResult processCommandAndSaveResult(NewCommandSourceHandler handler, JsonCommand command,
+            CommandSource commandSource, AppUser user, boolean isApprovedByChecker,
+            BiConsumer<CommandSource, CommandProcessingResult> resultUpdater) {
         final CommandProcessingResult result = handler.processCommand(command);
+        validateMakerChecker(commandSource, user, isApprovedByChecker, result);
+        resultUpdater.accept(commandSource, result);
+        return new CommandExecutionResult(result, saveResult(commandSource));
+    }
 
+    private void validateMakerChecker(CommandSource commandSource, AppUser user, boolean isApprovedByChecker,
+            CommandProcessingResult result) {
         String permission = commandSource.getPermissionCode();
         boolean isMakerChecker = configurationDomainService.isMakerCheckerEnabledForTask(permission);
         if (isMakerChecker || result.isRollbackTransaction()) {
@@ -145,11 +222,14 @@ public class CommandSourceService {
                     throw new GeneralPlatformDomainRuleException("error.msg.invalid.sanitization",
                             "Maker-checker command can not be sanitized, please change the permission configuration", permission);
                 }
+
                 commandSource.markAsAwaitingApproval();
                 throw new RollbackTransactionNotApprovedException(commandSource.getId(), commandSource.getResourceId());
             }
         }
-        return result;
+    }
+
+    public record CommandExecutionResult(CommandProcessingResult result, CommandSource commandSource) {
     }
 
     private void sanitizeJson(@NonNull CommandSource commandSource, Set<String> sanitizeKeys) {

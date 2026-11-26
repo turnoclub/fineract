@@ -22,6 +22,7 @@ package org.apache.fineract.portfolio.workingcapitalloan.mapper;
 import java.util.List;
 import org.apache.fineract.infrastructure.core.config.MapstructMapperConfig;
 import org.apache.fineract.portfolio.delinquency.mapper.DelinquencyRangeMapper;
+import org.apache.fineract.portfolio.loanaccount.data.InstallmentLevelDelinquency;
 import org.apache.fineract.portfolio.workingcapitalloan.data.WorkingCapitalLoanDelinquencyTagHistoryData;
 import org.apache.fineract.portfolio.workingcapitalloan.data.WorkingCapitalLoanRangeScheduleDelinquencyData;
 import org.apache.fineract.portfolio.workingcapitalloan.domain.WorkingCapitalLoanDelinquencyRangeScheduleTagHistory;
@@ -45,7 +46,14 @@ public interface WorkingCapitalLoanDelinquencyRangeScheduleTagHistoryMapper {
     @AfterMapping
     default void calculateTotal(WorkingCapitalLoanDelinquencyRangeScheduleTagHistory source,
             @MappingTarget WorkingCapitalLoanDelinquencyTagHistoryData target) {
-        target.setDelinquentDays(source.getRangeSchedule().getDelinquentDays() - source.getDelinquencyRange().getMinimumAgeDays() + 1);
+        if (source.getRangeSchedule().getDelinquentDays() != null) {
+            target.setDelinquentDays(source.getRangeSchedule().getDelinquentDays() - source.getDelinquencyRange().getMinimumAgeDays() + 1);
+        }
+    }
+
+    default WorkingCapitalLoanRangeScheduleDelinquencyData mapForCollectionData(
+            WorkingCapitalLoanDelinquencyRangeScheduleTagHistory source) {
+        return mapForCollectionData(mapToInstallmentLevelDelinquency(source));
     }
 
     @Mapping(target = "rangeId", source = "delinquencyRange.id")
@@ -53,6 +61,8 @@ public interface WorkingCapitalLoanDelinquencyRangeScheduleTagHistoryMapper {
     @Mapping(target = "minimumAgeDays", source = "delinquencyRange.minimumAgeDays")
     @Mapping(target = "maximumAgeDays", source = "delinquencyRange.maximumAgeDays")
     @Mapping(target = "delinquentAmount", source = "outstandingAmount")
-    WorkingCapitalLoanRangeScheduleDelinquencyData mapForCollectionData(WorkingCapitalLoanDelinquencyRangeScheduleTagHistory source);
+    InstallmentLevelDelinquency mapToInstallmentLevelDelinquency(WorkingCapitalLoanDelinquencyRangeScheduleTagHistory source);
+
+    WorkingCapitalLoanRangeScheduleDelinquencyData mapForCollectionData(InstallmentLevelDelinquency source);
 
 }

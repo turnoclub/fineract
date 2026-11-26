@@ -25,7 +25,6 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import lombok.RequiredArgsConstructor;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.fineract.infrastructure.accountnumberformat.domain.AccountNumberFormat;
@@ -42,8 +41,6 @@ import org.apache.fineract.organisation.monetary.domain.MonetaryCurrency;
 import org.apache.fineract.portfolio.client.domain.Client;
 import org.apache.fineract.portfolio.client.domain.ClientRepository;
 import org.apache.fineract.portfolio.client.exception.ClientNotFoundException;
-import org.apache.fineract.portfolio.delinquency.domain.DelinquencyBucket;
-import org.apache.fineract.portfolio.delinquency.domain.DelinquencyBucketRepository;
 import org.apache.fineract.portfolio.fund.domain.Fund;
 import org.apache.fineract.portfolio.fund.domain.FundRepository;
 import org.apache.fineract.portfolio.fund.exception.FundNotFoundException;
@@ -64,6 +61,7 @@ import org.apache.fineract.portfolio.workingcapitalloannearbreach.repository.Wor
 import org.apache.fineract.portfolio.workingcapitalloanproduct.WorkingCapitalLoanProductConstants;
 import org.apache.fineract.portfolio.workingcapitalloanproduct.data.WorkingCapitalPaymentAllocationData;
 import org.apache.fineract.portfolio.workingcapitalloanproduct.domain.WorkingCapitalAdvancedPaymentAllocationsJsonParser;
+import org.apache.fineract.portfolio.workingcapitalloanproduct.domain.WorkingCapitalLoanBreachStartType;
 import org.apache.fineract.portfolio.workingcapitalloanproduct.domain.WorkingCapitalLoanDelinquencyStartType;
 import org.apache.fineract.portfolio.workingcapitalloanproduct.domain.WorkingCapitalLoanProduct;
 import org.apache.fineract.portfolio.workingcapitalloanproduct.domain.WorkingCapitalLoanProductPaymentAllocationRule;
@@ -81,7 +79,7 @@ public class WorkingCapitalLoanAssemblerImpl implements WorkingCapitalLoanAssemb
     private final WorkingCapitalLoanProductRepository loanProductRepository;
     private final ClientRepository clientRepository;
     private final FundRepository fundRepository;
-    private final DelinquencyBucketRepository delinquencyBucketRepository;
+    private final WorkingCapitalDelinquencyBucketResolver workingCapitalDelinquencyBucketResolver;
     private final ExternalIdFactory externalIdFactory;
     private final WorkingCapitalAdvancedPaymentAllocationsJsonParser paymentAllocationParser;
     private final AccountNumberFormatLookup accountNumberFormatLookup;
@@ -112,7 +110,7 @@ public class WorkingCapitalLoanAssemblerImpl implements WorkingCapitalLoanAssemb
         final BigDecimal principal = fromApiJsonHelper
                 .extractBigDecimalWithLocaleNamed(WorkingCapitalLoanConstants.principalAmountParamName, element);
         final BigDecimal totalPaymentVolume = fromApiJsonHelper
-                .extractBigDecimalNamed(WorkingCapitalLoanConstants.totalPaymentVolumeParamName, element, new HashSet<>());
+                .extractBigDecimalWithLocaleNamed(WorkingCapitalLoanConstants.totalPaymentVolumeParamName, element);
 
         final LocalDate submittedOnDate = fromApiJsonHelper.parameterExists(WorkingCapitalLoanConstants.submittedOnDateParameterName,
                 element) ? fromApiJsonHelper.extractLocalDateNamed(WorkingCapitalLoanConstants.submittedOnDateParameterName, element)
@@ -123,7 +121,7 @@ public class WorkingCapitalLoanAssemblerImpl implements WorkingCapitalLoanAssemb
         final WorkingCapitalLoanProductRelatedDetails loanProductRelatedDetails = buildLoanProductRelatedDetails(element, product);
 
         final WorkingCapitalLoan loan = new WorkingCapitalLoan();
-        loan.setAccountNumber(accountNo != null ? accountNo : "");
+        loan.setAccountNumber(StringUtils.defaultIfBlank(accountNo, null));
         loan.setExternalId(externalId);
         loan.setClient(client);
         loan.setFund(fund);
@@ -146,7 +144,7 @@ public class WorkingCapitalLoanAssemblerImpl implements WorkingCapitalLoanAssemb
         loan.setProposedPrincipal(principal);
         loan.setApprovedPrincipal(BigDecimal.ZERO);
         final WorkingCapitalLoanBalance balance = WorkingCapitalLoanBalance.createFor(loan);
-        loan.setTotalPaymentVolume(totalPaymentVolume != null ? totalPaymentVolume : BigDecimal.ZERO);
+        loan.setTotalPaymentVolume(totalPaymentVolume);
         loan.setBalance(balance);
         loan.setLoanProductRelatedDetails(loanProductRelatedDetails);
 
@@ -165,11 +163,26 @@ public class WorkingCapitalLoanAssemblerImpl implements WorkingCapitalLoanAssemb
         detail.setPrincipal(fromApiJsonHelper.parameterExists(WorkingCapitalLoanConstants.principalAmountParamName, element)
                 ? fromApiJsonHelper.extractBigDecimalWithLocaleNamed(WorkingCapitalLoanConstants.principalAmountParamName, element)
                 : productDetail.getPrincipal());
-        detail.setPeriodPaymentRate(
-                fromApiJsonHelper.parameterExists(WorkingCapitalLoanProductConstants.periodPaymentRateParamName, element)
-                        ? fromApiJsonHelper.extractBigDecimalNamed(WorkingCapitalLoanProductConstants.periodPaymentRateParamName, element,
-                                new HashSet<>())
-                        : productDetail.getPeriodPaymentRate());
+        detail.setPaymentAmountCalculationStrategy(productDetail.getPaymentAmountCalculationStrategy());
+        if (productDetail.getPaymentAmountCalculationStrategy() != null
+                && productDetail.getPaymentAmountCalculationStrategy().isPaymentAmount()) {
+            detail.setPaymentAmount(requestedOrProductDefault(WorkingCapitalLoanProductConstants.paymentAmountParamName, element,
+                    productDetail.getPaymentAmount()));
+            detail.setPeriodPaymentRate(null);
+            detail.setAnnualEir(null);
+        } else if (productDetail.getPaymentAmountCalculationStrategy() != null
+                && productDetail.getPaymentAmountCalculationStrategy().isAnnualEir()) {
+            detail.setAnnualEir(
+                    requestedOrProductDefault(WorkingCapitalLoanConstants.annualEirParamName, element, productDetail.getAnnualEir()));
+            detail.setPeriodPaymentRate(null);
+            detail.setPaymentAmount(null);
+        } else {
+            detail.setPeriodPaymentRate(fromApiJsonHelper.parameterExists(WorkingCapitalLoanConstants.periodPaymentRateParamName, element)
+                    ? fromApiJsonHelper.extractBigDecimalWithLocaleNamed(WorkingCapitalLoanConstants.periodPaymentRateParamName, element)
+                    : productDetail.getPeriodPaymentRate());
+            detail.setAnnualEir(null);
+            detail.setPaymentAmount(null);
+        }
         detail.setRepaymentEvery(fromApiJsonHelper.parameterExists(WorkingCapitalLoanProductConstants.repaymentEveryParamName, element)
                 ? fromApiJsonHelper.extractIntegerWithLocaleNamed(WorkingCapitalLoanProductConstants.repaymentEveryParamName, element)
                 : productDetail.getRepaymentEvery());
@@ -181,53 +194,80 @@ public class WorkingCapitalLoanAssemblerImpl implements WorkingCapitalLoanAssemb
         detail.setAmortizationType(productDetail.getAmortizationType());
         detail.setNpvDayCount(productDetail.getNpvDayCount());
         detail.setDiscountProposed(fromApiJsonHelper.parameterExists(WorkingCapitalLoanProductConstants.discountParamName, element)
-                ? fromApiJsonHelper.extractBigDecimalNamed(WorkingCapitalLoanProductConstants.discountParamName, element, new HashSet<>())
+                ? fromApiJsonHelper.extractBigDecimalWithLocaleNamed(WorkingCapitalLoanProductConstants.discountParamName, element)
                 : null);
         if (detail.getDiscountProposed() == null && productDetail.getDiscount() != null
                 && productDetail.getDiscount().compareTo(BigDecimal.ZERO) > 0
                 && !product.getConfigurableAttributes().isDiscountDefaultOverridable()) {
             detail.setDiscountProposed(productDetail.getDiscount());
         }
-        final Long breachId = fromApiJsonHelper.parameterExists(WorkingCapitalLoanProductConstants.breachIdParamName, element)
-                ? fromApiJsonHelper.extractLongNamed(WorkingCapitalLoanProductConstants.breachIdParamName, element)
-                : null;
-        if (breachId != null) {
-            detail.setBreach(findBreachById(breachId));
+        // Present (even as null) overrides product; omitted inherits. Matches delinquency bucket and loan update.
+        if (fromApiJsonHelper.parameterExists(WorkingCapitalLoanProductConstants.breachIdParamName, element)) {
+            final Long breachId = fromApiJsonHelper.extractLongNamed(WorkingCapitalLoanProductConstants.breachIdParamName, element);
+            detail.setBreach(breachId != null ? findBreachById(breachId) : null);
         } else {
             detail.setBreach(product.getBreach());
         }
-        final Long nearBreachId = fromApiJsonHelper.parameterExists(WorkingCapitalLoanProductConstants.nearBreachIdParamName, element)
-                ? fromApiJsonHelper.extractLongNamed(WorkingCapitalLoanProductConstants.nearBreachIdParamName, element)
-                : null;
-        if (nearBreachId != null) {
-            detail.setNearBreach(findNearBreachById(nearBreachId));
+        if (fromApiJsonHelper.parameterExists(WorkingCapitalLoanProductConstants.nearBreachIdParamName, element)) {
+            final Long nearBreachId = fromApiJsonHelper.extractLongNamed(WorkingCapitalLoanProductConstants.nearBreachIdParamName, element);
+            detail.setNearBreach(nearBreachId != null ? findNearBreachById(nearBreachId) : null);
         } else {
             detail.setNearBreach(product.getNearBreach());
         }
         detail.setDelinquencyGraceDays(
                 fromApiJsonHelper.parameterExists(WorkingCapitalLoanProductConstants.delinquencyGraceDaysParamName, element)
-                        ? fromApiJsonHelper.extractIntegerNamed(WorkingCapitalLoanProductConstants.delinquencyGraceDaysParamName, element,
-                                new HashSet<>())
+                        ? fromApiJsonHelper.extractIntegerWithLocaleNamed(WorkingCapitalLoanProductConstants.delinquencyGraceDaysParamName,
+                                element)
                         : productDetail.getDelinquencyGraceDays());
-        final String delinquencyStartTypeValue = fromApiJsonHelper
-                .parameterExists(WorkingCapitalLoanProductConstants.delinquencyStartTypeParamName, element)
-                        ? fromApiJsonHelper.extractStringNamed(WorkingCapitalLoanProductConstants.delinquencyStartTypeParamName, element)
-                        : null;
-        if (delinquencyStartTypeValue != null) {
-            detail.setDelinquencyStartType(WorkingCapitalLoanDelinquencyStartType.valueOf(delinquencyStartTypeValue));
+        detail.setBreachGraceDays(fromApiJsonHelper.parameterExists(WorkingCapitalLoanProductConstants.breachGraceDaysParamName, element)
+                ? fromApiJsonHelper.extractIntegerWithLocaleNamed(WorkingCapitalLoanProductConstants.breachGraceDaysParamName, element)
+                : productDetail.getBreachGraceDays());
+        // Present (including null) overrides product; omitted inherits — same contract as parents/grace days.
+        if (fromApiJsonHelper.parameterExists(WorkingCapitalLoanProductConstants.delinquencyStartTypeParamName, element)) {
+            final String delinquencyStartTypeValue = fromApiJsonHelper
+                    .extractStringNamed(WorkingCapitalLoanProductConstants.delinquencyStartTypeParamName, element);
+            detail.setDelinquencyStartType(
+                    delinquencyStartTypeValue != null ? WorkingCapitalLoanDelinquencyStartType.fromString(delinquencyStartTypeValue)
+                            : null);
         } else {
             detail.setDelinquencyStartType(productDetail.getDelinquencyStartType());
+        }
+        if (fromApiJsonHelper.parameterExists(WorkingCapitalLoanProductConstants.breachStartTypeParamName, element)) {
+            final String breachStartTypeValue = fromApiJsonHelper
+                    .extractStringNamed(WorkingCapitalLoanProductConstants.breachStartTypeParamName, element);
+            detail.setBreachStartType(
+                    breachStartTypeValue != null ? WorkingCapitalLoanBreachStartType.fromString(breachStartTypeValue) : null);
+        } else {
+            detail.setBreachStartType(productDetail.getBreachStartType());
         }
 
         if (fromApiJsonHelper.parameterExists(WorkingCapitalLoanProductConstants.delinquencyBucketIdParamName, element)) {
             final Long bucketId = fromApiJsonHelper.extractLongNamed(WorkingCapitalLoanProductConstants.delinquencyBucketIdParamName,
                     element);
-            detail.setDelinquencyBucket(bucketId != null ? delinquencyBucketRepository.findById(bucketId).orElse(null) : null);
+            detail.setDelinquencyBucket(workingCapitalDelinquencyBucketResolver.findWorkingCapitalBucketByIdIfProvided(bucketId));
         } else {
             detail.setDelinquencyBucket(product.getDelinquencyBucket());
         }
+        if (detail.getDelinquencyBucket() == null) {
+            detail.setDelinquencyGraceDays(null);
+            detail.setDelinquencyStartType(null);
+        }
+        if (detail.getBreach() == null) {
+            detail.setBreachGraceDays(null);
+            detail.setBreachStartType(null);
+            detail.setNearBreach(null);
+        }
 
         return detail;
+    }
+
+    /**
+     * The strategy input the request sets, else the product default. An explicit null falls back too, as the validator
+     * resolved it: storing null would leave the loan without the input every later schedule check reads from it.
+     */
+    private BigDecimal requestedOrProductDefault(final String paramName, final JsonElement element, final BigDecimal productDefault) {
+        final BigDecimal requested = fromApiJsonHelper.extractBigDecimalWithLocaleNamed(paramName, element);
+        return requested != null ? requested : productDefault;
     }
 
     private List<WorkingCapitalPaymentAllocationData> copyPaymentAllocationRules(final WorkingCapitalLoan loan, final JsonCommand command,
@@ -276,8 +316,7 @@ public class WorkingCapitalLoanAssemblerImpl implements WorkingCapitalLoanAssemb
             loan.setClient(client);
             changes.put(WorkingCapitalLoanConstants.clientIdParameterName, clientId);
         }
-        if (command.isChangeInLongParameterNamed(WorkingCapitalLoanConstants.productIdParameterName,
-                loan.getLoanProduct() != null ? loan.getLoanProduct().getId() : null)) {
+        if (command.isChangeInLongParameterNamed(WorkingCapitalLoanConstants.productIdParameterName, loan.productId())) {
             final Long productId = fromApiJsonHelper.extractLongNamed(WorkingCapitalLoanConstants.productIdParameterName, element);
             final WorkingCapitalLoanProduct product = loanProductRepository.findById(productId)
                     .orElseThrow(() -> new WorkingCapitalLoanProductNotFoundException(productId));
@@ -293,7 +332,7 @@ public class WorkingCapitalLoanAssemblerImpl implements WorkingCapitalLoanAssemb
         }
         if (command.isChangeInStringParameterNamed(WorkingCapitalLoanConstants.accountNoParameterName, loan.getAccountNumber())) {
             final String accountNo = fromApiJsonHelper.extractStringNamed(WorkingCapitalLoanConstants.accountNoParameterName, element);
-            loan.setAccountNumber(accountNo != null ? accountNo : "");
+            loan.setAccountNumber(accountNo);
             changes.put(WorkingCapitalLoanConstants.accountNoParameterName, loan.getAccountNumber());
         }
         if (command.parameterExists(WorkingCapitalLoanConstants.externalIdParameterName)) {
@@ -308,19 +347,26 @@ public class WorkingCapitalLoanAssemblerImpl implements WorkingCapitalLoanAssemb
                 changes.put(WorkingCapitalLoanConstants.externalIdParameterName, externalIdStr);
             }
         }
-        final BigDecimal currentPrincipal = loan.getBalance() != null ? loan.getBalance().getPrincipalOutstanding() : null;
-        if (command.isChangeInBigDecimalParameterNamed(WorkingCapitalLoanConstants.principalAmountParamName, currentPrincipal)) {
+        final WorkingCapitalLoanProductRelatedDetails detail = loan.getLoanProductRelatedDetails();
+        if (command.isChangeInBigDecimalParameterNamed(WorkingCapitalLoanConstants.principalAmountParamName, loan.getProposedPrincipal())) {
             final BigDecimal principal = fromApiJsonHelper
                     .extractBigDecimalWithLocaleNamed(WorkingCapitalLoanConstants.principalAmountParamName, element);
             loan.setProposedPrincipal(principal);
             loan.setApprovedPrincipal(BigDecimal.ZERO);
+            if (detail != null) {
+                detail.setPrincipal(principal);
+            }
+            // The expected disbursement amount follows the proposed principal until approval overrides it.
+            if (!loan.getDisbursementDetails().isEmpty()) {
+                loan.getDisbursementDetails().getFirst().setExpectedAmount(principal);
+            }
             changes.put(WorkingCapitalLoanConstants.principalAmountParamName, principal);
         }
         final BigDecimal currenttotalPaymentVolumeVolume = loan.getTotalPaymentVolume();
         if (command.isChangeInBigDecimalParameterNamed(WorkingCapitalLoanConstants.totalPaymentVolumeParamName,
                 currenttotalPaymentVolumeVolume)) {
             final BigDecimal totalPaymentVolume = fromApiJsonHelper
-                    .extractBigDecimalNamed(WorkingCapitalLoanConstants.totalPaymentVolumeParamName, element, new HashSet<>());
+                    .extractBigDecimalWithLocaleNamed(WorkingCapitalLoanConstants.totalPaymentVolumeParamName, element);
             loan.setTotalPaymentVolume(totalPaymentVolume);
             changes.put(WorkingCapitalLoanConstants.totalPaymentVolumeParamName, totalPaymentVolume);
         }
@@ -340,23 +386,38 @@ public class WorkingCapitalLoanAssemblerImpl implements WorkingCapitalLoanAssemb
             if (!loan.getDisbursementDetails().isEmpty()) {
                 loan.getDisbursementDetails().getFirst().setExpectedDisbursementDate(expectedDisbursementDate);
             } else if (expectedDisbursementDate != null) {
-                final WorkingCapitalLoanDisbursementDetails detail = new WorkingCapitalLoanDisbursementDetails();
-                detail.setWcLoan(loan);
-                detail.setExpectedDisbursementDate(expectedDisbursementDate);
-                loan.getDisbursementDetails().add(detail);
+                final WorkingCapitalLoanDisbursementDetails disbursementDetail = new WorkingCapitalLoanDisbursementDetails();
+                disbursementDetail.setWcLoan(loan);
+                disbursementDetail.setExpectedDisbursementDate(expectedDisbursementDate);
+                disbursementDetail.setExpectedAmount(loan.getProposedPrincipal());
+                loan.getDisbursementDetails().add(disbursementDetail);
             }
             changes.put(WorkingCapitalLoanConstants.expectedDisbursementDateParameterName, expectedDisbursementDate);
         }
 
-        final WorkingCapitalLoanProductRelatedDetails detail = loan.getLoanProductRelatedDetails();
         if (detail != null) {
             if (fromApiJsonHelper.parameterExists(WorkingCapitalLoanProductConstants.periodPaymentRateParamName, element)
                     && command.isChangeInBigDecimalParameterNamed(WorkingCapitalLoanProductConstants.periodPaymentRateParamName,
                             detail.getPeriodPaymentRate())) {
                 final BigDecimal periodPaymentRate = fromApiJsonHelper
-                        .extractBigDecimalNamed(WorkingCapitalLoanProductConstants.periodPaymentRateParamName, element, new HashSet<>());
+                        .extractBigDecimalWithLocaleNamed(WorkingCapitalLoanProductConstants.periodPaymentRateParamName, element);
                 detail.setPeriodPaymentRate(periodPaymentRate);
                 changes.put(WorkingCapitalLoanProductConstants.periodPaymentRateParamName, periodPaymentRate);
+            }
+            if (fromApiJsonHelper.parameterExists(WorkingCapitalLoanConstants.annualEirParamName, element)
+                    && command.isChangeInBigDecimalParameterNamed(WorkingCapitalLoanConstants.annualEirParamName, detail.getAnnualEir())) {
+                final BigDecimal annualEir = fromApiJsonHelper
+                        .extractBigDecimalWithLocaleNamed(WorkingCapitalLoanConstants.annualEirParamName, element);
+                detail.setAnnualEir(annualEir);
+                changes.put(WorkingCapitalLoanConstants.annualEirParamName, annualEir);
+            }
+            if (fromApiJsonHelper.parameterExists(WorkingCapitalLoanProductConstants.paymentAmountParamName, element)
+                    && command.isChangeInBigDecimalParameterNamed(WorkingCapitalLoanProductConstants.paymentAmountParamName,
+                            detail.getPaymentAmount())) {
+                final BigDecimal paymentAmount = fromApiJsonHelper
+                        .extractBigDecimalWithLocaleNamed(WorkingCapitalLoanProductConstants.paymentAmountParamName, element);
+                detail.setPaymentAmount(paymentAmount);
+                changes.put(WorkingCapitalLoanProductConstants.paymentAmountParamName, paymentAmount);
             }
             if (fromApiJsonHelper.parameterExists(WorkingCapitalLoanProductConstants.repaymentEveryParamName, element)
                     && command.isChangeInIntegerParameterNamed(WorkingCapitalLoanProductConstants.repaymentEveryParamName,
@@ -375,10 +436,11 @@ public class WorkingCapitalLoanAssemblerImpl implements WorkingCapitalLoanAssemb
                 changes.put(WorkingCapitalLoanProductConstants.repaymentFrequencyTypeParamName, type.name());
             }
             if (fromApiJsonHelper.parameterExists(WorkingCapitalLoanProductConstants.discountParamName, element)) {
-                final BigDecimal discount = fromApiJsonHelper.extractBigDecimalNamed(WorkingCapitalLoanProductConstants.discountParamName,
-                        element, new HashSet<>());
+                final BigDecimal discount = fromApiJsonHelper
+                        .extractBigDecimalWithLocaleNamed(WorkingCapitalLoanProductConstants.discountParamName, element);
+                // Compare against the proposed discount: the effective one is only set at disbursement.
                 if (command.isChangeInBigDecimalParameterNamed(WorkingCapitalLoanProductConstants.discountParamName,
-                        detail.getDiscount())) {
+                        detail.getDiscountProposed())) {
                     detail.setDiscountProposed(discount);
                     changes.put(WorkingCapitalLoanProductConstants.discountParamName, discount);
                 }
@@ -389,6 +451,13 @@ public class WorkingCapitalLoanAssemblerImpl implements WorkingCapitalLoanAssemb
                 final Long breachId = fromApiJsonHelper.extractLongNamed(WorkingCapitalLoanProductConstants.breachIdParamName, element);
                 detail.setBreach(breachId != null ? findBreachById(breachId) : null);
                 changes.put(WorkingCapitalLoanProductConstants.breachIdParamName, breachId);
+                if (breachId == null) {
+                    detail.clearBreachSettings(changes);
+                    if (detail.getNearBreach() != null) {
+                        detail.setNearBreach(null);
+                        changes.put(WorkingCapitalLoanProductConstants.nearBreachIdParamName, null);
+                    }
+                }
             }
             final Long existingNearBreachId = detail.getNearBreach() != null ? detail.getNearBreach().getId() : null;
             if (fromApiJsonHelper.parameterExists(WorkingCapitalLoanProductConstants.nearBreachIdParamName, element) && command
@@ -398,14 +467,15 @@ public class WorkingCapitalLoanAssemblerImpl implements WorkingCapitalLoanAssemb
                 detail.setNearBreach(nearBreachId != null ? findNearBreachById(nearBreachId) : null);
                 changes.put(WorkingCapitalLoanProductConstants.nearBreachIdParamName, nearBreachId);
             }
-            if (fromApiJsonHelper.parameterExists(WorkingCapitalLoanProductConstants.delinquencyBucketIdParamName, element)) {
+            final Long existingBucketId = detail.getDelinquencyBucket() != null ? detail.getDelinquencyBucket().getId() : null;
+            if (fromApiJsonHelper.parameterExists(WorkingCapitalLoanProductConstants.delinquencyBucketIdParamName, element) && command
+                    .isChangeInLongParameterNamed(WorkingCapitalLoanProductConstants.delinquencyBucketIdParamName, existingBucketId)) {
                 final Long bucketId = fromApiJsonHelper.extractLongNamed(WorkingCapitalLoanProductConstants.delinquencyBucketIdParamName,
                         element);
-                final DelinquencyBucket bucket = bucketId != null ? delinquencyBucketRepository.findById(bucketId).orElse(null) : null;
-                final Long existingBucketId = detail.getDelinquencyBucket() != null ? detail.getDelinquencyBucket().getId() : null;
-                if (!Objects.equals(bucketId, existingBucketId)) {
-                    detail.setDelinquencyBucket(bucket);
-                    changes.put(WorkingCapitalLoanProductConstants.delinquencyBucketIdParamName, bucketId);
+                detail.setDelinquencyBucket(workingCapitalDelinquencyBucketResolver.findWorkingCapitalBucketByIdIfProvided(bucketId));
+                changes.put(WorkingCapitalLoanProductConstants.delinquencyBucketIdParamName, bucketId);
+                if (bucketId == null) {
+                    detail.clearDelinquencySettings(changes);
                 }
             }
             if (fromApiJsonHelper.parameterExists(WorkingCapitalLoanProductConstants.delinquencyGraceDaysParamName, element)) {
@@ -417,6 +487,15 @@ public class WorkingCapitalLoanAssemblerImpl implements WorkingCapitalLoanAssemb
                     changes.put(WorkingCapitalLoanProductConstants.delinquencyGraceDaysParamName, delinquencyGraceDays);
                 }
             }
+            if (fromApiJsonHelper.parameterExists(WorkingCapitalLoanProductConstants.breachGraceDaysParamName, element)) {
+                final Integer breachGraceDays = fromApiJsonHelper
+                        .extractIntegerWithLocaleNamed(WorkingCapitalLoanProductConstants.breachGraceDaysParamName, element);
+                if (command.isChangeInIntegerParameterNamed(WorkingCapitalLoanProductConstants.breachGraceDaysParamName,
+                        detail.getBreachGraceDays())) {
+                    detail.setBreachGraceDays(breachGraceDays);
+                    changes.put(WorkingCapitalLoanProductConstants.breachGraceDaysParamName, breachGraceDays);
+                }
+            }
             if (fromApiJsonHelper.parameterExists(WorkingCapitalLoanProductConstants.delinquencyStartTypeParamName, element)) {
                 final String existingValue = detail.getDelinquencyStartType() != null ? detail.getDelinquencyStartType().name() : null;
                 if (command.isChangeInStringParameterNamed(WorkingCapitalLoanProductConstants.delinquencyStartTypeParamName,
@@ -425,12 +504,27 @@ public class WorkingCapitalLoanAssemblerImpl implements WorkingCapitalLoanAssemb
                             .extractStringNamed(WorkingCapitalLoanProductConstants.delinquencyStartTypeParamName, element);
                     if (delinquencyStartTypeValue != null) {
                         final WorkingCapitalLoanDelinquencyStartType type = WorkingCapitalLoanDelinquencyStartType
-                                .valueOf(delinquencyStartTypeValue);
+                                .fromString(delinquencyStartTypeValue);
                         detail.setDelinquencyStartType(type);
                         changes.put(WorkingCapitalLoanProductConstants.delinquencyStartTypeParamName, type.getCode());
                     } else {
                         detail.setDelinquencyStartType(null);
                         changes.put(WorkingCapitalLoanProductConstants.delinquencyStartTypeParamName, null);
+                    }
+                }
+            }
+            if (fromApiJsonHelper.parameterExists(WorkingCapitalLoanProductConstants.breachStartTypeParamName, element)) {
+                final String existingValue = detail.getBreachStartType() != null ? detail.getBreachStartType().name() : null;
+                if (command.isChangeInStringParameterNamed(WorkingCapitalLoanProductConstants.breachStartTypeParamName, existingValue)) {
+                    final String breachStartTypeValue = fromApiJsonHelper
+                            .extractStringNamed(WorkingCapitalLoanProductConstants.breachStartTypeParamName, element);
+                    if (breachStartTypeValue != null) {
+                        final WorkingCapitalLoanBreachStartType type = WorkingCapitalLoanBreachStartType.fromString(breachStartTypeValue);
+                        detail.setBreachStartType(type);
+                        changes.put(WorkingCapitalLoanProductConstants.breachStartTypeParamName, type.getCode());
+                    } else {
+                        detail.setBreachStartType(null);
+                        changes.put(WorkingCapitalLoanProductConstants.breachStartTypeParamName, null);
                     }
                 }
             }
@@ -446,19 +540,16 @@ public class WorkingCapitalLoanAssemblerImpl implements WorkingCapitalLoanAssemb
     }
 
     /**
-     * If accountNo was provided in the request, leave it. Otherwise generate via the same infrastructure as Loan
+     * If the loan already has an account number, leave it. Otherwise generate via the same infrastructure as Loan
      * (AccountNumberFormat + AccountNumberGeneratorService for EntityAccountType.WORKING_CAPITAL_LOAN).
      */
     @Override
-    public void accountNumberGeneration(final JsonCommand command, final WorkingCapitalLoan loan) {
-        final JsonElement element = command.parsedJson();
-        final String accountNo = fromApiJsonHelper.extractStringNamed(WorkingCapitalLoanConstants.accountNoParameterName, element);
-        if (!StringUtils.isBlank(accountNo)) {
+    public void accountNumberGeneration(final WorkingCapitalLoan loan) {
+        if (loan.getAccountNumber() != null) {
             return;
         }
         final AccountNumberFormat format = accountNumberFormatLookup.findByAccountType(EntityAccountType.WORKING_CAPITAL_LOAN);
-        final String generated = accountNumberGeneratorService.generate(EntityAccountType.WORKING_CAPITAL_LOAN, loan, format);
-        loan.setAccountNumber(generated);
+        loan.setAccountNumber(accountNumberGeneratorService.generate(EntityAccountType.WORKING_CAPITAL_LOAN, loan, format));
     }
 
     private WorkingCapitalBreach findBreachById(final Long breachId) {

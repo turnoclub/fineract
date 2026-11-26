@@ -44,6 +44,8 @@ public interface LoanApiConstants {
     String chargesParameterName = "charges";
     String loanIdTobeApproved = "loanId";
     String postDatedChecks = "postDatedChecks";
+    String skipDownPaymentFeeParameterName = "skipDownPaymentFee";
+    String downPaymentFeeAmountParameterName = "downPaymentFeeAmount";
 
     String approvedLoanAmountParameterName = "approvedLoanAmount";
     String approvedOnDateParameterName = "approvedOnDate";
@@ -75,6 +77,8 @@ public interface LoanApiConstants {
     String amortizationTypeParameterName = "amortizationType";
     String amortizationTypeOptionsParameterName = "amortizationTypeOptions";
     String repaymentFrequencyTypeParameterName = "repaymentFrequencyType";
+    String FIRST_REPAYMENT_DAY_OF_MONTH = "firstRepaymentDayOfMonth";
+    String SECOND_REPAYMENT_DAY_OF_MONTH = "secondRepaymentDayOfMonth";
     String loanTermFrequencyTypeParameterName = "loanTermFrequencyType";
     String loanTermFrequencyParameterName = "loanTermFrequency";
     String numberOfRepaymentsParameterName = "numberOfRepayments";
@@ -94,6 +98,7 @@ public interface LoanApiConstants {
     String createStandingInstructionAtDisbursementParameterName = "createStandingInstructionAtDisbursement";
     String daysInYearTypeParameterName = "daysInYearType";
     String daysInYearCustomStrategyParameterName = "daysInYearCustomStrategy";
+    String monthEndDueDateStrategyParameterName = "monthEndDueDateStrategy";
     String daysInMonthTypeParameterName = "daysInMonthType";
 
     String MULTIDISBURSE_DETAILS_PARAMNAME = "multiDisburseDetails";
@@ -186,6 +191,8 @@ public interface LoanApiConstants {
     String CAPITALIZED_INCOME_ADJUSTMENT_TRANSACTION_COMMAND = "capitalizedIncomeAdjustment";
     String CONTRACT_TERMINATION_COMMAND = "contractTermination";
     String UNDO_CONTRACT_TERMINATION_COMMAND = "undoContractTermination";
+    String LOAN_WITHDRAWAL_COMMAND = "loanWithdrawal";
+    String UNDO_LOAN_WITHDRAWAL_COMMAND = "undoLoanWithdrawal";
     String BUY_DOWN_FEE_COMMAND = "buyDownFee";
     String BUY_DOWN_FEE_ADJUSTMENT_COMMAND = "buyDownFeeAdjustment";
     String REAGE_COMMAND = "reAge";
@@ -206,6 +213,7 @@ public interface LoanApiConstants {
             LoanTransactionType.GOODWILL_CREDIT, //
             LoanTransactionType.INTEREST_PAYMENT_WAIVER, //
             LoanTransactionType.INTEREST_REFUND, //
+            LoanTransactionType.FEE_REFUND, //
             LoanTransactionType.MERCHANT_ISSUED_REFUND, //
             LoanTransactionType.PAYOUT_REFUND, //
             LoanTransactionType.REPAYMENT //

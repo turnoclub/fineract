@@ -33,6 +33,8 @@ public final class ErrorMessageHelper {
 
     public static final DateTimeFormatter FORMATTER = DateTimeFormatter.ofPattern("dd MMMM yyyy");
     public static final String DATA_INTEGRITY_ISSUE_ENTITY_LINKED_CODE = "error.msg.data.integrity.issue.entity.linked";
+    public static final String WC_LOAN_DUPLICATE_ACCOUNT_NO_CODE = "error.msg.wc.loan.duplicate.accountNo";
+    public static final String WC_LOAN_ACCOUNT_NO_ALREADY_USED_MESSAGE = "Loan with account number is already registered.";
 
     private ErrorMessageHelper() {}
 
@@ -123,8 +125,8 @@ public final class ErrorMessageHelper {
         return "Loan can't be disbursed, disburse amount is exceeding approved principal.";
     }
 
-    public static String loanSubmitDateInFutureFailureMsg() {
-        return "The date on which a loan is submitted cannot be in the future.";
+    public static String disburseWithChargeOutOfRangeFailure() {
+        return "This charge with specified due date cannot be added as the it is not in schedule range.";
     }
 
     public static String loanApproveDateInFutureFailureMsg() {
@@ -171,6 +173,10 @@ public final class ErrorMessageHelper {
                 loanIdStr);
     }
 
+    public static String writeOffBeforeLastTransactionFailure() {
+        return "The date of the writeoff transaction must occur on or after previous transactions.";
+    }
+
     public static String notChargedOffFailure(Long loanId) {
         String loanIdStr = String.valueOf(loanId);
         return String.format("Loan: %s is not charged-off", loanIdStr);
@@ -194,7 +200,7 @@ public final class ErrorMessageHelper {
     }
 
     public static String addCapitalizedIncomeUndoFailureTransactionTypeNonReversal() {
-        return "Only (non-reversed) transactions of type repayment, waiver, accrual, credit balance refund, capitalized income, capitalized income adjustment, buy down fee or buy down fee adjustment can be adjusted.";
+        return "Only (non-reversed) transactions of type repayment, waiver, accrual, credit balance refund, capitalized income, capitalized income adjustment, buy down fee, buy down fee adjustment, chargeback, goodwill credit, payout refund, merchant issued refund, charge adjustment or refund can be adjusted.";
     }
 
     public static String addCapitalizedIncomeUndoFailureAdjustmentExists() {
@@ -497,19 +503,13 @@ public final class ErrorMessageHelper {
                 expected);
     }
 
-    public static String wrongValueInLineInJournalEntries(int line, List<List<List<String>>> actual, List<String> expected) {
-        return wrongValueInLineInJournalEntries(null, line, actual, expected);
+    public static String wrongValueInInJournalEntries(List<List<String>> expected, List<List<String>> actual) {
+        return String.format("%nWrong values in Journal entries." //
+                + "%nActual values are: %n%s %nExpected values are: %n%s", actual, expected);
     }
 
     public static String wrongValueInLineInJournalEntries(String resourceId, int line, List<List<List<String>>> actualList,
             List<String> expected) {
-        String actual = actualList.stream().map(Object::toString).collect(Collectors.joining(System.lineSeparator()));
-        return String.format("%nWrong value in Journal entries of resource %s line %s." //
-                + "%nActual values for the possible transactions in line (with the same date) are: %n%s %nExpected values in line: %n%s",
-                resourceId, line, actual, expected);
-    }
-
-    public static String wrongValueInLineInJournalEntry(String resourceId, int line, List<List<String>> actualList, List<String> expected) {
         String actual = actualList.stream().map(Object::toString).collect(Collectors.joining(System.lineSeparator()));
         return String.format("%nWrong value in Journal entries of resource %s line %s." //
                 + "%nActual values for the possible transactions in line (with the same date) are: %n%s %nExpected values in line: %n%s",
@@ -1025,6 +1025,50 @@ public final class ErrorMessageHelper {
         return "Validation errors: [id] Loan reamortization can only be done once a day. There has already been a reamortization done for today";
     }
 
+    public static String contractTerminationBeforeBusinessDateFailure() {
+        return "[transactionDate] Failed data validation due to: cannot.be.before.business.date.";
+    }
+
+    public static String contractTerminationNotBeforeMaturityDateFailure() {
+        return "[transactionDate] Failed data validation due to: must.be.before.maturity.date.";
+    }
+
+    public static String contractTerminationOnWithdrawnLoanFailure() {
+        return "Contract termination can not be applied, Loan withdrawal has been applied to the loan account.";
+    }
+
+    public static String undoContractTerminationNotAppliedFailure(final Long loanId) {
+        return String.format("Loan: %s is not contract terminated", loanId);
+    }
+
+    public static String loanWithdrawalBeforeLastTransactionDateFailure() {
+        return "[transactionDate] Failed data validation due to: cannot.be.before.last.transaction.date.";
+    }
+
+    public static String loanWithdrawalBeforeChargeSubmittedOnDateFailure() {
+        return "[transactionDate] Failed data validation due to: cannot.be.before.charge.submitted.on.date.";
+    }
+
+    public static String loanWithdrawalNotBeforeMaturityDateFailure() {
+        return "[transactionDate] Failed data validation due to: must.be.before.maturity.date.";
+    }
+
+    public static String loanWithdrawalOnTerminatedLoanFailure() {
+        return "Loan withdrawal can not be applied, Loan Account is already terminated.";
+    }
+
+    public static String loanWithdrawalAlreadyAppliedFailure() {
+        return "Loan withdrawal can not be applied, Loan withdrawal has been applied to the loan account.";
+    }
+
+    public static String undoLoanWithdrawalNotAppliedFailure(final Long loanId) {
+        return String.format("Loan: %s has no loan withdrawal applied", loanId);
+    }
+
+    public static String undoLoanWithdrawalNotLastTransactionFailure(final Long loanId) {
+        return String.format("Loan: %s loan withdrawal cannot be undone. User transaction was found after loan withdrawal!", loanId);
+    }
+
     public static String incorrectExpectedValueInResponse() {
         return "The parameter is not matching to expected.";
     }
@@ -1052,6 +1096,14 @@ public final class ErrorMessageHelper {
 
     public static String paymentAllocationRulesDuplicateFailure() {
         return "The list of provided payment allocation rules must not contain any duplicates";
+    }
+
+    public static String paymentAllocationRulesWithoutDefaultFailure() {
+        return "At least one DEFAULT payment allocation must be provided";
+    }
+
+    public static String invalidTrnTypeDuplicatedForPaymentAllocationFailure() {
+        return "The same transaction type must be provided only once";
     }
 
     public static String workingCapitalLoanProductIdentifiedDoesNotExistFailure(String identifierId) {
@@ -1106,20 +1158,16 @@ public final class ErrorMessageHelper {
         return "Failed data validation due to: override.not.allowed.by.product.";
     }
 
+    public static String overrideDisallowedByProductFailure(String disallowedOverrideSettingName) {
+        return String.format("validation.msg.WORKINGCAPITALLOAN.%s.override.not.allowed.by.product", disallowedOverrideSettingName);
+    }
+
     public static String discountAlreadySetBeforeDisburseFailure() {
         return "Discount was already set before disbursement and cannot be added again";
     }
 
-    public static String discountDiffDateFromDisburseFailure() {
-        return "Failed data validation due to: transaction.date.must.be.equal.disbursement.date.";
-    }
-
     public static String discountAdjustmentExceedFailure() {
         return "Failed data validation due to: cannot.be.more.than.discount.fee.";
-    }
-
-    public static String discountAdjustmentBackdatedFailure() {
-        return "Failed data validation due to: backdated.not.allowed.";
     }
 
     public static String discountAdjustmentBeforeDiscountDateFailure() {
@@ -1136,6 +1184,23 @@ public final class ErrorMessageHelper {
 
     public static String discountAdjustmentNotActiveLoanFailure() {
         return "Failed data validation due to: adjustment.only.allowed.for.active.loan.";
+    }
+
+    public static String discountAdjustmentUndoAlreadyReversedFailure() {
+        return "Failed data validation due to: discount.adjustment.already.reversed.";
+    }
+
+    public static String discountAdjustmentUndoInvalidTypeFailure() {
+        return "Undo is not supported for transaction type";
+    }
+
+    public static String workingCapitalLoanTransactionNotFoundFailure(final long transactionId, final long loanId) {
+        return String.format("Working Capital Loan transaction with identifier %s does not exist for loan with identifier %s.",
+                transactionId, loanId);
+    }
+
+    public static String discountAdjustmentUndoNotActiveLoanFailure() {
+        return "Failed data validation due to: undo.transaction.not.allowed.for.loan.status.";
     }
 
     public static String nearBreachCannotEnableWithoutBreachFailure() {
@@ -1156,5 +1221,25 @@ public final class ErrorMessageHelper {
 
     public static String periodPaymentRateOnNonActiveLoanFailure() {
         return "rate.change.not.allowed.for.non.active.loan";
+    }
+
+    public static String creditBalanceRefundBackdatedForbiddenFailure() {
+        return "Backdated credit balance refund is not allowed";
+    }
+
+    public static String workingCapitalInputValuesCauseUnableCalculateEIrFailure() {
+        return "Please check the input values - unable to calculate a valid EIR.";
+    }
+
+    public static String workingCapitalInputValuesCauseUnableCalculateEIrErrorCodeFailure() {
+        return "validation.msg.WORKINGCAPITALLOAN.principalAmount.unable.to.calculate.valid.eir";
+    }
+
+    public static String workingCapitalInputDiscountExceedsPrincipalFailure() {
+        return "validation.msg.WORKINGCAPITALLOAN.discount.amount.cannot.exceed.principal";
+    }
+
+    public static String workingCapitalPeriodPaymentRateAfterMaturityDateFailure() {
+        return "[effectiveDate] Failed data validation due to: cannot.be.after.maturity.date.";
     }
 }

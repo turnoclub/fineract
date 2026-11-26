@@ -19,8 +19,12 @@
 package org.apache.fineract.portfolio.loanaccount.service;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -28,16 +32,22 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
+import java.math.MathContext;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.List;
 import java.util.stream.Stream;
+import org.apache.fineract.accounting.journalentry.data.AccountingBridgeDataDTO;
 import org.apache.fineract.accounting.journalentry.service.JournalEntryWritePlatformService;
 import org.apache.fineract.infrastructure.configuration.domain.ConfigurationDomainService;
 import org.apache.fineract.infrastructure.core.api.JsonCommand;
+import org.apache.fineract.infrastructure.core.domain.ExternalId;
+import org.apache.fineract.infrastructure.core.serialization.FromJsonHelper;
 import org.apache.fineract.infrastructure.core.service.DateUtils;
-import org.apache.fineract.infrastructure.event.business.domain.loan.transaction.LoanAccrualTransactionCreatedBusinessEvent;
+import org.apache.fineract.infrastructure.core.service.ExternalIdFactory;
 import org.apache.fineract.infrastructure.event.business.service.BusinessEventNotifierService;
 import org.apache.fineract.organisation.monetary.domain.MonetaryCurrency;
 import org.apache.fineract.organisation.monetary.domain.MoneyHelper;
@@ -45,27 +55,33 @@ import org.apache.fineract.portfolio.charge.domain.Charge;
 import org.apache.fineract.portfolio.charge.domain.ChargeCalculationType;
 import org.apache.fineract.portfolio.charge.domain.ChargePaymentMode;
 import org.apache.fineract.portfolio.charge.domain.ChargeRepositoryWrapper;
-import org.apache.fineract.portfolio.loanaccount.data.AccountingBridgeDataDTO;
+import org.apache.fineract.portfolio.charge.domain.ChargeTimeType;
 import org.apache.fineract.portfolio.loanaccount.domain.Loan;
 import org.apache.fineract.portfolio.loanaccount.domain.LoanAccountDomainService;
 import org.apache.fineract.portfolio.loanaccount.domain.LoanAccountService;
 import org.apache.fineract.portfolio.loanaccount.domain.LoanCharge;
 import org.apache.fineract.portfolio.loanaccount.domain.LoanChargeRepository;
+import org.apache.fineract.portfolio.loanaccount.domain.LoanDisbursementDetails;
 import org.apache.fineract.portfolio.loanaccount.domain.LoanLifecycleStateMachine;
+import org.apache.fineract.portfolio.loanaccount.domain.LoanRepaymentScheduleInstallment;
 import org.apache.fineract.portfolio.loanaccount.domain.LoanStatus;
 import org.apache.fineract.portfolio.loanaccount.domain.LoanTransaction;
 import org.apache.fineract.portfolio.loanaccount.domain.LoanTransactionRepository;
 import org.apache.fineract.portfolio.loanaccount.domain.SingleLoanChargeRepaymentScheduleProcessingWrapper;
+import org.apache.fineract.portfolio.loanaccount.loanschedule.data.OverdueLoanScheduleData;
 import org.apache.fineract.portfolio.loanaccount.loanschedule.domain.LoanScheduleType;
 import org.apache.fineract.portfolio.loanaccount.serialization.LoanChargeApiJsonValidator;
 import org.apache.fineract.portfolio.loanaccount.serialization.LoanChargeValidator;
+import org.apache.fineract.portfolio.loanproduct.domain.LoanProduct;
 import org.apache.fineract.portfolio.loanproduct.domain.LoanProductRelatedDetail;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
-import org.mockito.InjectMocks;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.MockedStatic;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -84,7 +100,6 @@ class LoanChargeWritePlatformServiceImplTest {
     private static final LocalDate BUSINESS_DATE_BEFORE = LocalDate.of(2024, 2, 14);
     private static final String CURRENCY_CODE = "USD";
 
-    @InjectMocks
     private LoanChargeWritePlatformServiceImpl loanChargeWritePlatformService;
 
     @Mock
@@ -168,9 +183,47 @@ class LoanChargeWritePlatformServiceImplTest {
     @Mock
     private LoanScheduleService loanScheduleService;
 
+    @Mock
+    private LoanAccrualsProcessingService loanAccrualsProcessingService;
+
+    @Mock
+    private FromJsonHelper fromApiJsonHelper;
+
+    @Mock
+    private LoanChargeReadPlatformService loanChargeReadPlatformService;
+
+    @Mock
+    private LoanUtilService loanUtilService;
+
+    @Mock
+    private ExternalIdFactory externalIdFactory;
+
     @BeforeEach
     void setUp() {
-        when(loanAssembler.assembleFrom(LOAN_ID)).thenReturn(loan);
+        // build the real services around the mocks, as @InjectMocks did for the single class before the split
+        final LoanChargeWriteHelper loanChargeWriteHelper = new LoanChargeWriteHelper(loanChargeRepository, loanUtilService, null,
+                configurationDomainService, loanAccrualsProcessingService, loanChargeValidator, loanScheduleService,
+                reprocessLoanTransactionsService, loanAccountService, loanChargeService);
+        loanChargeWritePlatformService = new LoanChargeWritePlatformServiceImpl(
+                new LoanChargeAddUpdateWritePlatformService(loanChargeApiJsonValidator, loanAssembler, chargeRepository,
+                        businessEventNotifierService, loanTransactionRepository, null, loanAccountDomainService, null, loanUtilService,
+                        loanLifecycleStateMachine, externalIdFactory, loanChargeAssembler, loanAccrualsProcessingService,
+                        loanChargeValidator, loanScheduleService, reprocessLoanTransactionsService, loanChargeService,
+                        loanChargeWriteHelper),
+                new LoanChargeWaiverWritePlatformService(loanChargeApiJsonValidator, loanAssembler, businessEventNotifierService,
+                        loanTransactionRepository, null, loanAccountDomainService, loanUtilService, loanChargeReadPlatformService,
+                        loanLifecycleStateMachine, externalIdFactory, loanAccrualsProcessingService, loanChargeValidator,
+                        loanScheduleService, reprocessLoanTransactionsService, journalEntryPoster, loanChargeWriteHelper),
+                new LoanChargePaymentWritePlatformService(loanChargeApiJsonValidator, loanAssembler, businessEventNotifierService, null,
+                        loanAccountDomainService, null, loanUtilService, loanLifecycleStateMachine, null, fromApiJsonHelper,
+                        externalIdFactory, null, null, null, null, loanChargeValidator, loanScheduleService,
+                        reprocessLoanTransactionsService, loanAccountService, journalEntryPoster, loanChargeWriteHelper),
+                new LoanOverdueChargeWritePlatformService(loanAssembler, chargeRepository, businessEventNotifierService, null,
+                        loanAccountDomainService, loanChargeRepository, null, loanUtilService, loanChargeReadPlatformService,
+                        fromApiJsonHelper, configurationDomainService, loanChargeAssembler, loanAccrualsProcessingService,
+                        loanScheduleService, reprocessLoanTransactionsService, loanAccountService, null, loanChargeWriteHelper));
+
+        when(loanAssembler.assembleFromInUserScope(LOAN_ID)).thenReturn(loan);
         when(chargeRepository.findOneWithNotFoundDetection(anyLong())).thenReturn(chargeDefinition);
         when(chargeDefinition.getChargeTimeType()).thenReturn(SPECIFIED_DUE_DATE);
         when(chargeDefinition.getCurrencyCode()).thenReturn(CURRENCY_CODE);
@@ -224,19 +277,147 @@ class LoanChargeWritePlatformServiceImplTest {
 
             mockedDateUtils.when(DateUtils::getBusinessLocalDate).thenReturn(businessDate);
             mockedDateUtils.when(() -> DateUtils.isBeforeBusinessDate(any(LocalDate.class))).thenReturn(false);
-            mockedMoneyHelper.when(MoneyHelper::getMathContext).thenReturn(java.math.MathContext.DECIMAL64);
-            mockedMoneyHelper.when(MoneyHelper::getRoundingMode).thenReturn(java.math.RoundingMode.HALF_EVEN);
+            mockedMoneyHelper.when(MoneyHelper::getMathContext).thenReturn(MathContext.DECIMAL64);
+            mockedMoneyHelper.when(MoneyHelper::getRoundingMode).thenReturn(RoundingMode.HALF_EVEN);
 
             loanChargeWritePlatformService.addLoanCharge(LOAN_ID, jsonCommand);
         }
 
         if (isAccrualExpected) {
-            verify(loanTransactionRepository, times(1)).saveAndFlush(any(LoanTransaction.class));
-            verify(businessEventNotifierService, times(1)).notifyPostBusinessEvent(any(LoanAccrualTransactionCreatedBusinessEvent.class));
+            verify(loanAccrualsProcessingService, times(1)).postChargeAccrual(loanTransaction);
         } else {
-            verify(loanTransactionRepository, never()).saveAndFlush(any(LoanTransaction.class));
-            verify(businessEventNotifierService, never()).notifyPostBusinessEvent(any(LoanAccrualTransactionCreatedBusinessEvent.class));
+            verify(loanAccrualsProcessingService, never()).postChargeAccrual(any(LoanTransaction.class));
         }
+    }
+
+    @Test
+    @DisplayName("Post-maturity immediate accrual is skipped and the charge is handed to real-time accrual when real-time applies")
+    void shouldDelegateToRealTimeAccrualInsteadOfPostMaturityAccrual_WhenBothApply() {
+        when(configurationDomainService.isImmediateChargeAccrualPostMaturityEnabled()).thenReturn(true);
+        when(loan.getMaturityDate()).thenReturn(MATURITY_DATE);
+        when(loan.isPeriodicAccrualAccountingEnabledOnLoanProduct()).thenReturn(true);
+        when(loanAccrualsProcessingService.isRealTimeChargeAccrualApplicable(loan)).thenReturn(true);
+        when(loanChargeService.createChargeAppliedTransaction(loan, loanCharge, null)).thenReturn(loanTransaction);
+
+        try (MockedStatic<DateUtils> mockedDateUtils = mockStatic(DateUtils.class);
+                MockedStatic<MoneyHelper> mockedMoneyHelper = mockStatic(MoneyHelper.class)) {
+            mockedDateUtils.when(DateUtils::getBusinessLocalDate).thenReturn(BUSINESS_DATE_AFTER);
+            mockedDateUtils.when(() -> DateUtils.isBeforeBusinessDate(any(LocalDate.class))).thenReturn(false);
+            mockedMoneyHelper.when(MoneyHelper::getMathContext).thenReturn(MathContext.DECIMAL64);
+            mockedMoneyHelper.when(MoneyHelper::getRoundingMode).thenReturn(RoundingMode.HALF_EVEN);
+
+            loanChargeWritePlatformService.addLoanCharge(LOAN_ID, jsonCommand);
+        }
+
+        verify(loanChargeService, never()).createChargeAppliedTransaction(any(Loan.class), any(LoanCharge.class), any());
+        verify(loanAccrualsProcessingService, never()).postChargeAccrual(any(LoanTransaction.class));
+        verify(loanAccrualsProcessingService, times(1)).processRealTimeChargeAccruals(loan, List.of(loanCharge));
+    }
+
+    @Test
+    @DisplayName("Post-maturity immediate accrual posts the charge accrual itself when real-time accrual does not apply")
+    void shouldPostImmediatePostMaturityAccrual_WhenRealTimeAccrualIsNotApplicable() {
+        when(configurationDomainService.isImmediateChargeAccrualPostMaturityEnabled()).thenReturn(true);
+        when(loan.getMaturityDate()).thenReturn(MATURITY_DATE);
+        when(loan.isPeriodicAccrualAccountingEnabledOnLoanProduct()).thenReturn(true);
+        when(loanAccrualsProcessingService.isRealTimeChargeAccrualApplicable(loan)).thenReturn(false);
+        when(loanChargeService.createChargeAppliedTransaction(loan, loanCharge, null)).thenReturn(loanTransaction);
+
+        try (MockedStatic<DateUtils> mockedDateUtils = mockStatic(DateUtils.class);
+                MockedStatic<MoneyHelper> mockedMoneyHelper = mockStatic(MoneyHelper.class)) {
+            mockedDateUtils.when(DateUtils::getBusinessLocalDate).thenReturn(BUSINESS_DATE_AFTER);
+            mockedDateUtils.when(() -> DateUtils.isBeforeBusinessDate(any(LocalDate.class))).thenReturn(false);
+            mockedMoneyHelper.when(MoneyHelper::getMathContext).thenReturn(MathContext.DECIMAL64);
+            mockedMoneyHelper.when(MoneyHelper::getRoundingMode).thenReturn(RoundingMode.HALF_EVEN);
+
+            loanChargeWritePlatformService.addLoanCharge(LOAN_ID, jsonCommand);
+        }
+
+        InOrder inOrder = inOrder(loanChargeService, loanAccrualsProcessingService);
+        inOrder.verify(loanChargeService).createChargeAppliedTransaction(loan, loanCharge, null);
+        inOrder.verify(loanAccrualsProcessingService).postChargeAccrual(loanTransaction);
+    }
+
+    @Test
+    @DisplayName("Applying an overdue penalty hands the applied penalty to real-time accrual after the loan is reprocessed")
+    void shouldHandAppliedOverduePenaltiesToRealTimeAccrualAfterReprocessing() {
+        // the overdue charge job loads the loan without the user's office scope
+        when(loanAssembler.assembleFrom(LOAN_ID)).thenReturn(loan);
+        LocalDate overdueDueDate = LocalDate.of(2024, 1, 15);
+        LoanProduct loanProduct = mock(LoanProduct.class);
+        when(loan.getLoanProduct()).thenReturn(loanProduct);
+        when(loanProduct.getCharges()).thenReturn(List.of(chargeDefinition));
+        when(chargeDefinition.getChargeTimeType()).thenReturn(ChargeTimeType.OVERDUE_INSTALLMENT.getValue());
+        when(chargeDefinition.isLoanCharge()).thenReturn(true);
+        when(chargeDefinition.feeFrequency()).thenReturn(null);
+        when(loan.isProgressiveSchedule()).thenReturn(true);
+        LoanRepaymentScheduleInstallment overdueInstallment = mock(LoanRepaymentScheduleInstallment.class);
+        when(overdueInstallment.getDueDate()).thenReturn(overdueDueDate);
+        when(loan.fetchRepaymentScheduleInstallment(anyInt())).thenReturn(overdueInstallment);
+        when(fromApiJsonHelper.extractLocalDateNamed(eq("dueDate"), any())).thenReturn(overdueDueDate);
+        LoanCharge penalty = mock(LoanCharge.class);
+        when(penalty.amount()).thenReturn(BigDecimal.TEN);
+        when(penalty.getChargePaymentMode()).thenReturn(ChargePaymentMode.REGULAR);
+        when(loanChargeAssembler.createNewFromJson(eq(loan), eq(chargeDefinition), any(JsonCommand.class), eq(overdueDueDate)))
+                .thenReturn(penalty);
+        OverdueLoanScheduleData overdueInstallmentData = new OverdueLoanScheduleData(LOAN_ID, 1L, "15 January 2024", BigDecimal.TEN,
+                "dd MMMM yyyy", "en", BigDecimal.TEN, BigDecimal.ZERO, 1);
+
+        try (MockedStatic<DateUtils> mockedDateUtils = mockStatic(DateUtils.class)) {
+            mockedDateUtils.when(DateUtils::getBusinessLocalDate).thenReturn(BUSINESS_DATE_AFTER);
+
+            loanChargeWritePlatformService.applyOverdueChargesForLoan(LOAN_ID, List.of(overdueInstallmentData));
+        }
+
+        InOrder inOrder = inOrder(reprocessLoanTransactionsService, loanAccountService, loanAccrualsProcessingService);
+        inOrder.verify(reprocessLoanTransactionsService).reprocessTransactions(loan);
+        inOrder.verify(loanAccountService).saveAndFlushLoanWithDataIntegrityViolationChecks(loan);
+        inOrder.verify(loanAccrualsProcessingService).processRealTimeChargeAccruals(loan, List.of(penalty));
+        verify(loanAccrualsProcessingService, never()).postChargeAccrual(any(LoanTransaction.class));
+    }
+
+    @Test
+    @DisplayName("Adding a percentage-of-disbursement charge hands every created tranche charge to real-time accrual")
+    void shouldHandAllTrancheChargesToRealTimeAccrual_WhenChargeIsPercentageOfDisbursement() {
+        LoanDisbursementDetails firstTranche = pendingTranche(LocalDate.of(2024, 3, 1));
+        LoanDisbursementDetails secondTranche = pendingTranche(LocalDate.of(2024, 4, 1));
+        when(loan.getDisbursementDetails()).thenReturn(List.of(firstTranche, secondTranche));
+        when(chargeDefinition.isPercentageOfDisbursementAmount()).thenReturn(true);
+        when(externalIdFactory.createFromCommand(jsonCommand, "externalId")).thenReturn(ExternalId.empty());
+        when(externalIdFactory.create()).thenReturn(ExternalId.empty());
+        LoanCharge firstTrancheCharge = trancheCharge(firstTranche);
+        LoanCharge secondTrancheCharge = trancheCharge(secondTranche);
+        when(loanChargeRepository.saveAndFlush(firstTrancheCharge)).thenReturn(firstTrancheCharge);
+        when(loanChargeRepository.saveAndFlush(secondTrancheCharge)).thenReturn(secondTrancheCharge);
+
+        try (MockedStatic<DateUtils> mockedDateUtils = mockStatic(DateUtils.class)) {
+            mockedDateUtils.when(DateUtils::getBusinessLocalDate).thenReturn(BUSINESS_DATE_BEFORE);
+            mockedDateUtils.when(() -> DateUtils.isBeforeBusinessDate(any(LocalDate.class))).thenReturn(false);
+
+            loanChargeWritePlatformService.addLoanCharge(LOAN_ID, jsonCommand);
+        }
+
+        verify(loanAccrualsProcessingService, times(1)).processRealTimeChargeAccruals(loan,
+                List.of(firstTrancheCharge, secondTrancheCharge));
+    }
+
+    private static LoanDisbursementDetails pendingTranche(final LocalDate expectedDisbursementDate) {
+        LoanDisbursementDetails tranche = mock(LoanDisbursementDetails.class);
+        when(tranche.actualDisbursementDate()).thenReturn(null);
+        when(tranche.expectedDisbursementDateAsLocalDate()).thenReturn(expectedDisbursementDate);
+        when(tranche.getPrincipal()).thenReturn(BigDecimal.valueOf(500));
+        return tranche;
+    }
+
+    private LoanCharge trancheCharge(final LoanDisbursementDetails tranche) {
+        LocalDate dueDate = tranche.expectedDisbursementDateAsLocalDate();
+        LoanCharge trancheCharge = mock(LoanCharge.class);
+        when(trancheCharge.getChargePaymentMode()).thenReturn(ChargePaymentMode.REGULAR);
+        when(trancheCharge.getDueLocalDate()).thenReturn(dueDate);
+        when(trancheCharge.getEffectiveDueDate()).thenReturn(dueDate);
+        when(loanChargeAssembler.createNewWithoutLoan(eq(chargeDefinition), eq(BigDecimal.valueOf(500)), any(), any(), any(), eq(dueDate),
+                any(), any(), any(ExternalId.class))).thenReturn(trancheCharge);
+        return trancheCharge;
     }
 
     private static Stream<Arguments> loanChargeAccrualTestCases() {

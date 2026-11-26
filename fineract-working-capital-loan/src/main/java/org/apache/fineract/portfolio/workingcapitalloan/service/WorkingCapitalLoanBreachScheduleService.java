@@ -21,23 +21,59 @@ package org.apache.fineract.portfolio.workingcapitalloan.service;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
+import org.apache.fineract.portfolio.loanaccount.domain.LoanStatus;
 import org.apache.fineract.portfolio.workingcapitalloan.data.WorkingCapitalLoanBreachScheduleData;
 import org.apache.fineract.portfolio.workingcapitalloan.domain.WorkingCapitalLoan;
+import org.apache.fineract.portfolio.workingcapitalloan.domain.WorkingCapitalLoanBreachAction;
 import org.apache.fineract.portfolio.workingcapitalloan.domain.WorkingCapitalLoanBreachSchedule;
 
 public interface WorkingCapitalLoanBreachScheduleService {
 
-    void generateInitialPeriod(WorkingCapitalLoan loan);
+    boolean generateInitialPeriod(WorkingCapitalLoan loan);
 
-    void generateNextPeriodIfNeeded(WorkingCapitalLoan loan, LocalDate businessDate);
+    boolean generateNextPeriodIfNeeded(WorkingCapitalLoan loan, LocalDate businessDate);
 
     boolean hasSchedule(Long loanId);
+
+    /**
+     * Removes every breach schedule period of the loan together with the breach and near breach actions recorded
+     * against it, so the next disbursement generates the schedule again from the loan's current breach configuration
+     * alone.
+     */
+    void deleteScheduleAndActions(Long loanId);
 
     List<WorkingCapitalLoanBreachScheduleData> retrieveBreachSchedule(Long loanId);
 
     boolean evaluateBreachOnDate(WorkingCapitalLoanBreachSchedule period, LocalDate businessDate);
 
-    void applyRepayment(Long loanId, LocalDate transactionDate, BigDecimal amount);
+    void applyRepayment(WorkingCapitalLoan loan, LocalDate transactionDate, BigDecimal amount);
 
-    void evaluateBreach(WorkingCapitalLoan loan, LocalDate businessDate);
+    void applyRepaymentUndo(WorkingCapitalLoan loan, LocalDate transactionDate, BigDecimal amount);
+
+    boolean evaluateBreach(WorkingCapitalLoan loan, LocalDate businessDate);
+
+    /**
+     * Replays the recorded breach actions over the schedule after {@code action} was recorded, re-dating the periods it
+     * reaches and rewriting their demand.
+     */
+    void replayForBreachAction(WorkingCapitalLoan loan, WorkingCapitalLoanBreachAction action);
+
+    void recalculateMinimumPayment(WorkingCapitalLoan loan);
+
+    void recalculatePastDueAmount(WorkingCapitalLoan loan);
+
+    /** Derives the reset flags from the persisted breach actions, so a new RESET or UNDO_RESET must be saved first. */
+    void applyActiveResetFlags(WorkingCapitalLoan loan);
+
+    void reprocessBreachSchedule(WorkingCapitalLoan loan);
+
+    void splitPeriodAtResetAndReprocess(WorkingCapitalLoan loan, LocalDate resetDate);
+
+    void restoreSplitPeriodAndReprocess(WorkingCapitalLoan loan, WorkingCapitalLoanBreachAction undoneReset);
+
+    /**
+     * Re-derives the near breach of the open period when the loan has just been reopened from {@code statusBefore}: the
+     * near breach is not evaluated while a loan is closed, so it would otherwise stay stale until the next COB.
+     */
+    void rederiveNearBreachIfReopened(WorkingCapitalLoan loan, LoanStatus statusBefore);
 }

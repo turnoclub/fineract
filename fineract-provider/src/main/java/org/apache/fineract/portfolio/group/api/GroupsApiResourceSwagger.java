@@ -19,7 +19,10 @@
 package org.apache.fineract.portfolio.group.api;
 
 import io.swagger.v3.oas.annotations.media.Schema;
+import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -136,8 +139,12 @@ final class GroupsApiResourceSwagger {
 
             @Schema(example = "4")
             public Long id;
+            @Schema(example = "000000004")
+            public String accountNo;
             @Schema(example = "AnotherGroup")
             public String name;
+            @Schema(example = "000-1A")
+            public String externalId;
             public GetGroupsStatus status;
             @Schema(example = "false")
             public Boolean active;
@@ -173,12 +180,28 @@ final class GroupsApiResourceSwagger {
             public String activatedByLastname;
         }
 
+        static final class GetGroupsGroupIdClientMembers {
+
+            private GetGroupsGroupIdClientMembers() {}
+
+            @Schema(example = "1")
+            public Long id;
+            @Schema(example = "Sangamesh MB")
+            public String displayName;
+        }
+
         @Schema(example = "1")
         public Long id;
+        @Schema(example = "000000001")
+        public String accountNo;
         @Schema(example = "First Group")
         public String name;
         @Schema(example = "000-1A")
         public String externalId;
+        @Schema(example = "true")
+        public Boolean active;
+        @Schema(example = "1")
+        public Long staffId;
         @Schema(example = "1")
         public Long officeId;
         @Schema(example = "Head Office")
@@ -186,6 +209,8 @@ final class GroupsApiResourceSwagger {
         @Schema(example = ".1.")
         public String hierarchy;
         public GetGroupsGroupIdTimeline timeline;
+        @Schema(description = "Returned when the clientMembers association is requested")
+        public Set<GetGroupsGroupIdClientMembers> clientMembers;
     }
 
     @Schema(description = "PostGroupsRequest")
@@ -193,31 +218,40 @@ final class GroupsApiResourceSwagger {
 
         private PostGroupsRequest() {}
 
+        static final class PostGroupsDatatable {
+
+            private PostGroupsDatatable() {}
+
+            @Schema(example = "dt_registered_table")
+            public String registeredTableName;
+            @Schema(description = "The datatable columns and their values")
+            public Map<String, Object> data;
+        }
+
         @Schema(example = "1")
         public Long officeId;
         @Schema(example = "Pending Group")
         public String name;
         @Schema(example = "false")
         public Boolean active;
+        @Schema(example = "externalId1")
+        public String externalId;
+        @Schema(example = "dd MMMM yyyy")
+        public String dateFormat;
+        @Schema(example = "en")
+        public String locale;
+        @Schema(example = "04 March 2011")
+        public String activationDate;
+        @Schema(example = "04 March 2011")
+        public String submittedOnDate;
+        @Schema(description = "Entries for the datatables registered against this entity")
+        public List<PostGroupsDatatable> datatables;
     }
 
     @Schema(description = "PostGroupsResponse")
     public static final class PostGroupsResponse {
 
         private PostGroupsResponse() {}
-
-        @Schema(example = "1")
-        public Long officeId;
-        @Schema(example = "2")
-        public Long groupId;
-        @Schema(example = "2")
-        public Long resourceId;
-    }
-
-    @Schema(description = "DeleteGroupsGroupIdResponse")
-    public static final class DeleteGroupsGroupIdResponse {
-
-        private DeleteGroupsGroupIdResponse() {}
 
         @Schema(example = "1")
         public Long officeId;
@@ -253,37 +287,6 @@ final class GroupsApiResourceSwagger {
         @Schema(example = "1")
         public Long resourceId;
         public PostGroupsGroupIdCommandUnassignStaffChanges changes;
-    }
-
-    @Schema(description = "PutGroupsGroupIdRequest")
-    public static final class PutGroupsGroupIdRequest {
-
-        private PutGroupsGroupIdRequest() {}
-
-        @Schema(example = "First Group (changed)")
-        public String name;
-    }
-
-    @Schema(description = "PutGroupsGroupIdResponse")
-    public static final class PutGroupsGroupIdResponse {
-
-        private PutGroupsGroupIdResponse() {}
-
-        static final class PutGroupsGroupIdChanges {
-
-            private PutGroupsGroupIdChanges() {}
-
-            @Schema(example = "First Group (changed)")
-            public String name;
-        }
-
-        @Schema(example = "1")
-        public Long officeId;
-        @Schema(example = "1")
-        public Long groupId;
-        @Schema(example = "1")
-        public Long resourceId;
-        public PutGroupsGroupIdChanges changes;
     }
 
     @Schema(description = "GetGroupsGroupIdAccountsResponse")
@@ -521,6 +524,18 @@ final class GroupsApiResourceSwagger {
         @Schema(example = "2")
         public Long destinationGroupId;
         public Set<PostGroupsGroupIdClients> clients;
+        @Schema(example = "dd MMMM yyyy")
+        public String dateFormat;
+        @Schema(example = "en")
+        public String locale;
+        @Schema(example = "04 March 2011")
+        public String activationDate;
+        @Schema(example = "1")
+        public Long staffId;
+        @Schema(example = "false")
+        public Boolean inheritStaffForClientAccounts;
+        @Schema(description = "List of client ids to associate with or disassociate from the group")
+        public List<Long> clientMembers;
     }
 
     @Schema(description = "PostGroupsGroupIdResponse")
@@ -528,7 +543,40 @@ final class GroupsApiResourceSwagger {
 
         private PostGroupsGroupIdResponse() {}
 
+        static final class PostGroupsGroupIdChanges {
+
+            private PostGroupsGroupIdChanges() {}
+
+            @Schema(example = "1")
+            public Long staffId;
+            @Schema(description = "Ids of the clients associated or disassociated by the command")
+            public List<String> clientMembers;
+        }
+
+        @Schema(example = "1")
+        public Long officeId;
+        @Schema(example = "1")
+        public Long groupId;
         @Schema(example = "1")
         public Long resourceId;
+        public PostGroupsGroupIdChanges changes;
+    }
+
+    @Schema(description = "GetGroupsGroupIdGsimAccountsResponse")
+    public static final class GetGroupsGroupIdGsimAccountsResponse {
+
+        private GetGroupsGroupIdGsimAccountsResponse() {}
+
+        static final class GetGroupsGsimChildAccount {
+
+            private GetGroupsGsimChildAccount() {}
+
+            @Schema(example = "1")
+            public Long id;
+        }
+
+        @Schema(example = "1")
+        public BigDecimal gsimId;
+        public List<GetGroupsGsimChildAccount> childGSIMAccounts;
     }
 }

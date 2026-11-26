@@ -19,70 +19,35 @@
 package org.apache.fineract.portfolio.loanaccount.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.HashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
-import org.apache.fineract.commands.service.CommandProcessingService;
 import org.apache.fineract.infrastructure.businessdate.domain.BusinessDateType;
 import org.apache.fineract.infrastructure.configuration.domain.ConfigurationDomainService;
 import org.apache.fineract.infrastructure.core.api.JsonCommand;
 import org.apache.fineract.infrastructure.core.data.CommandProcessingResult;
-import org.apache.fineract.infrastructure.core.domain.ExternalId;
-import org.apache.fineract.infrastructure.core.domain.FineractPlatformTenant;
-import org.apache.fineract.infrastructure.core.exception.GeneralPlatformDomainRuleException;
 import org.apache.fineract.infrastructure.core.service.DateUtils;
-import org.apache.fineract.infrastructure.core.service.ExternalIdFactory;
 import org.apache.fineract.infrastructure.core.service.ThreadLocalContextUtil;
-import org.apache.fineract.infrastructure.event.business.service.BusinessEventNotifierService;
-import org.apache.fineract.infrastructure.security.service.PlatformSecurityContext;
-import org.apache.fineract.organisation.monetary.data.CurrencyData;
-import org.apache.fineract.organisation.monetary.domain.MonetaryCurrency;
-import org.apache.fineract.organisation.monetary.domain.Money;
-import org.apache.fineract.organisation.monetary.domain.MoneyHelper;
-import org.apache.fineract.portfolio.account.data.PortfolioAccountData;
-import org.apache.fineract.portfolio.account.service.AccountAssociationsReadPlatformService;
-import org.apache.fineract.portfolio.account.service.AccountTransfersWritePlatformService;
-import org.apache.fineract.portfolio.charge.domain.ChargePaymentMode;
-import org.apache.fineract.portfolio.client.domain.Client;
+import org.apache.fineract.organisation.office.domain.Office;
+import org.apache.fineract.organisation.staff.domain.Staff;
+import org.apache.fineract.portfolio.calendar.domain.Calendar;
 import org.apache.fineract.portfolio.loanaccount.domain.Loan;
 import org.apache.fineract.portfolio.loanaccount.domain.LoanAccountDomainService;
-import org.apache.fineract.portfolio.loanaccount.domain.LoanBuilder;
-import org.apache.fineract.portfolio.loanaccount.domain.LoanCharge;
-import org.apache.fineract.portfolio.loanaccount.domain.LoanLifecycleStateMachine;
-import org.apache.fineract.portfolio.loanaccount.domain.LoanRepaymentScheduleInstallment;
-import org.apache.fineract.portfolio.loanaccount.domain.LoanRepaymentScheduleInstallmentRepository;
-import org.apache.fineract.portfolio.loanaccount.domain.LoanRepository;
-import org.apache.fineract.portfolio.loanaccount.domain.LoanRepositoryWrapper;
-import org.apache.fineract.portfolio.loanaccount.domain.LoanStatus;
-import org.apache.fineract.portfolio.loanaccount.domain.LoanSummary;
 import org.apache.fineract.portfolio.loanaccount.domain.LoanTransaction;
-import org.apache.fineract.portfolio.loanaccount.domain.LoanTransactionRepository;
+import org.apache.fineract.portfolio.loanaccount.domain.LoanTransactionType;
 import org.apache.fineract.portfolio.loanaccount.serialization.LoanTransactionValidator;
-import org.apache.fineract.portfolio.loanproduct.domain.LoanProduct;
-import org.apache.fineract.portfolio.loanproduct.domain.LoanProductRelatedDetail;
 import org.apache.fineract.portfolio.paymentdetail.service.PaymentDetailWritePlatformService;
-import org.apache.fineract.useradministration.domain.AppUser;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.mockito.junit.jupiter.MockitoSettings;
-import org.mockito.quality.Strictness;
-import org.springframework.context.ApplicationContext;
 
 @ExtendWith(MockitoExtension.class)
 public class LoanWritePlatformServiceJpaRepositoryImplTest {
@@ -91,390 +56,396 @@ public class LoanWritePlatformServiceJpaRepositoryImplTest {
     private LoanAssembler loanAssembler;
 
     @Mock
-    private LoanRepository loanRepository;
-
-    @Mock
-    private LoanTransactionRepository loanTransactionRepository;
-
-    @Mock
-    private ApplicationContext applicationContext;
-
-    @Mock
-    private CommandProcessingService commandProcessingService;
-
-    @Mock
-    private ExternalIdFactory externalIdFactory;
-
-    @Mock
-    private PlatformSecurityContext context;
-
-    @Mock
     private LoanTransactionValidator loanTransactionValidator;
-
-    @Mock
-    private BusinessEventNotifierService businessEventNotifierService;
-
-    @Mock
-    private ReprocessLoanTransactionsService reprocessLoanTransactionsService;
-
-    @Mock
-    private LoanRepaymentScheduleInstallmentRepository loanRepaymentScheduleInstallmentRepository;
-
-    @Mock
-    private LoanRepositoryWrapper loanRepositoryWrapper;
-
-    @Mock
-    private LoanJournalEntryPoster journalEntryPoster;
-
-    @Mock
-    private LoanAccrualTransactionBusinessEventService loanAccrualTransactionBusinessEventService;
-
-    @Mock
-    private LoanBalanceService loanBalanceService;
-
-    @Mock
-    private AccountTransfersWritePlatformService accountTransfersWritePlatformService;
-
-    @Mock
-    private AccountAssociationsReadPlatformService accountAssociationsReadPlatformService;
-
-    @Mock
-    private LoanDisbursementService loanDisbursementService;
 
     @Mock
     private ConfigurationDomainService configurationDomainService;
 
     @Mock
-    private LoanUtilService loanUtilService;
-
-    @Mock
     private LoanAccountDomainService loanAccountDomainService;
-
-    @Mock
-    private LoanAccrualsProcessingService loanAccrualsProcessingService;
 
     @Mock
     private PaymentDetailWritePlatformService paymentDetailWritePlatformService;
 
     @Mock
-    private LoanLifecycleStateMachine loanLifecycleStateMachine;
+    private LoanTransactionWritePlatformService loanTransactionWritePlatformService;
 
     @Mock
-    private LoanScheduleService loanScheduleService;
+    private LoanClosureWritePlatformService loanClosureWritePlatformService;
+
+    @Mock
+    private LoanTransferWritePlatformService loanTransferWritePlatformService;
+
+    @Mock
+    private LoanScheduleMaintenanceWritePlatformService loanScheduleMaintenanceWritePlatformService;
 
     @InjectMocks
     private LoanWritePlatformServiceJpaRepositoryImpl loanWritePlatformService;
 
-    private Loan loan;
-    private AppUser appUser;
+    @Mock
     private JsonCommand command;
     private static final Long LOAN_ID = 1L;
 
     @BeforeEach
     public void setUp() {
-        appUser = mock(AppUser.class);
-
         ThreadLocalContextUtil
                 .setBusinessDates(new HashMap<>(Map.of(BusinessDateType.BUSINESS_DATE, DateUtils.parseLocalDate("2025-05-20"))));
-
-        when(context.getAuthenticatedUserIfPresent()).thenReturn(appUser);
-    }
-
-    private void setupMoneyHelper() {
-        // Set up a test tenant context
-        FineractPlatformTenant tenant = new FineractPlatformTenant(1L, "test", "Test Tenant", "Asia/Kolkata", null);
-        ThreadLocalContextUtil.setTenant(tenant);
-
-        // Initialize MoneyHelper with tenant configuration (HALF_EVEN = 6)
-        MoneyHelper.initializeTenantRoundingMode("test", 6);
     }
 
     @Test
-    public void chargeOff_withInactiveLoan_expectException() {
-        LoanProductRelatedDetail loanProductDetail = mock(LoanProductRelatedDetail.class);
+    public void makeGLIMLoanRepayment_shouldDelegateToLoanTransactionWritePlatformService() {
+        CommandProcessingResult expectedResult = mock(CommandProcessingResult.class);
+        when(loanTransactionWritePlatformService.makeGLIMLoanRepayment(LOAN_ID, command)).thenReturn(expectedResult);
 
-        LoanProduct loanProduct = mock(LoanProduct.class);
-        when(loanProduct.getLoanProductRelatedDetail()).thenReturn(loanProductDetail);
-        loan = new LoanBuilder(loanProduct).withId(LOAN_ID).build();
+        CommandProcessingResult actualResult = loanWritePlatformService.makeGLIMLoanRepayment(LOAN_ID, command);
 
-        when(loanAssembler.assembleFrom(anyLong())).thenReturn(loan);
-
-        command = mock(JsonCommand.class);
-
-        GeneralPlatformDomainRuleException exception = assertThrows(GeneralPlatformDomainRuleException.class,
-                () -> loanWritePlatformService.chargeOff(command));
-
-        assertEquals("Loan: 1 Charge-off is not allowed. Loan Account is not Active", exception.getMessage());
+        assertEquals(expectedResult, actualResult);
+        verify(loanTransactionWritePlatformService).makeGLIMLoanRepayment(LOAN_ID, command);
     }
 
     @Test
-    public void chargeOff_withChargedOffLoan_expectException() {
-        LoanProductRelatedDetail loanProductDetail = mock(LoanProductRelatedDetail.class);
+    public void makeLoanRepayment_shouldDelegateToLoanTransactionWritePlatformService() {
+        CommandProcessingResult expectedResult = mock(CommandProcessingResult.class);
+        when(loanTransactionWritePlatformService.makeLoanRepayment(LoanTransactionType.REPAYMENT, LOAN_ID, command, false))
+                .thenReturn(expectedResult);
 
-        LoanProduct loanProduct = mock(LoanProduct.class);
-        when(loanProduct.getLoanProductRelatedDetail()).thenReturn(loanProductDetail);
-        loan = new LoanBuilder(loanProduct).withId(LOAN_ID).withLoanStatus(LoanStatus.ACTIVE).withChargedOff(true).build();
+        CommandProcessingResult actualResult = loanWritePlatformService.makeLoanRepayment(LoanTransactionType.REPAYMENT, LOAN_ID, command,
+                false);
 
-        when(loanAssembler.assembleFrom(anyLong())).thenReturn(loan);
-
-        command = mock(JsonCommand.class);
-
-        GeneralPlatformDomainRuleException exception = assertThrows(GeneralPlatformDomainRuleException.class,
-                () -> loanWritePlatformService.chargeOff(command));
-
-        assertEquals("Loan: 1 is already charged-off", exception.getMessage());
+        assertEquals(expectedResult, actualResult);
+        verify(loanTransactionWritePlatformService).makeLoanRepayment(LoanTransactionType.REPAYMENT, LOAN_ID, command, false);
     }
 
     @Test
-    public void chargeOff_transactionBeforeLast_expectException() {
-        setupMoneyHelper();
-        LoanProductRelatedDetail loanProductDetail = mock(LoanProductRelatedDetail.class);
+    public void makeLoanRepaymentWithChargeRefundChargeType_shouldDelegateToLoanTransactionWritePlatformService() {
+        CommandProcessingResult expectedResult = mock(CommandProcessingResult.class);
+        when(loanTransactionWritePlatformService.makeLoanRepaymentWithChargeRefundChargeType(LoanTransactionType.REPAYMENT, LOAN_ID,
+                command, false, "chargeType")).thenReturn(expectedResult);
 
-        LoanProduct loanProduct = mock(LoanProduct.class);
-        when(loanProduct.getLoanProductRelatedDetail()).thenReturn(loanProductDetail);
+        CommandProcessingResult actualResult = loanWritePlatformService
+                .makeLoanRepaymentWithChargeRefundChargeType(LoanTransactionType.REPAYMENT, LOAN_ID, command, false, "chargeType");
 
-        LoanTransaction t1 = LoanTransaction.repayment(null, Money.of(CurrencyData.blank(), BigDecimal.valueOf(100)), null,
-                DateUtils.parseLocalDate("2025-05-15"), null);
-
-        loan = new LoanBuilder(loanProduct).withId(LOAN_ID).withLoanStatus(LoanStatus.ACTIVE).withLoanTransactions(List.of(t1)).build();
-
-        when(loanAssembler.assembleFrom(anyLong())).thenReturn(loan);
-
-        command = mock(JsonCommand.class);
-        when(command.localDateValueOfParameterNamed("transactionDate")).thenReturn(DateUtils.parseLocalDate("2025-05-14"));
-
-        GeneralPlatformDomainRuleException exception = assertThrows(GeneralPlatformDomainRuleException.class,
-                () -> loanWritePlatformService.chargeOff(command));
-
-        assertEquals("Loan: 1 charge-off cannot be executed. User transaction was found after the charge-off transaction date!",
-                exception.getMessage());
+        assertEquals(expectedResult, actualResult);
+        verify(loanTransactionWritePlatformService).makeLoanRepaymentWithChargeRefundChargeType(LoanTransactionType.REPAYMENT, LOAN_ID,
+                command, false, "chargeType");
     }
 
     @Test
-    public void chargeOff_cannotBeInFuture_expectException() {
-        setupMoneyHelper();
-        LoanProductRelatedDetail loanProductDetail = mock(LoanProductRelatedDetail.class);
+    public void makeInterestPaymentWaiver_shouldDelegateToLoanTransactionWritePlatformService() {
+        CommandProcessingResult expectedResult = mock(CommandProcessingResult.class);
+        when(loanTransactionWritePlatformService.makeInterestPaymentWaiver(command)).thenReturn(expectedResult);
 
-        LoanProduct loanProduct = mock(LoanProduct.class);
-        when(loanProduct.getLoanProductRelatedDetail()).thenReturn(loanProductDetail);
+        CommandProcessingResult actualResult = loanWritePlatformService.makeInterestPaymentWaiver(command);
 
-        LoanTransaction t1 = LoanTransaction.repayment(null, Money.of(CurrencyData.blank(), BigDecimal.valueOf(100)), null,
-                DateUtils.parseLocalDate("2025-05-13"), null);
-
-        loan = new LoanBuilder(loanProduct).withId(LOAN_ID).withLoanStatus(LoanStatus.ACTIVE).withLoanTransactions(List.of(t1)).build();
-
-        when(loanAssembler.assembleFrom(anyLong())).thenReturn(loan);
-
-        command = mock(JsonCommand.class);
-        when(command.localDateValueOfParameterNamed("transactionDate")).thenReturn(DateUtils.parseLocalDate("2025-05-24"));
-
-        GeneralPlatformDomainRuleException exception = assertThrows(GeneralPlatformDomainRuleException.class,
-                () -> loanWritePlatformService.chargeOff(command));
-
-        assertEquals("The transaction date cannot be in the future.", exception.getMessage());
+        assertEquals(expectedResult, actualResult);
+        verify(loanTransactionWritePlatformService).makeInterestPaymentWaiver(command);
     }
 
     @Test
-    public void chargeOff_forReversedTransaction_shouldRun() {
-        LoanProductRelatedDetail loanProductDetail = mock(LoanProductRelatedDetail.class);
-        when(loanProductDetail.getAnnualNominalInterestRate()).thenReturn(BigDecimal.valueOf(10));
+    public void adjustLoanTransaction_shouldDelegateToLoanTransactionWritePlatformService() {
+        CommandProcessingResult expectedResult = mock(CommandProcessingResult.class);
+        when(loanTransactionWritePlatformService.adjustLoanTransaction(LOAN_ID, 2L, command)).thenReturn(expectedResult);
 
-        LoanProduct loanProduct = mock(LoanProduct.class);
-        when(loanProduct.getLoanProductRelatedDetail()).thenReturn(loanProductDetail);
+        CommandProcessingResult actualResult = loanWritePlatformService.adjustLoanTransaction(LOAN_ID, 2L, command);
 
-        LoanCharge charge = mock(LoanCharge.class);
-        when(charge.getSubmittedOnDate()).thenReturn(DateUtils.parseLocalDate("2025-05-10"));
-
-        Client client = mock(Client.class);
-        when(client.getId()).thenReturn(1L);
-
-        LoanSummary summary = LoanSummary.create(BigDecimal.TEN);
-        summary.zeroFields();
-        loan = new LoanBuilder(loanProduct).withId(LOAN_ID).withLoanStatus(LoanStatus.ACTIVE).withCharges(Set.of(charge))
-                .withSummary(summary).withClient(client).build();
-
-        LoanTransaction t1 = LoanTransaction.chargeOff(loan, DateUtils.parseLocalDate("2025-05-13"), ExternalId.empty());
-        t1.reverse();
-        LoanTransaction t2 = LoanTransaction.chargeOff(loan, DateUtils.parseLocalDate("2025-05-10"), ExternalId.empty());
-
-        loan.addLoanTransaction(t1);
-        loan.addLoanTransaction(t2);
-
-        when(loanAssembler.assembleFrom(anyLong())).thenReturn(loan);
-
-        command = mock(JsonCommand.class);
-        when(command.localDateValueOfParameterNamed("transactionDate")).thenReturn(DateUtils.parseLocalDate("2025-05-12"));
-
-        CommandProcessingResult result = loanWritePlatformService.chargeOff(command);
-
-        assertEquals(1L, result.getClientId());
+        assertEquals(expectedResult, actualResult);
+        verify(loanTransactionWritePlatformService).adjustLoanTransaction(LOAN_ID, 2L, command);
     }
 
     @Test
-    @MockitoSettings(strictness = Strictness.LENIENT)
-    public void disburseLoan_withAccountTransferDisbursementCharge_shouldRefreshLoanSummary() {
-        setupMoneyHelper();
+    public void chargebackLoanTransaction_shouldDelegateToLoanTransactionWritePlatformService() {
+        CommandProcessingResult expectedResult = mock(CommandProcessingResult.class);
+        when(loanTransactionWritePlatformService.chargebackLoanTransaction(LOAN_ID, 2L, command)).thenReturn(expectedResult);
 
-        final LocalDate disbursementDate = DateUtils.parseLocalDate("2025-05-20");
-        final MonetaryCurrency currency = new MonetaryCurrency("KES", 2, null);
+        CommandProcessingResult actualResult = loanWritePlatformService.chargebackLoanTransaction(LOAN_ID, 2L, command);
 
-        // Setup loan product
-        LoanProductRelatedDetail loanProductDetail = mock(LoanProductRelatedDetail.class);
-        LoanProduct loanProduct = mock(LoanProduct.class);
-        when(loanProduct.getLoanProductRelatedDetail()).thenReturn(loanProductDetail);
-        when(loanProduct.isMultiDisburseLoan()).thenReturn(false);
-        when(loanProduct.isDisallowExpectedDisbursements()).thenReturn(false);
-        when(loanProduct.getId()).thenReturn(1L);
-        when(loanProduct.isIncludeInBorrowerCycle()).thenReturn(false);
-
-        // Setup disbursement charge with ACCOUNT_TRANSFER payment mode.
-        // Charges with this mode are collected from the linked savings account via transferFunds().
-        // After that loop, the LoanSummary must be refreshed — that's the bug fix under test.
-        LoanCharge disbursementCharge = mock(LoanCharge.class);
-        when(disbursementCharge.isDueAtDisbursement()).thenReturn(true);
-        when(disbursementCharge.getChargePaymentMode()).thenReturn(ChargePaymentMode.ACCOUNT_TRANSFER);
-        when(disbursementCharge.isChargePending()).thenReturn(true);
-        when(disbursementCharge.amountOutstanding()).thenReturn(BigDecimal.valueOf(500));
-        when(disbursementCharge.getId()).thenReturn(100L);
-        when(disbursementCharge.isActive()).thenReturn(true);
-
-        // Setup repayment schedule installment
-        LoanRepaymentScheduleInstallment installment = mock(LoanRepaymentScheduleInstallment.class);
-        when(installment.getDueDate()).thenReturn(disbursementDate.plusMonths(1));
-
-        // Setup summary
-        LoanSummary summary = mock(LoanSummary.class);
-        when(summary.getTotalInterestCharged()).thenReturn(BigDecimal.ZERO);
-
-        // Setup loan as mock for full control over method return values
-        loan = mock(Loan.class);
-        when(loan.getId()).thenReturn(LOAN_ID);
-        when(loan.loanProduct()).thenReturn(loanProduct);
-        when(loan.getLoanProduct()).thenReturn(loanProduct);
-        when(loan.getLoanProductRelatedDetail()).thenReturn(loanProductDetail);
-        when(loan.getLoanRepaymentScheduleDetail()).thenReturn(loanProductDetail);
-        when(loan.getActiveCharges()).thenReturn(Set.of(disbursementCharge));
-        when(loan.getRepaymentScheduleInstallments()).thenReturn(List.of(installment));
-        when(loan.fetchRepaymentScheduleInstallment(1)).thenReturn(installment);
-        when(loan.isGroupLoan()).thenReturn(false);
-        when(loan.getClientId()).thenReturn(1L);
-        when(loan.getStatus()).thenReturn(LoanStatus.APPROVED);
-        when(loan.getLoanStatus()).thenReturn(LoanStatus.ACTIVE);
-        when(loan.isMultiDisburmentLoan()).thenReturn(false);
-        when(loan.isTopup()).thenReturn(false);
-        when(loan.getPrincipal()).thenReturn(Money.of(currency, BigDecimal.valueOf(20000)));
-        when(loan.getCurrency()).thenReturn(currency);
-        when(loan.getSummary()).thenReturn(summary);
-        when(loan.getNextPossibleRepaymentDateForRescheduling()).thenReturn(disbursementDate.plusMonths(1));
-        when(loan.deriveSumTotalOfChargesDueAtDisbursement()).thenReturn(BigDecimal.valueOf(500));
-        when(loan.shouldCreateStandingInstructionAtDisbursement()).thenReturn(false);
-        when(loan.getIsFloatingInterestRate()).thenReturn(false);
-        when(loan.getExternalId()).thenReturn(ExternalId.empty());
-
-        // Setup command
-        command = mock(JsonCommand.class);
-        when(command.localDateValueOfParameterNamed("actualDisbursementDate")).thenReturn(disbursementDate);
-        when(command.extractLocale()).thenReturn(Locale.ENGLISH);
-        when(command.dateFormat()).thenReturn("dd MMMM yyyy");
-
-        // Setup service mocks
-        when(loanAssembler.assembleFrom(LOAN_ID)).thenReturn(loan);
-        when(loanLifecycleStateMachine.dryTransition(any(), any())).thenReturn(LoanStatus.ACTIVE);
-        when(loanDisbursementService.adjustDisburseAmount(any(), any(), any())).thenReturn(Money.of(currency, BigDecimal.valueOf(20000)));
-        when(externalIdFactory.createFromCommand(any(), any())).thenReturn(ExternalId.empty());
-
-        PortfolioAccountData linkedAccount = PortfolioAccountData.lookup(2L, "SA001");
-        when(accountAssociationsReadPlatformService.retriveLoanLinkedAssociation(LOAN_ID)).thenReturn(linkedAccount);
-        when(loanRepositoryWrapper.getClientOrJLGLoansDisbursedAfter(any(), anyLong())).thenReturn(List.of());
-        when(loanRepositoryWrapper.saveAndFlush(any(Loan.class))).thenReturn(loan);
-
-        // ACT
-        loanWritePlatformService.disburseLoan(LOAN_ID, command, true, false);
-
-        // ASSERT: The private disburseLoan() calls updateLoanSummaryDerivedFields once.
-        // Our fix adds a second call after the account-transfer charge loop.
-        verify(loanBalanceService, times(2)).updateLoanSummaryDerivedFields(loan);
+        assertEquals(expectedResult, actualResult);
+        verify(loanTransactionWritePlatformService).chargebackLoanTransaction(LOAN_ID, 2L, command);
     }
 
     @Test
-    @MockitoSettings(strictness = Strictness.LENIENT)
-    public void disburseLoan_withoutAccountTransferDisbursementCharge_shouldNotRefreshLoanSummaryExtraTime() {
-        setupMoneyHelper();
+    public void waiveInterestOnLoan_shouldDelegateToLoanTransactionWritePlatformService() {
+        CommandProcessingResult expectedResult = mock(CommandProcessingResult.class);
+        when(loanTransactionWritePlatformService.waiveInterestOnLoan(LOAN_ID, command)).thenReturn(expectedResult);
 
-        final LocalDate disbursementDate = DateUtils.parseLocalDate("2025-05-20");
-        final MonetaryCurrency currency = new MonetaryCurrency("KES", 2, null);
+        CommandProcessingResult actualResult = loanWritePlatformService.waiveInterestOnLoan(LOAN_ID, command);
 
-        // Setup loan product
-        LoanProductRelatedDetail loanProductDetail = mock(LoanProductRelatedDetail.class);
-        LoanProduct loanProduct = mock(LoanProduct.class);
-        when(loanProduct.getLoanProductRelatedDetail()).thenReturn(loanProductDetail);
-        when(loanProduct.isMultiDisburseLoan()).thenReturn(false);
-        when(loanProduct.isDisallowExpectedDisbursements()).thenReturn(false);
-        when(loanProduct.getId()).thenReturn(1L);
-        when(loanProduct.isIncludeInBorrowerCycle()).thenReturn(false);
+        assertEquals(expectedResult, actualResult);
+        verify(loanTransactionWritePlatformService).waiveInterestOnLoan(LOAN_ID, command);
+    }
 
-        // A regular (non-ACCOUNT_TRANSFER) disbursement charge — should NOT trigger the extra summary refresh.
-        LoanCharge disbursementCharge = mock(LoanCharge.class);
-        when(disbursementCharge.isDueAtDisbursement()).thenReturn(true);
-        when(disbursementCharge.getChargePaymentMode()).thenReturn(ChargePaymentMode.REGULAR);
-        when(disbursementCharge.isChargePending()).thenReturn(true);
-        when(disbursementCharge.isActive()).thenReturn(true);
+    @Test
+    public void recoverFromGuarantor_shouldDelegateToLoanTransactionWritePlatformService() {
+        CommandProcessingResult expectedResult = mock(CommandProcessingResult.class);
+        when(loanTransactionWritePlatformService.recoverFromGuarantor(LOAN_ID)).thenReturn(expectedResult);
 
-        // Setup repayment schedule installment
-        LoanRepaymentScheduleInstallment installment = mock(LoanRepaymentScheduleInstallment.class);
-        when(installment.getDueDate()).thenReturn(disbursementDate.plusMonths(1));
+        CommandProcessingResult actualResult = loanWritePlatformService.recoverFromGuarantor(LOAN_ID);
 
-        // Setup summary
-        LoanSummary summary = mock(LoanSummary.class);
-        when(summary.getTotalInterestCharged()).thenReturn(BigDecimal.ZERO);
+        assertEquals(expectedResult, actualResult);
+        verify(loanTransactionWritePlatformService).recoverFromGuarantor(LOAN_ID);
+    }
 
-        // Setup loan
-        loan = mock(Loan.class);
-        when(loan.getId()).thenReturn(LOAN_ID);
-        when(loan.loanProduct()).thenReturn(loanProduct);
-        when(loan.getLoanProduct()).thenReturn(loanProduct);
-        when(loan.getLoanProductRelatedDetail()).thenReturn(loanProductDetail);
-        when(loan.getLoanRepaymentScheduleDetail()).thenReturn(loanProductDetail);
-        when(loan.getActiveCharges()).thenReturn(Set.of(disbursementCharge));
-        when(loan.getRepaymentScheduleInstallments()).thenReturn(List.of(installment));
-        when(loan.fetchRepaymentScheduleInstallment(1)).thenReturn(installment);
-        when(loan.isGroupLoan()).thenReturn(false);
-        when(loan.getClientId()).thenReturn(1L);
-        when(loan.getStatus()).thenReturn(LoanStatus.APPROVED);
-        when(loan.getLoanStatus()).thenReturn(LoanStatus.ACTIVE);
-        when(loan.isMultiDisburmentLoan()).thenReturn(false);
-        when(loan.isTopup()).thenReturn(false);
-        when(loan.getPrincipal()).thenReturn(Money.of(currency, BigDecimal.valueOf(20000)));
-        when(loan.getCurrency()).thenReturn(currency);
-        when(loan.getSummary()).thenReturn(summary);
-        when(loan.getNextPossibleRepaymentDateForRescheduling()).thenReturn(disbursementDate.plusMonths(1));
-        when(loan.deriveSumTotalOfChargesDueAtDisbursement()).thenReturn(BigDecimal.ZERO);
-        when(loan.shouldCreateStandingInstructionAtDisbursement()).thenReturn(false);
-        when(loan.getIsFloatingInterestRate()).thenReturn(false);
-        when(loan.getExternalId()).thenReturn(ExternalId.empty());
+    @Test
+    public void creditBalanceRefund_shouldDelegateToLoanTransactionWritePlatformService() {
+        CommandProcessingResult expectedResult = mock(CommandProcessingResult.class);
+        when(loanTransactionWritePlatformService.creditBalanceRefund(LOAN_ID, command)).thenReturn(expectedResult);
 
-        // Setup command
-        command = mock(JsonCommand.class);
-        when(command.localDateValueOfParameterNamed("actualDisbursementDate")).thenReturn(disbursementDate);
-        when(command.extractLocale()).thenReturn(Locale.ENGLISH);
-        when(command.dateFormat()).thenReturn("dd MMMM yyyy");
+        CommandProcessingResult actualResult = loanWritePlatformService.creditBalanceRefund(LOAN_ID, command);
 
-        // Setup service mocks
-        when(loanAssembler.assembleFrom(LOAN_ID)).thenReturn(loan);
-        when(loanLifecycleStateMachine.dryTransition(any(), any())).thenReturn(LoanStatus.ACTIVE);
-        when(loanDisbursementService.adjustDisburseAmount(any(), any(), any())).thenReturn(Money.of(currency, BigDecimal.valueOf(20000)));
-        when(externalIdFactory.createFromCommand(any(), any())).thenReturn(ExternalId.empty());
-        PortfolioAccountData linkedAccount = PortfolioAccountData.lookup(2L, "SA001");
-        when(accountAssociationsReadPlatformService.retriveLoanLinkedAssociation(LOAN_ID)).thenReturn(linkedAccount);
-        when(loanRepositoryWrapper.getClientOrJLGLoansDisbursedAfter(any(), anyLong())).thenReturn(List.of());
-        when(loanRepositoryWrapper.saveAndFlush(any(Loan.class))).thenReturn(loan);
+        assertEquals(expectedResult, actualResult);
+        verify(loanTransactionWritePlatformService).creditBalanceRefund(LOAN_ID, command);
+    }
 
-        // ACT
-        loanWritePlatformService.disburseLoan(LOAN_ID, command, true, false);
+    @Test
+    public void makeLoanRefund_shouldDelegateToLoanTransactionWritePlatformService() {
+        CommandProcessingResult expectedResult = mock(CommandProcessingResult.class);
+        when(loanTransactionWritePlatformService.makeLoanRefund(LOAN_ID, command)).thenReturn(expectedResult);
 
-        // ASSERT: With no ACCOUNT_TRANSFER disbursement charges, disBuLoanCharges is empty and
-        // the fix block is skipped. updateLoanSummaryDerivedFields is called exactly once
-        // (the standard call inside the private disburseLoan helper).
-        verify(loanBalanceService, times(1)).updateLoanSummaryDerivedFields(loan);
+        CommandProcessingResult actualResult = loanWritePlatformService.makeLoanRefund(LOAN_ID, command);
+
+        assertEquals(expectedResult, actualResult);
+        verify(loanTransactionWritePlatformService).makeLoanRefund(LOAN_ID, command);
+    }
+
+    @Test
+    public void makeRefund_shouldDelegateToLoanTransactionWritePlatformService() {
+        CommandProcessingResult expectedResult = mock(CommandProcessingResult.class);
+        when(loanTransactionWritePlatformService.makeRefund(LOAN_ID, LoanTransactionType.MERCHANT_ISSUED_REFUND, command))
+                .thenReturn(expectedResult);
+
+        CommandProcessingResult actualResult = loanWritePlatformService.makeRefund(LOAN_ID, LoanTransactionType.MERCHANT_ISSUED_REFUND,
+                command);
+
+        assertEquals(expectedResult, actualResult);
+        verify(loanTransactionWritePlatformService).makeRefund(LOAN_ID, LoanTransactionType.MERCHANT_ISSUED_REFUND, command);
+    }
+
+    @Test
+    public void makeManualInterestRefund_shouldDelegateToLoanTransactionWritePlatformService() {
+        CommandProcessingResult expectedResult = mock(CommandProcessingResult.class);
+        when(loanTransactionWritePlatformService.makeManualInterestRefund(LOAN_ID, 2L, command)).thenReturn(expectedResult);
+
+        CommandProcessingResult actualResult = loanWritePlatformService.makeManualInterestRefund(LOAN_ID, 2L, command);
+
+        assertEquals(expectedResult, actualResult);
+        verify(loanTransactionWritePlatformService).makeManualInterestRefund(LOAN_ID, 2L, command);
+    }
+
+    @Test
+    public void writeOff_shouldDelegateToLoanClosureWritePlatformService() {
+        CommandProcessingResult expectedResult = mock(CommandProcessingResult.class);
+        when(loanClosureWritePlatformService.writeOff(LOAN_ID, command)).thenReturn(expectedResult);
+
+        CommandProcessingResult actualResult = loanWritePlatformService.writeOff(LOAN_ID, command);
+
+        assertEquals(expectedResult, actualResult);
+        verify(loanClosureWritePlatformService).writeOff(LOAN_ID, command);
+    }
+
+    @Test
+    public void closeLoan_shouldDelegateToLoanClosureWritePlatformService() {
+        CommandProcessingResult expectedResult = mock(CommandProcessingResult.class);
+        when(loanClosureWritePlatformService.closeLoan(LOAN_ID, command)).thenReturn(expectedResult);
+
+        CommandProcessingResult actualResult = loanWritePlatformService.closeLoan(LOAN_ID, command);
+
+        assertEquals(expectedResult, actualResult);
+        verify(loanClosureWritePlatformService).closeLoan(LOAN_ID, command);
+    }
+
+    @Test
+    public void closeAsRescheduled_shouldDelegateToLoanClosureWritePlatformService() {
+        CommandProcessingResult expectedResult = mock(CommandProcessingResult.class);
+        when(loanClosureWritePlatformService.closeAsRescheduled(LOAN_ID, command)).thenReturn(expectedResult);
+
+        CommandProcessingResult actualResult = loanWritePlatformService.closeAsRescheduled(LOAN_ID, command);
+
+        assertEquals(expectedResult, actualResult);
+        verify(loanClosureWritePlatformService).closeAsRescheduled(LOAN_ID, command);
+    }
+
+    @Test
+    public void undoWriteOff_shouldDelegateToLoanClosureWritePlatformService() {
+        CommandProcessingResult expectedResult = mock(CommandProcessingResult.class);
+        when(loanClosureWritePlatformService.undoWriteOff(LOAN_ID)).thenReturn(expectedResult);
+
+        CommandProcessingResult actualResult = loanWritePlatformService.undoWriteOff(LOAN_ID);
+
+        assertEquals(expectedResult, actualResult);
+        verify(loanClosureWritePlatformService).undoWriteOff(LOAN_ID);
+    }
+
+    @Test
+    public void forecloseLoan_shouldDelegateToLoanClosureWritePlatformService() {
+        CommandProcessingResult expectedResult = mock(CommandProcessingResult.class);
+        when(loanClosureWritePlatformService.forecloseLoan(LOAN_ID, command)).thenReturn(expectedResult);
+
+        CommandProcessingResult actualResult = loanWritePlatformService.forecloseLoan(LOAN_ID, command);
+
+        assertEquals(expectedResult, actualResult);
+        verify(loanClosureWritePlatformService).forecloseLoan(LOAN_ID, command);
+    }
+
+    @Test
+    public void markLoanAsFraud_shouldDelegateToLoanClosureWritePlatformService() {
+        CommandProcessingResult expectedResult = mock(CommandProcessingResult.class);
+        when(loanClosureWritePlatformService.markLoanAsFraud(LOAN_ID, command)).thenReturn(expectedResult);
+
+        CommandProcessingResult actualResult = loanWritePlatformService.markLoanAsFraud(LOAN_ID, command);
+
+        assertEquals(expectedResult, actualResult);
+        verify(loanClosureWritePlatformService).markLoanAsFraud(LOAN_ID, command);
+    }
+
+    @Test
+    public void chargeOff_shouldDelegateToLoanClosureWritePlatformService() {
+        CommandProcessingResult expectedResult = mock(CommandProcessingResult.class);
+        when(loanClosureWritePlatformService.chargeOff(command)).thenReturn(expectedResult);
+
+        CommandProcessingResult actualResult = loanWritePlatformService.chargeOff(command);
+
+        assertEquals(expectedResult, actualResult);
+        verify(loanClosureWritePlatformService).chargeOff(command);
+    }
+
+    @Test
+    public void undoChargeOff_shouldDelegateToLoanClosureWritePlatformService() {
+        CommandProcessingResult expectedResult = mock(CommandProcessingResult.class);
+        when(loanClosureWritePlatformService.undoChargeOff(command)).thenReturn(expectedResult);
+
+        CommandProcessingResult actualResult = loanWritePlatformService.undoChargeOff(command);
+
+        assertEquals(expectedResult, actualResult);
+        verify(loanClosureWritePlatformService).undoChargeOff(command);
+    }
+
+    @Test
+    public void loanReassignment_shouldDelegateToLoanTransferWritePlatformService() {
+        CommandProcessingResult expectedResult = mock(CommandProcessingResult.class);
+        when(loanTransferWritePlatformService.loanReassignment(LOAN_ID, command)).thenReturn(expectedResult);
+
+        CommandProcessingResult actualResult = loanWritePlatformService.loanReassignment(LOAN_ID, command);
+
+        assertEquals(expectedResult, actualResult);
+        verify(loanTransferWritePlatformService).loanReassignment(LOAN_ID, command);
+    }
+
+    @Test
+    public void bulkLoanReassignment_shouldDelegateToLoanTransferWritePlatformService() {
+        CommandProcessingResult expectedResult = mock(CommandProcessingResult.class);
+        when(loanTransferWritePlatformService.bulkLoanReassignment(command)).thenReturn(expectedResult);
+
+        CommandProcessingResult actualResult = loanWritePlatformService.bulkLoanReassignment(command);
+
+        assertEquals(expectedResult, actualResult);
+        verify(loanTransferWritePlatformService).bulkLoanReassignment(command);
+    }
+
+    @Test
+    public void removeLoanOfficer_shouldDelegateToLoanTransferWritePlatformService() {
+        CommandProcessingResult expectedResult = mock(CommandProcessingResult.class);
+        when(loanTransferWritePlatformService.removeLoanOfficer(LOAN_ID, command)).thenReturn(expectedResult);
+
+        CommandProcessingResult actualResult = loanWritePlatformService.removeLoanOfficer(LOAN_ID, command);
+
+        assertEquals(expectedResult, actualResult);
+        verify(loanTransferWritePlatformService).removeLoanOfficer(LOAN_ID, command);
+    }
+
+    @Test
+    public void initiateLoanTransfer_shouldDelegateToLoanTransferWritePlatformService() {
+        Loan loan = mock(Loan.class);
+        LoanTransaction expectedResult = mock(LoanTransaction.class);
+        when(loanTransferWritePlatformService.initiateLoanTransfer(loan, LocalDate.of(2025, 5, 20))).thenReturn(expectedResult);
+
+        LoanTransaction actualResult = loanWritePlatformService.initiateLoanTransfer(loan, LocalDate.of(2025, 5, 20));
+
+        assertEquals(expectedResult, actualResult);
+        verify(loanTransferWritePlatformService).initiateLoanTransfer(loan, LocalDate.of(2025, 5, 20));
+    }
+
+    @Test
+    public void withdrawLoanTransfer_shouldDelegateToLoanTransferWritePlatformService() {
+        Loan loan = mock(Loan.class);
+        LoanTransaction expectedResult = mock(LoanTransaction.class);
+        when(loanTransferWritePlatformService.withdrawLoanTransfer(loan, LocalDate.of(2025, 5, 20))).thenReturn(expectedResult);
+
+        LoanTransaction actualResult = loanWritePlatformService.withdrawLoanTransfer(loan, LocalDate.of(2025, 5, 20));
+
+        assertEquals(expectedResult, actualResult);
+        verify(loanTransferWritePlatformService).withdrawLoanTransfer(loan, LocalDate.of(2025, 5, 20));
+    }
+
+    @Test
+    public void rejectLoanTransfer_shouldDelegateToLoanTransferWritePlatformService() {
+        Loan loan = mock(Loan.class);
+
+        loanWritePlatformService.rejectLoanTransfer(loan);
+
+        verify(loanTransferWritePlatformService).rejectLoanTransfer(loan);
+    }
+
+    @Test
+    public void acceptLoanTransfer_shouldDelegateToLoanTransferWritePlatformService() {
+        Loan loan = mock(Loan.class);
+        Office acceptedInOffice = mock(Office.class);
+        Staff loanOfficer = mock(Staff.class);
+        LoanTransaction expectedResult = mock(LoanTransaction.class);
+        when(loanTransferWritePlatformService.acceptLoanTransfer(loan, LocalDate.of(2025, 5, 20), acceptedInOffice, loanOfficer))
+                .thenReturn(expectedResult);
+
+        LoanTransaction actualResult = loanWritePlatformService.acceptLoanTransfer(loan, LocalDate.of(2025, 5, 20), acceptedInOffice,
+                loanOfficer);
+
+        assertEquals(expectedResult, actualResult);
+        verify(loanTransferWritePlatformService).acceptLoanTransfer(loan, LocalDate.of(2025, 5, 20), acceptedInOffice, loanOfficer);
+    }
+
+    @Test
+    public void applyMeetingDateChanges_shouldDelegateToLoanScheduleMaintenanceWritePlatformService() {
+        Calendar calendar = mock(Calendar.class);
+
+        loanWritePlatformService.applyMeetingDateChanges(calendar, List.of(), true, LocalDate.of(2025, 5, 20), LocalDate.of(2025, 5, 20));
+
+        verify(loanScheduleMaintenanceWritePlatformService).applyMeetingDateChanges(calendar, List.of(), true, LocalDate.of(2025, 5, 20),
+                LocalDate.of(2025, 5, 20));
+    }
+
+    @Test
+    public void recalculateInterest_shouldDelegateToLoanScheduleMaintenanceWritePlatformService() {
+        Loan loan = mock(Loan.class);
+        Loan expectedResult = mock(Loan.class);
+        when(loanScheduleMaintenanceWritePlatformService.recalculateInterest(loan)).thenReturn(expectedResult);
+
+        Loan actualResult = loanWritePlatformService.recalculateInterest(loan);
+
+        assertEquals(expectedResult, actualResult);
+        verify(loanScheduleMaintenanceWritePlatformService).recalculateInterest(loan);
+    }
+
+    @Test
+    public void applyMeetingDateChangesWithMeetingDates_shouldDelegateToLoanScheduleMaintenanceWritePlatformService() {
+        Calendar calendar = mock(Calendar.class);
+
+        loanWritePlatformService.applyMeetingDateChanges(calendar, List.of());
+
+        verify(loanScheduleMaintenanceWritePlatformService).applyMeetingDateChanges(calendar, List.of());
+    }
+
+    @Test
+    public void recalculateInterestByLoanId_shouldDelegateToLoanScheduleMaintenanceWritePlatformService() {
+
+        loanWritePlatformService.recalculateInterest(LOAN_ID);
+
+        verify(loanScheduleMaintenanceWritePlatformService).recalculateInterest(LOAN_ID);
+    }
+
+    @Test
+    public void updateOriginalSchedule_shouldDelegateToLoanScheduleMaintenanceWritePlatformService() {
+        Loan loan = mock(Loan.class);
+
+        loanWritePlatformService.updateOriginalSchedule(loan);
+
+        verify(loanScheduleMaintenanceWritePlatformService).updateOriginalSchedule(loan);
     }
 }

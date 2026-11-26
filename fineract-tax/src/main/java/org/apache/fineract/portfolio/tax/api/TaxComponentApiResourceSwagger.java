@@ -34,6 +34,30 @@ final class TaxComponentApiResourceSwagger {
 
         private GetTaxesComponentsResponse() {}
 
+        static final class GetTaxesComponentsDebitAccountType {
+
+            private GetTaxesComponentsDebitAccountType() {}
+
+            @Schema(example = "1")
+            public Integer id;
+            @Schema(example = "accountType.asset")
+            public String code;
+            @Schema(example = "accountType.asset")
+            public String value;
+        }
+
+        static final class GetTaxesComponentsDebitAccount {
+
+            private GetTaxesComponentsDebitAccount() {}
+
+            @Schema(example = "1")
+            public Long id;
+            @Schema(example = "Tax Asset Account")
+            public String name;
+            @Schema(example = "100001")
+            public String glCode;
+        }
+
         static final class GetTaxesComponentsCreditAccountType {
 
             private GetTaxesComponentsCreditAccountType() {}
@@ -69,11 +93,15 @@ final class TaxComponentApiResourceSwagger {
         public String name;
         @Schema(example = "10.000000")
         public Float percentage;
+        public GetTaxesComponentsDebitAccountType debitAccountType;
+        public GetTaxesComponentsDebitAccount debitAccount;
         public GetTaxesComponentsCreditAccountType creditAccountType;
         public GetTaxesComponentsCreditAccount creditAccount;
         @Schema(example = "[2016, 4, 11]")
         public LocalDate startDate;
         public Set<GetTaxesComponentsHistories> taxComponentsHistories;
+        @Schema(example = "true", description = "false once the component is linked to a charge, savings product or savings account, or used in a tax transaction; then only name can be changed")
+        public boolean editable;
     }
 
     @Schema(description = "PostTaxesComponentsRequest")
@@ -119,6 +147,14 @@ final class TaxComponentApiResourceSwagger {
         public String name;
         @Schema(example = "15")
         public Float percentage;
+        @Schema(example = "2")
+        public Integer debitAccountType;
+        @Schema(example = "4")
+        public Long debitAccountId;
+        @Schema(example = "2")
+        public Integer creditAccountType;
+        @Schema(example = "4")
+        public Long creditAccountId;
         @Schema(example = "en")
         public String locale;
         @Schema(example = "dd MMMM yyyy")
@@ -142,6 +178,14 @@ final class TaxComponentApiResourceSwagger {
             public String name;
             @Schema(example = "[2016, 4, 15]")
             public LocalDate startDate;
+            @Schema(example = "2")
+            public Integer debitAccountType;
+            @Schema(example = "4")
+            public Long debitAccountId;
+            @Schema(example = "2")
+            public Integer creditAccountType;
+            @Schema(example = "4")
+            public Long creditAccountId;
         }
 
         @Schema(example = "1")

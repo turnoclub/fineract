@@ -18,128 +18,20 @@
  */
 package org.apache.fineract.integrationtests.common;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-
-import com.google.gson.Gson;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.Map;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.apache.fineract.client.models.GetGlobalConfigurationsResponse;
-import org.apache.fineract.client.models.GlobalConfigurationPropertyData;
-import org.apache.fineract.client.models.PutGlobalConfigurationsRequest;
-import org.apache.fineract.client.models.PutGlobalConfigurationsResponse;
-import org.apache.fineract.client.util.Calls;
-import org.apache.fineract.client.util.JSON;
 import org.apache.fineract.infrastructure.configuration.api.GlobalConfigurationConstants;
-import org.junit.jupiter.api.Assertions;
 
-@SuppressWarnings({ "unused", "rawtypes" })
-@Slf4j
-@RequiredArgsConstructor
-public class GlobalConfigurationHelper {
+/**
+ * The default value of every global configuration. Tests that change a configuration restore these defaults through
+ * {@link org.apache.fineract.integrationtests.client.feign.helpers.FeignGlobalConfigurationHelper}.
+ */
+@SuppressWarnings("rawtypes")
+public final class GlobalConfigurationHelper {
 
-    private static final Gson GSON = new JSON().getGson();
+    public static final String IDEMPOTENCY_RECOVERABLE_ERROR_CODES_DEFAULT = "error.msg.clients.activationDate.in.the.future,error.msg.group.activationDate.in.the.future";
 
-    public GetGlobalConfigurationsResponse getAllGlobalConfigurations() {
-        log.info("------------------------ RETRIEVING ALL GLOBAL CONFIGURATIONS -------------------------");
-        return Calls.ok(FineractClientHelper.getFineractClient().globalConfigurations.retrieveConfiguration(false));
-    }
-
-    public GlobalConfigurationPropertyData getGlobalConfigurationByName(final String configName) {
-        log.info("------------------------ RETRIEVING GLOBAL CONFIGURATION BY NAME -------------------------");
-        return Calls.ok(FineractClientHelper.getFineractClient().globalConfigurations.retrieveOneByName(configName));
-    }
-
-    public GlobalConfigurationPropertyData getGlobalConfigurationById(final Long configId) {
-        log.info("------------------------ RETRIEVING GLOBAL CONFIGURATION BY ID -------------------------");
-        return Calls.ok(FineractClientHelper.getFineractClient().globalConfigurations.retrieveOneGlobalConfiguration(configId));
-    }
-
-    // TODO: This is quite a bad pattern and adds a lot of time to individual test
-    // executions
-    public void resetAllDefaultGlobalConfigurations() {
-
-        GetGlobalConfigurationsResponse actualGlobalConfigurations = getAllGlobalConfigurations();
-        final ArrayList<HashMap> defaults = getAllDefaultGlobalConfigurations();
-
-        Map<String, HashMap> defaultMap = new HashMap<>();
-        for (HashMap config : defaults) {
-            defaultMap.put((String) config.get("name"), config);
-        }
-
-        int changedNo = 0;
-        for (GlobalConfigurationPropertyData actualGlobalConfiguration : actualGlobalConfigurations.getGlobalConfiguration()) {
-
-            HashMap defaultGlobalConfiguration = defaultMap.get(actualGlobalConfiguration.getName());
-            if (defaultGlobalConfiguration == null) {
-                String message = "Global configuration '" + actualGlobalConfiguration.getName()
-                        + "' found in database but not in integration test defaults. "
-                        + "You must add it to GlobalConfigurationHelper.getAllDefaultGlobalConfigurations() to ensure test isolation.";
-                log.error(message);
-                throw new RuntimeException(message);
-            }
-
-            if (!isMatching(defaultGlobalConfiguration, actualGlobalConfiguration)) {
-
-                /**
-                 * Cannot update trapDoor global configurations because
-                 * {@link org.apache.fineract.infrastructure.configuration.exception.GlobalConfigurationPropertyCannotBeModfied}
-                 * will be thrown.
-                 */
-                if ((Boolean) defaultGlobalConfiguration.get("trapDoor")) {
-                    continue;
-                }
-
-                // Currently only values and enabled flags are modified by the
-                // integration test suite.
-                // If any other column is modified by the integration test suite in
-                // the future, it needs to be reset here.
-                final String configName = (String) defaultGlobalConfiguration.get("name");
-                final Long configDefaultValue = (Long) defaultGlobalConfiguration.get("value");
-
-                updateGlobalConfiguration(configName, new PutGlobalConfigurationsRequest().value(configDefaultValue)
-                        .enabled((Boolean) defaultGlobalConfiguration.get("enabled")));
-                changedNo++;
-            }
-        }
-        log.info("--------------------------------- UPDATED GLOBAL CONFIG ENTRY SIZE: {} ---------------------------------------------",
-                changedNo);
-    }
-
-    private static boolean isMatching(HashMap o1, GlobalConfigurationPropertyData o2) {
-        return o1.get("name").equals(o2.getName()) && o1.get("value").equals(o2.getValue()) && o1.get("enabled").equals(o2.getEnabled())
-                && o1.get("trapDoor").equals(o2.getTrapDoor());
-    }
-
-    public void verifyAllDefaultGlobalConfigurations() {
-        ArrayList<HashMap> expectedGlobalConfigurations = getAllDefaultGlobalConfigurations();
-        GetGlobalConfigurationsResponse actualGlobalConfigurations = getAllGlobalConfigurations();
-
-        Assertions.assertEquals(expectedGlobalConfigurations.size(), actualGlobalConfigurations.getGlobalConfiguration().size());
-
-        Map<String, HashMap> expectedConfigMap = new HashMap<>();
-        for (HashMap config : expectedGlobalConfigurations) {
-            expectedConfigMap.put((String) config.get("name"), config);
-        }
-
-        for (GlobalConfigurationPropertyData actualGlobalConfiguration : actualGlobalConfigurations.getGlobalConfiguration()) {
-            String configName = actualGlobalConfiguration.getName();
-            HashMap expectedGlobalConfiguration = expectedConfigMap.get(configName);
-
-            assertNotNull(expectedGlobalConfiguration, "Configuration found in API but not in expected defaults: " + configName);
-
-            final String assertionFailedMessage = "Assertion failed for configName:<" + configName + ">";
-            Assertions.assertEquals(expectedGlobalConfiguration.get("name"), actualGlobalConfiguration.getName(), assertionFailedMessage);
-            Assertions.assertEquals(expectedGlobalConfiguration.get("value"), actualGlobalConfiguration.getValue(), assertionFailedMessage);
-            Assertions.assertEquals(expectedGlobalConfiguration.get("enabled"), actualGlobalConfiguration.getEnabled(),
-                    assertionFailedMessage);
-            Assertions.assertEquals(expectedGlobalConfiguration.get("trapDoor"), actualGlobalConfiguration.getTrapDoor(),
-                    assertionFailedMessage);
-        }
-    }
+    private GlobalConfigurationHelper() {}
 
     /**
      * Helper method to get the current default instance data of the /configurations endpoint. Used to reset and verify
@@ -150,7 +42,7 @@ public class GlobalConfigurationHelper {
      *      integration test state using Spring Framework's integration test infrastructure for transaction commits and
      *      rollbacks.
      */
-    private static ArrayList<HashMap> getAllDefaultGlobalConfigurations() {
+    public static ArrayList<HashMap> getAllDefaultGlobalConfigurations() {
 
         ArrayList<HashMap> defaults = new ArrayList<>();
 
@@ -628,13 +520,6 @@ public class GlobalConfigurationHelper {
         forceWithdrawalOnSavingsAccount.put("trapDoor", false);
         defaults.add(forceWithdrawalOnSavingsAccount);
 
-        HashMap<String, Object> forceWithdrawalOnSavingsAccountLimit = new HashMap<>();
-        forceWithdrawalOnSavingsAccountLimit.put("name", GlobalConfigurationConstants.FORCE_WITHDRAWAL_ON_SAVINGS_ACCOUNT_LIMIT);
-        forceWithdrawalOnSavingsAccountLimit.put("value", 0L);
-        forceWithdrawalOnSavingsAccountLimit.put("enabled", false);
-        forceWithdrawalOnSavingsAccountLimit.put("trapDoor", false);
-        defaults.add(forceWithdrawalOnSavingsAccountLimit);
-
         HashMap<String, Object> allowCashAndNonCashAccrual = new HashMap<>();
         allowCashAndNonCashAccrual.put("name", GlobalConfigurationConstants.ALLOW_CASH_AND_NON_CASH_ACCRUAL);
         allowCashAndNonCashAccrual.put("value", 0L);
@@ -649,24 +534,104 @@ public class GlobalConfigurationHelper {
         enableInstantDelinquencyCalculation.put("trapDoor", false);
         defaults.add(enableInstantDelinquencyCalculation);
 
+        HashMap<String, Object> lastDayOfFinancialYear = new HashMap<>();
+        lastDayOfFinancialYear.put("name", GlobalConfigurationConstants.LAST_DAY_OF_FINANCIAL_YEAR);
+        lastDayOfFinancialYear.put("value", 31L);
+        lastDayOfFinancialYear.put("enabled", true);
+        lastDayOfFinancialYear.put("trapDoor", false);
+        defaults.add(lastDayOfFinancialYear);
+
+        HashMap<String, Object> lastMonthOfFinancialYear = new HashMap<>();
+        lastMonthOfFinancialYear.put("name", GlobalConfigurationConstants.LAST_MONTH_OF_FINANCIAL_YEAR);
+        lastMonthOfFinancialYear.put("value", 12L);
+        lastMonthOfFinancialYear.put("enabled", true);
+        lastMonthOfFinancialYear.put("trapDoor", false);
+        defaults.add(lastMonthOfFinancialYear);
+
+        HashMap<String, Object> incomeExpenseGlAccounts = new HashMap<>();
+        incomeExpenseGlAccounts.put("name", GlobalConfigurationConstants.INCOME_EXPENSE_GL_ACCOUNTS);
+        incomeExpenseGlAccounts.put("value", 0L);
+        incomeExpenseGlAccounts.put("enabled", true);
+        incomeExpenseGlAccounts.put("trapDoor", false);
+        incomeExpenseGlAccounts.put("string_value", "");
+        defaults.add(incomeExpenseGlAccounts);
+
+        HashMap<String, Object> retainedEarningGlAccount = new HashMap<>();
+        retainedEarningGlAccount.put("name", GlobalConfigurationConstants.RETAINED_EARNING_GL_ACCOUNT);
+        retainedEarningGlAccount.put("value", 0L);
+        retainedEarningGlAccount.put("enabled", true);
+        retainedEarningGlAccount.put("trapDoor", false);
+        retainedEarningGlAccount.put("string_value", "");
+        defaults.add(retainedEarningGlAccount);
+
+        HashMap<String, Object> officeId = new HashMap<>();
+        officeId.put("name", GlobalConfigurationConstants.OFFICE_ID);
+        officeId.put("value", 1L);
+        officeId.put("enabled", true);
+        officeId.put("trapDoor", false);
+        defaults.add(officeId);
+
+        HashMap<String, Object> retainedEarningUsedByReportName = new HashMap<>();
+        retainedEarningUsedByReportName.put("name", GlobalConfigurationConstants.RETAINED_EARNING_USED_BY_REPORT_NAME);
+        retainedEarningUsedByReportName.put("value", 0L);
+        retainedEarningUsedByReportName.put("enabled", true);
+        retainedEarningUsedByReportName.put("trapDoor", false);
+        retainedEarningUsedByReportName.put("string_value", "Trial Balance Summary Report with Asset Owner");
+        defaults.add(retainedEarningUsedByReportName);
+
+        HashMap<String, Object> retainedEarningWorkingCapitalUsedByReportName = new HashMap<>();
+        retainedEarningWorkingCapitalUsedByReportName.put("name", GlobalConfigurationConstants.RETAINED_EARNING_WC_USED_BY_REPORT_NAME);
+        retainedEarningWorkingCapitalUsedByReportName.put("value", 0L);
+        retainedEarningWorkingCapitalUsedByReportName.put("enabled", true);
+        retainedEarningWorkingCapitalUsedByReportName.put("trapDoor", false);
+        retainedEarningWorkingCapitalUsedByReportName.put("string_value", "Trial Balance Summary Report for Working Capital Loans");
+        defaults.add(retainedEarningWorkingCapitalUsedByReportName);
+
+        HashMap<String, Object> isDisallowBackdatedTransactions = new HashMap<>();
+        isDisallowBackdatedTransactions.put("name", GlobalConfigurationConstants.DISALLOW_BACKDATED_TRANSACTIONS);
+        isDisallowBackdatedTransactions.put("value", 0L);
+        isDisallowBackdatedTransactions.put("enabled", false);
+        isDisallowBackdatedTransactions.put("trapDoor", false);
+        defaults.add(isDisallowBackdatedTransactions);
+
+        HashMap<String, Object> wclChargeAccrualTime = new HashMap<>();
+        wclChargeAccrualTime.put("name", GlobalConfigurationConstants.WCL_CHARGE_ACCRUAL_TIME);
+        wclChargeAccrualTime.put("value", 0L);
+        wclChargeAccrualTime.put("enabled", true);
+        wclChargeAccrualTime.put("trapDoor", false);
+        wclChargeAccrualTime.put("string_value", "EOD");
+        defaults.add(wclChargeAccrualTime);
+
+        HashMap<String, Object> plChargeAccrualTime = new HashMap<>();
+        plChargeAccrualTime.put("name", GlobalConfigurationConstants.PL_CHARGE_ACCRUAL_TIME);
+        plChargeAccrualTime.put("value", 0L);
+        plChargeAccrualTime.put("enabled", true);
+        plChargeAccrualTime.put("trapDoor", false);
+        plChargeAccrualTime.put("string_value", "EOD");
+        defaults.add(plChargeAccrualTime);
+
+        HashMap<String, Object> payoffSchedulePreviewMaxPayoffPeriods = new HashMap<>();
+        payoffSchedulePreviewMaxPayoffPeriods.put("name", GlobalConfigurationConstants.PAYOFF_SCHEDULE_PREVIEW_MAX_PAYOFF_PERIODS);
+        payoffSchedulePreviewMaxPayoffPeriods.put("value", 1200L);
+        payoffSchedulePreviewMaxPayoffPeriods.put("enabled", true);
+        payoffSchedulePreviewMaxPayoffPeriods.put("trapDoor", false);
+        defaults.add(payoffSchedulePreviewMaxPayoffPeriods);
+
+        HashMap<String, Object> payoffSchedulePreviewMaxTermPeriods = new HashMap<>();
+        payoffSchedulePreviewMaxTermPeriods.put("name", GlobalConfigurationConstants.PAYOFF_SCHEDULE_PREVIEW_MAX_TERM_PERIODS);
+        payoffSchedulePreviewMaxTermPeriods.put("value", 1200L);
+        payoffSchedulePreviewMaxTermPeriods.put("enabled", true);
+        payoffSchedulePreviewMaxTermPeriods.put("trapDoor", false);
+        defaults.add(payoffSchedulePreviewMaxTermPeriods);
+
+        HashMap<String, Object> idempotencyRecoverableErrorCodes = new HashMap<>();
+        idempotencyRecoverableErrorCodes.put("name", GlobalConfigurationConstants.IDEMPOTENCY_RECOVERABLE_ERROR_CODES);
+        idempotencyRecoverableErrorCodes.put("value", 0L);
+        idempotencyRecoverableErrorCodes.put("enabled", true);
+        idempotencyRecoverableErrorCodes.put("trapDoor", false);
+        idempotencyRecoverableErrorCodes.put("string_value", IDEMPOTENCY_RECOVERABLE_ERROR_CODES_DEFAULT);
+        defaults.add(idempotencyRecoverableErrorCodes);
+
         return defaults;
-    }
-
-    public PutGlobalConfigurationsResponse updateGlobalConfiguration(final String configName, PutGlobalConfigurationsRequest request) {
-        log.info("---------------------------------UPDATE VALUE FOR GLOBAL CONFIG---------------------------------------------");
-        return Calls.ok(FineractClientHelper.getFineractClient().globalConfigurations.updateConfigurationByName(configName, request));
-    }
-
-    public void updateGlobalConfigurationInternal(final String configName, final Long value) {
-        log.info("---------------------------UPDATE VALUE FOR GLOBAL CONFIG (internal) ---------------------------------------");
-        Calls.ok(FineractClientHelper.getFineractClient().legacy.updateInternalGlobalConfiguration(configName, value));
-    }
-
-    public void manageConfigurations(final String configurationName, final boolean enabled) {
-        GlobalConfigurationPropertyData configuration = getGlobalConfigurationByName(configurationName);
-        assertNotNull(configuration);
-        updateGlobalConfiguration(configurationName, new PutGlobalConfigurationsRequest().enabled(enabled));
-        GlobalConfigurationPropertyData updatedConfiguration = getGlobalConfigurationByName(configurationName);
-        assertEquals(updatedConfiguration.getEnabled(), enabled);
     }
 }

@@ -22,8 +22,9 @@ import java.time.LocalDate;
 import java.util.List;
 import org.apache.fineract.infrastructure.core.exception.MultiException;
 import org.apache.fineract.portfolio.loanaccount.domain.Loan;
+import org.apache.fineract.portfolio.loanaccount.domain.LoanCharge;
 import org.apache.fineract.portfolio.loanaccount.domain.LoanTransaction;
-import org.springframework.lang.NonNull;
+import org.jspecify.annotations.NonNull;
 
 public interface LoanAccrualsProcessingService {
 
@@ -45,4 +46,10 @@ public interface LoanAccrualsProcessingService {
 
     void processAccrualsOnLoanForeClosure(@NonNull Loan loan, @NonNull LocalDate foreClosureDate,
             @NonNull List<LoanTransaction> newAccrualTransactions);
+
+    boolean isRealTimeChargeAccrualApplicable(@NonNull Loan loan);
+
+    void processRealTimeChargeAccruals(@NonNull Loan loan, @NonNull List<LoanCharge> loanCharges);
+
+    void postChargeAccrual(@NonNull LoanTransaction chargeAccrual);
 }

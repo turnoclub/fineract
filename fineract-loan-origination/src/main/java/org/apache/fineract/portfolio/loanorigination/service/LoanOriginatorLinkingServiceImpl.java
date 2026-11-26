@@ -21,107 +21,114 @@ package org.apache.fineract.portfolio.loanorigination.service;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
-import java.sql.SQLException;
 import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
 import java.util.Set;
-import lombok.RequiredArgsConstructor;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.fineract.infrastructure.core.data.ApiParameterError;
+import org.apache.fineract.infrastructure.core.exception.PlatformApiDataValidationException;
 import org.apache.fineract.portfolio.loanaccount.service.LoanOriginatorLinkingService;
-import org.apache.fineract.portfolio.loanorigination.data.LoanApplicationOriginatorData;
 import org.apache.fineract.portfolio.loanorigination.domain.LoanOriginator;
 import org.apache.fineract.portfolio.loanorigination.domain.LoanOriginatorMapping;
 import org.apache.fineract.portfolio.loanorigination.domain.LoanOriginatorMappingRepository;
 import org.apache.fineract.portfolio.loanorigination.domain.LoanOriginatorRepository;
-import org.apache.fineract.portfolio.loanorigination.domain.LoanOriginatorStatus;
-import org.apache.fineract.portfolio.loanorigination.exception.LoanOriginatorNotActiveException;
-import org.apache.fineract.portfolio.loanorigination.exception.LoanOriginatorNotFoundException;
 import org.apache.fineract.portfolio.loanorigination.serialization.LoanApplicationOriginatorDataValidator;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.dao.DataAccessException;
-import org.springframework.dao.DataIntegrityViolationException;
-import org.springframework.orm.jpa.JpaSystemException;
+import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * Implementation of {@link LoanOriginatorLinkingService} that handles processing of originators during loan
- * application. This service is active only when the loan-origination module is enabled.
+ * Implementation of {@link LoanOriginatorLinkingService} that handles processing of originators during loan application
+ * and reconciles mappings during disbursement. This service is active only when the loan-origination module is enabled.
  */
 @Slf4j
+@Primary
 @Service("loanOriginatorLinkingServiceImpl")
-@RequiredArgsConstructor
 @ConditionalOnProperty(value = "fineract.module.loan-origination.enabled", havingValue = "true")
-public class LoanOriginatorLinkingServiceImpl implements LoanOriginatorLinkingService {
+public class LoanOriginatorLinkingServiceImpl extends AbstractLoanOriginatorLinkingServiceImpl {
 
-    private static final String SQL_STATE_INTEGRITY_CONSTRAINT_VIOLATION = "23";
-
-    private final LoanOriginatorRepository loanOriginatorRepository;
     private final LoanOriginatorMappingRepository loanOriginatorMappingRepository;
-    private final LoanApplicationOriginatorDataValidator validator;
-    private final LoanOriginatorHelper loanOriginatorHelper;
 
+    public LoanOriginatorLinkingServiceImpl(LoanOriginatorRepository loanOriginatorRepository,
+            LoanApplicationOriginatorDataValidator validator, LoanOriginatorHelper loanOriginatorHelper,
+            LoanOriginatorMappingRepository loanOriginatorMappingRepository) {
+        super(loanOriginatorRepository, validator, loanOriginatorHelper);
+        this.loanOriginatorMappingRepository = loanOriginatorMappingRepository;
+    }
+
+    @Override
+    protected void createAndSaveOriginatorMapping(Long loanId, Long originatorId) {
+        if (!loanOriginatorMappingRepository.existsByLoanIdAndOriginatorId(loanId, originatorId)) {
+            final LoanOriginator originatorRef = loanOriginatorRepository.getReferenceById(originatorId);
+            final LoanOriginatorMapping mapping = LoanOriginatorMapping.create(loanId, originatorRef);
+            loanOriginatorMappingRepository.save(mapping);
+            log.debug("Attached originator {} to loan {}", originatorId, loanId);
+        }
+    }
+
+    /**
+     * Reconciles loan-originator mappings for a disbursement request so the loan's mappings exactly match the supplied
+     * originator array. A null array is treated as no-op, while an empty array detaches all current originators.
+     *
+     * @param loanId
+     *            loan whose originator mappings should be reconciled
+     * @param originatorsArray
+     *            JSON array from the disbursement request, or null when the request omitted originators
+     */
     @Transactional
     @Override
-    public void processOriginatorsForLoanApplication(final Long loanId, final JsonArray originatorsArray) {
-        if (originatorsArray == null || originatorsArray.isEmpty()) {
+    public void processOriginatorsForLoanDisbursement(final Long loanId, final JsonArray originatorsArray) {
+        if (originatorsArray == null) {
             return;
         }
 
-        log.debug("Processing {} originators for loan application {}", originatorsArray.size(), loanId);
+        log.debug("Reconciling {} originators for loan disbursement {}", originatorsArray.size(), loanId);
 
-        final Set<Long> attachedOriginatorIds = new HashSet<>();
+        final Set<Long> requestedOriginatorIds = resolveOriginatorIdsForDisbursement(originatorsArray);
+        reconcileOriginatorMappings(loanId, requestedOriginatorIds);
+    }
+
+    private Set<Long> resolveOriginatorIdsForDisbursement(final JsonArray originatorsArray) {
+        final Set<Long> requestedOriginatorIds = new HashSet<>();
 
         for (final JsonElement element : originatorsArray) {
             if (!element.isJsonObject()) {
-                continue;
+                throw new PlatformApiDataValidationException(List.of(ApiParameterError.parameterError(
+                        "validation.msg.loan.originator.invalid.element", "Each originator entry must be a JSON object", "originators")));
             }
 
             final JsonObject jsonObject = element.getAsJsonObject();
-            final LoanApplicationOriginatorData originatorData = validator.validateAndExtract(jsonObject);
-            final Long originatorId = resolveOrCreateOriginatorId(originatorData);
-
-            if (attachedOriginatorIds.contains(originatorId)) {
-                log.debug("Originator {} already attached to loan {}, skipping duplicate", originatorId, loanId);
-                continue;
-            }
-
-            if (!loanOriginatorMappingRepository.existsByLoanIdAndOriginatorId(loanId, originatorId)) {
-                final LoanOriginator originatorRef = loanOriginatorRepository.getReferenceById(originatorId);
-                final LoanOriginatorMapping mapping = LoanOriginatorMapping.create(loanId, originatorRef);
-                loanOriginatorMappingRepository.save(mapping);
-                log.debug("Attached originator {} to loan {}", originatorId, loanId);
-            }
-
-            attachedOriginatorIds.add(originatorId);
+            requestedOriginatorIds.add(resolveOrCreateOriginatorId(validator.validateAndExtract(jsonObject),
+                    loanOriginatorHelper::findOrCreateOriginatorIdForLoanDisbursement));
         }
+
+        return requestedOriginatorIds;
     }
 
-    private Long resolveOrCreateOriginatorId(final LoanApplicationOriginatorData originatorData) {
-        if (originatorData.getId() != null) {
-            final LoanOriginator originator = loanOriginatorRepository.findById(originatorData.getId())
-                    .orElseThrow(() -> new LoanOriginatorNotFoundException(originatorData.getId()));
-            if (originator.getStatus() != LoanOriginatorStatus.ACTIVE) {
-                throw new LoanOriginatorNotActiveException(originator.getId(), originator.getStatus().getValue());
-            }
-            return originator.getId();
-        }
-        return findOrCreateOriginatorIdByExternalId(originatorData);
-    }
+    private void reconcileOriginatorMappings(final Long loanId, final Set<Long> requestedOriginatorIds) {
+        final List<LoanOriginatorMapping> currentMappings = loanOriginatorMappingRepository.findByLoanId(loanId);
 
-    private Long findOrCreateOriginatorIdByExternalId(final LoanApplicationOriginatorData originatorData) {
-        try {
-            return loanOriginatorHelper.findOrCreateOriginatorId(originatorData);
-        } catch (final JpaSystemException | DataIntegrityViolationException e) {
-            if (!isConstraintViolation(e)) {
-                throw e;
-            }
-            // Another thread created the originator concurrently - retry
-            return loanOriginatorHelper.findOrCreateOriginatorId(originatorData);
-        }
-    }
+        final Map<Long, LoanOriginatorMapping> currentByOriginatorId = currentMappings.stream()
+                .collect(Collectors.toMap(mapping -> mapping.getOriginator().getId(), Function.identity()));
 
-    private boolean isConstraintViolation(final DataAccessException e) {
-        return e.getMostSpecificCause() instanceof SQLException sqlEx && sqlEx.getSQLState() != null
-                && sqlEx.getSQLState().startsWith(SQL_STATE_INTEGRITY_CONSTRAINT_VIOLATION);
+        final List<LoanOriginatorMapping> toRemove = currentMappings.stream()
+                .filter(mapping -> !requestedOriginatorIds.contains(mapping.getOriginator().getId())).toList();
+
+        final List<LoanOriginatorMapping> toAdd = requestedOriginatorIds.stream()
+                .filter(originatorId -> !currentByOriginatorId.containsKey(originatorId))
+                .map(originatorId -> LoanOriginatorMapping.create(loanId, loanOriginatorRepository.getReferenceById(originatorId)))
+                .toList();
+
+        if (!toRemove.isEmpty()) {
+            loanOriginatorMappingRepository.deleteAll(toRemove);
+        }
+
+        if (!toAdd.isEmpty()) {
+            loanOriginatorMappingRepository.saveAll(toAdd);
+        }
     }
 }

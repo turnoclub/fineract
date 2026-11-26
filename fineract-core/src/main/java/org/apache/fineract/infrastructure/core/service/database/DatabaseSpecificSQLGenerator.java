@@ -21,6 +21,7 @@ package org.apache.fineract.infrastructure.core.service.database;
 import static java.lang.String.format;
 
 import java.math.BigInteger;
+import java.sql.Connection;
 import java.sql.SQLException;
 import java.util.Collection;
 import java.util.Collections;
@@ -31,10 +32,10 @@ import lombok.RequiredArgsConstructor;
 import org.apache.fineract.infrastructure.core.service.DateUtils;
 import org.apache.fineract.infrastructure.dataqueries.data.ResultsetColumnHeaderData;
 import org.apache.logging.log4j.util.Strings;
+import org.jspecify.annotations.NonNull;
 import org.springframework.data.domain.Sort;
 import org.springframework.jdbc.datasource.DataSourceUtils;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
-import org.springframework.lang.NonNull;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -106,7 +107,7 @@ public class DatabaseSpecificSQLGenerator {
 
     public String countQueryResult(@NonNull String sql) {
         // Needs to remove the limit and offset
-        sql = sql.replaceAll("LIMIT \\d+", "").replaceAll("OFFSET \\d+", "").trim();
+        sql = sql.replaceAll("(?i)LIMIT\\s+\\d+", "").replaceAll("(?i)OFFSET\\s+\\d+", "").trim();
         return format("SELECT COUNT(*) FROM (%s) AS temp", sql);
     }
 
@@ -164,7 +165,8 @@ public class DatabaseSpecificSQLGenerator {
         if (databaseTypeResolver.isMySQL()) {
             return format("CAST(%s AS CHAR) COLLATE utf8mb4_unicode_ci", sql);
         } else if (databaseTypeResolver.isPostgreSQL()) {
-            return format("%s::CHAR", sql);
+            // ::CHAR is CHAR(1) on PostgreSQL and silently truncates to one character
+            return format("%s::VARCHAR", sql);
         } else {
             throw new IllegalStateException(
                     "Database type is not supported for casting to character " + databaseTypeResolver.databaseType());
@@ -353,10 +355,13 @@ public class DatabaseSpecificSQLGenerator {
     public Object[] inParametersFor(List<Long> ids) {
         return switch (getDialect()) {
             case POSTGRESQL -> {
+                final Connection con = DataSourceUtils.getConnection(dataSource);
                 try {
-                    yield new Object[] { DataSourceUtils.getConnection(dataSource).createArrayOf("bigint", ids.toArray(new Long[0])) };
+                    yield new Object[] { con.createArrayOf("bigint", ids.toArray(new Long[0])) };
                 } catch (SQLException e) {
                     throw new RuntimeException(e);
+                } finally {
+                    DataSourceUtils.releaseConnection(con, dataSource);
                 }
             }
             case MYSQL -> ids.toArray();

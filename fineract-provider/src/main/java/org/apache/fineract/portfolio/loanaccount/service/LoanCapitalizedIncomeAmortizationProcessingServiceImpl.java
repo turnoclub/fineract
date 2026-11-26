@@ -24,7 +24,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import lombok.RequiredArgsConstructor;
-import org.apache.fineract.infrastructure.configuration.domain.ConfigurationDomainService;
 import org.apache.fineract.infrastructure.core.domain.ExternalId;
 import org.apache.fineract.infrastructure.core.service.DateUtils;
 import org.apache.fineract.infrastructure.core.service.ExternalIdFactory;
@@ -45,7 +44,7 @@ import org.apache.fineract.portfolio.loanaccount.domain.LoanTransactionRelationT
 import org.apache.fineract.portfolio.loanaccount.domain.LoanTransactionRepository;
 import org.apache.fineract.portfolio.loanaccount.repository.LoanCapitalizedIncomeBalanceRepository;
 import org.apache.fineract.portfolio.loanaccount.util.CapitalizedIncomeAmortizationUtil;
-import org.springframework.lang.NonNull;
+import org.jspecify.annotations.NonNull;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -53,7 +52,6 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class LoanCapitalizedIncomeAmortizationProcessingServiceImpl implements LoanCapitalizedIncomeAmortizationProcessingService {
 
-    private final ConfigurationDomainService configurationDomainService;
     private final LoanTransactionRepository loanTransactionRepository;
     private final LoanCapitalizedIncomeBalanceRepository loanCapitalizedIncomeBalanceRepository;
     private final BusinessEventNotifierService businessEventNotifierService;
@@ -64,21 +62,52 @@ public class LoanCapitalizedIncomeAmortizationProcessingServiceImpl implements L
     @Override
     @Transactional
     public void processCapitalizedIncomeAmortizationOnLoanClosure(@NonNull final Loan loan, final boolean addJournal) {
-        final LocalDate transactionDate = getFinalCapitalizedIncomeAmortizationTransactionDate(loan);
-        final Optional<LoanTransaction> amortizationTransaction = createCapitalizedIncomeAmortizationTransaction(loan, transactionDate,
-                false, null);
-        amortizationTransaction.ifPresent(loanTransaction -> {
-            if (loanTransaction.isCapitalizedIncomeAmortization()) {
-                businessEventNotifierService
-                        .notifyPostBusinessEvent(new LoanCapitalizedIncomeAmortizationTransactionCreatedBusinessEvent(loanTransaction));
-            } else {
-                businessEventNotifierService.notifyPostBusinessEvent(
-                        new LoanCapitalizedIncomeAmortizationAdjustmentTransactionCreatedBusinessEvent(loanTransaction));
-            }
-            if (addJournal) {
-                journalEntryPoster.postJournalEntriesForLoanTransaction(amortizationTransaction.get(), false, false);
-            }
-        });
+        processRemainingCapitalizedIncomeAmortization(loan, getFinalCapitalizedIncomeAmortizationTransactionDate(loan), addJournal);
+    }
+
+    @Override
+    @Transactional
+    public void processCapitalizedIncomeAmortizationOnLoanSale(@NonNull final Loan loan, @NonNull final LocalDate transactionDate,
+            final boolean addJournal) {
+        processRemainingCapitalizedIncomeAmortization(loan, transactionDate, addJournal);
+    }
+
+    @Override
+    @Transactional
+    public void processCapitalizedIncomeAmortizationImmediately(@NonNull final Loan loan,
+            @NonNull final LoanTransaction capitalizedIncomeRelatedTransaction, @NonNull final LocalDate transactionDate,
+            final boolean addJournal) {
+        final LoanCapitalizedIncomeBalance relatedBalance = resolveRelatedCapitalizedIncomeBalance(loan,
+                capitalizedIncomeRelatedTransaction);
+        if (relatedBalance == null) {
+            return;
+        }
+        // Recognize only the posted capitalized income/adjustment balance so other deferred balances keep daily COB
+        // amortization.
+        createCapitalizedIncomeAmortizationTransaction(loan, transactionDate, false, null, List.of(relatedBalance), false)
+                .ifPresent(loanTransaction -> notifyAndPostJournal(loanTransaction, addJournal));
+    }
+
+    private void processRemainingCapitalizedIncomeAmortization(@NonNull final Loan loan, @NonNull final LocalDate transactionDate,
+            final boolean addJournal) {
+        createCapitalizedIncomeAmortizationTransaction(loan, transactionDate, false, null,
+                loanCapitalizedIncomeBalanceRepository.findAllByLoanIdAndClosedFalse(loan.getId()), true)
+                .ifPresent(loanTransaction -> notifyAndPostJournal(loanTransaction, addJournal));
+    }
+
+    private LoanCapitalizedIncomeBalance resolveRelatedCapitalizedIncomeBalance(final Loan loan,
+            final LoanTransaction capitalizedIncomeRelatedTransaction) {
+        // Type checks on the enum: LoanTransaction#isCapitalizedIncome() and #isCapitalizedIncomeAdjustment() exclude
+        // reversed transactions.
+        if (capitalizedIncomeRelatedTransaction.getTypeOf().isCapitalizedIncome()) {
+            // Includes deleted balances (e.g. after reverse) so recognized income can still be adjusted.
+            return loanCapitalizedIncomeBalanceRepository.findByLoanIdAndLoanTransactionIdAndClosedFalse(loan.getId(),
+                    capitalizedIncomeRelatedTransaction.getId());
+        }
+        if (capitalizedIncomeRelatedTransaction.getTypeOf().isCapitalizedIncomeAdjustment()) {
+            return loanCapitalizedIncomeBalanceRepository.findBalanceForAdjustment(capitalizedIncomeRelatedTransaction.getId());
+        }
+        return null;
     }
 
     @Override
@@ -91,32 +120,28 @@ public class LoanCapitalizedIncomeAmortizationProcessingServiceImpl implements L
         }
 
         final Optional<LoanTransaction> amortizationTransaction = createCapitalizedIncomeAmortizationTransaction(loan, transactionDate,
-                true, chargeOffTransaction);
-        if (amortizationTransaction.isPresent()) {
-            journalEntryPoster.postJournalEntriesForLoanTransaction(amortizationTransaction.get(), false, false);
-            if (amortizationTransaction.get().isCapitalizedIncomeAmortization()) {
-                businessEventNotifierService.notifyPostBusinessEvent(
-                        new LoanCapitalizedIncomeAmortizationTransactionCreatedBusinessEvent(amortizationTransaction.get()));
-            } else {
-                businessEventNotifierService.notifyPostBusinessEvent(
-                        new LoanCapitalizedIncomeAmortizationAdjustmentTransactionCreatedBusinessEvent(amortizationTransaction.get()));
-            }
-        }
+                true, chargeOffTransaction, loanCapitalizedIncomeBalanceRepository.findAllByLoanIdAndClosedFalse(loan.getId()), true);
+        amortizationTransaction.ifPresent(loanTransaction -> notifyAndPostJournal(loanTransaction, true));
     }
 
+    /**
+     * @param balances
+     *            balances to recognize (all open balances for sale/closure/charge-off, or a single related balance for
+     *            IMMEDIATE)
+     * @param useLoanWideAmortizedTotal
+     *            when true (sale/closure/charge-off), transaction amount is loan-wide remaining unrecognized; when
+     *            false (IMMEDIATE), amount is derived only from the given balances so other capitalized incomes are not
+     *            touched
+     */
     private Optional<LoanTransaction> createCapitalizedIncomeAmortizationTransaction(final Loan loan, final LocalDate transactionDate,
-            final boolean isChargeOff, final LoanTransaction chargeOffTransaction) {
-        ExternalId externalId = ExternalId.empty();
+            final boolean isChargeOff, final LoanTransaction chargeOffTransaction, final List<LoanCapitalizedIncomeBalance> balances,
+            final boolean useLoanWideAmortizedTotal) {
+        final ExternalId externalId = externalIdFactory.create();
 
-        if (configurationDomainService.isExternalIdAutoGenerationEnabled()) {
-            externalId = ExternalId.generate();
-        }
-
-        final List<LoanCapitalizedIncomeBalance> balances = loanCapitalizedIncomeBalanceRepository
-                .findAllByLoanIdAndClosedFalse(loan.getId());
         final List<LoanAmortizationAllocationMapping> loanAmortizationAllocationMappings = new ArrayList<>();
 
         BigDecimal totalAmortization = BigDecimal.ZERO;
+        BigDecimal selectedBalancesNetAmount = BigDecimal.ZERO;
         final BigDecimal totalAmortized = loanTransactionRepository.getAmortizedAmountCapitalizedIncome(loan);
         for (LoanCapitalizedIncomeBalance balance : balances) {
             BigDecimal amortizationAmount;
@@ -130,17 +155,14 @@ public class LoanCapitalizedIncomeAmortizationProcessingServiceImpl implements L
                 totalAmortization = totalAmortization.add(amortizationTillDate.getAmount());
                 final BigDecimal alreadyAmortizedAmount = loanAmortizationAllocationService
                         .calculateAlreadyAmortizedAmount(balance.getLoanTransaction().getId(), loan.getId());
-                if (!adjustments.isEmpty()) {
-                    if (alreadyAmortizedAmount.compareTo(amortizationTillDate.getAmount()) > 0) {
-                        amortizationAmount = alreadyAmortizedAmount.subtract(amortizationTillDate.getAmount());
-                        amortizationType = AmortizationType.AM_ADJ;
-                    } else {
-                        amortizationAmount = amortizationTillDate.getAmount().subtract(alreadyAmortizedAmount);
-                        amortizationType = AmortizationType.AM;
-                    }
+                if (alreadyAmortizedAmount.compareTo(amortizationTillDate.getAmount()) > 0) {
+                    amortizationAmount = alreadyAmortizedAmount.subtract(amortizationTillDate.getAmount());
+                    amortizationType = AmortizationType.AM_ADJ;
+                    selectedBalancesNetAmount = selectedBalancesNetAmount.subtract(amortizationAmount);
                 } else {
                     amortizationAmount = amortizationTillDate.getAmount().subtract(alreadyAmortizedAmount);
                     amortizationType = AmortizationType.AM;
+                    selectedBalancesNetAmount = selectedBalancesNetAmount.add(amortizationAmount);
                 }
                 if (isChargeOff) {
                     balance.setChargedOffAmount(balance.getUnrecognizedAmount());
@@ -149,6 +171,7 @@ public class LoanCapitalizedIncomeAmortizationProcessingServiceImpl implements L
             } else {
                 amortizationAmount = balance.getAmount().subtract(balance.getUnrecognizedAmount());
                 amortizationType = AmortizationType.AM_ADJ;
+                selectedBalancesNetAmount = selectedBalancesNetAmount.subtract(amortizationAmount);
                 balance.setClosed(true);
             }
             if (amortizationAmount.compareTo(BigDecimal.ZERO) > 0) {
@@ -159,16 +182,27 @@ public class LoanCapitalizedIncomeAmortizationProcessingServiceImpl implements L
             }
         }
 
-        final BigDecimal totalUnrecognizedAmount = totalAmortization.subtract(totalAmortized);
-        if (MathUtil.isZero(totalUnrecognizedAmount)) {
-            return Optional.empty();
+        loanCapitalizedIncomeBalanceRepository.saveAll(balances);
+
+        final BigDecimal amortizationTransactionAmount;
+        if (useLoanWideAmortizedTotal) {
+            final BigDecimal totalUnrecognizedAmount = totalAmortization.subtract(totalAmortized);
+            if (MathUtil.isZero(totalUnrecognizedAmount)) {
+                return Optional.empty();
+            }
+            amortizationTransactionAmount = totalUnrecognizedAmount;
+        } else {
+            if (MathUtil.isZero(selectedBalancesNetAmount)) {
+                return Optional.empty();
+            }
+            amortizationTransactionAmount = selectedBalancesNetAmount;
         }
 
-        final LoanTransaction amortizationTransaction = MathUtil.isGreaterThanZero(totalUnrecognizedAmount)
-                ? LoanTransaction.capitalizedIncomeAmortization(loan, loan.getOffice(), transactionDate, totalUnrecognizedAmount,
+        final LoanTransaction amortizationTransaction = MathUtil.isGreaterThanZero(amortizationTransactionAmount)
+                ? LoanTransaction.capitalizedIncomeAmortization(loan, loan.getOffice(), transactionDate, amortizationTransactionAmount,
                         externalId)
                 : LoanTransaction.capitalizedIncomeAmortizationAdjustment(loan,
-                        Money.of(loan.getCurrency(), MathUtil.negate(totalUnrecognizedAmount)), transactionDate, externalId);
+                        Money.of(loan.getCurrency(), MathUtil.negate(amortizationTransactionAmount)), transactionDate, externalId);
         if (isChargeOff) {
             amortizationTransaction.getLoanTransactionRelations().add(LoanTransactionRelation.linkToTransaction(amortizationTransaction,
                     chargeOffTransaction, LoanTransactionRelationTypeEnum.RELATED));
@@ -195,9 +229,9 @@ public class LoanCapitalizedIncomeAmortizationProcessingServiceImpl implements L
                                         && rel.getToTransaction().equals(loanTransaction)))
                 .forEach(transaction -> {
                     transaction.reverse();
+                    journalEntryPoster.postJournalEntriesForLoanTransaction(transaction, false, false);
                     final LoanAdjustTransactionBusinessEvent.Data data = new LoanAdjustTransactionBusinessEvent.Data(transaction);
                     businessEventNotifierService.notifyPostBusinessEvent(new LoanAdjustTransactionBusinessEvent(data));
-                    journalEntryPoster.postJournalEntriesForLoanTransaction(transaction, false, false);
                 });
 
         for (LoanCapitalizedIncomeBalance balance : loanCapitalizedIncomeBalanceRepository
@@ -229,20 +263,26 @@ public class LoanCapitalizedIncomeAmortizationProcessingServiceImpl implements L
             AmortizationType amortizationType;
             if (!balance.isDeleted()) {
                 final List<LoanTransaction> adjustments = loanTransactionRepository.findAdjustments(balance.getLoanTransaction());
-                final Money amortizationTillDate = CapitalizedIncomeAmortizationUtil.calculateTotalAmortizationTillDate(balance,
-                        adjustments, maturityDate, loan.getLoanProductRelatedDetail().getCapitalizedIncomeStrategy(), tillDatePlusOne,
-                        loan.getCurrency());
-                totalAmortization = totalAmortization.add(amortizationTillDate);
                 final BigDecimal alreadyAmortizedAmount = loanAmortizationAllocationService
                         .calculateAlreadyAmortizedAmount(balance.getLoanTransaction().getId(), loan.getId());
-                if (!adjustments.isEmpty()) {
-                    if (alreadyAmortizedAmount.compareTo(amortizationTillDate.getAmount()) > 0) {
-                        amortizationAmount = alreadyAmortizedAmount.subtract(amortizationTillDate.getAmount());
-                        amortizationType = AmortizationType.AM_ADJ;
-                    } else {
-                        amortizationAmount = amortizationTillDate.getAmount().subtract(alreadyAmortizedAmount);
-                        amortizationType = AmortizationType.AM;
-                    }
+                if (MathUtil.isZero(balance.getUnrecognizedAmount()) && adjustments.isEmpty()) {
+                    totalAmortization = totalAmortization.add(Money.of(loan.getCurrency(), alreadyAmortizedAmount));
+                    continue;
+                }
+                final BigDecimal grossAmortizedAmount = loanAmortizationAllocationService
+                        .calculateGrossAmortizedAmount(balance.getLoanTransaction().getId(), loan.getId());
+                final BigDecimal netCapitalizedIncomeAmount = MathUtil.subtract(balance.getAmount(),
+                        MathUtil.nullToZero(balance.getAmountAdjustment()));
+                final boolean fullyAmortizedOnSaleOrClosure = MathUtil.isZero(balance.getUnrecognizedAmount())
+                        && grossAmortizedAmount.compareTo(netCapitalizedIncomeAmount) >= 0;
+                final LocalDate effectiveTillDate = fullyAmortizedOnSaleOrClosure ? maturityDate : tillDatePlusOne;
+                final Money amortizationTillDate = CapitalizedIncomeAmortizationUtil.calculateTotalAmortizationTillDate(balance,
+                        adjustments, maturityDate, loan.getLoanProductRelatedDetail().getCapitalizedIncomeStrategy(), effectiveTillDate,
+                        loan.getCurrency());
+                totalAmortization = totalAmortization.add(amortizationTillDate);
+                if (alreadyAmortizedAmount.compareTo(amortizationTillDate.getAmount()) > 0) {
+                    amortizationAmount = alreadyAmortizedAmount.subtract(amortizationTillDate.getAmount());
+                    amortizationType = AmortizationType.AM_ADJ;
                 } else {
                     amortizationAmount = amortizationTillDate.getAmount().subtract(alreadyAmortizedAmount);
                     amortizationType = AmortizationType.AM;
@@ -287,6 +327,19 @@ public class LoanCapitalizedIncomeAmortizationProcessingServiceImpl implements L
                     ? new LoanCapitalizedIncomeAmortizationTransactionCreatedBusinessEvent(transaction)
                     : new LoanCapitalizedIncomeAmortizationAdjustmentTransactionCreatedBusinessEvent(transaction);
             businessEventNotifierService.notifyPostBusinessEvent(event);
+        }
+    }
+
+    private void notifyAndPostJournal(final LoanTransaction amortizationTransaction, final boolean addJournal) {
+        if (amortizationTransaction.isCapitalizedIncomeAmortization()) {
+            businessEventNotifierService
+                    .notifyPostBusinessEvent(new LoanCapitalizedIncomeAmortizationTransactionCreatedBusinessEvent(amortizationTransaction));
+        } else {
+            businessEventNotifierService.notifyPostBusinessEvent(
+                    new LoanCapitalizedIncomeAmortizationAdjustmentTransactionCreatedBusinessEvent(amortizationTransaction));
+        }
+        if (addJournal) {
+            journalEntryPoster.postJournalEntriesForLoanTransaction(amortizationTransaction, false, false);
         }
     }
 

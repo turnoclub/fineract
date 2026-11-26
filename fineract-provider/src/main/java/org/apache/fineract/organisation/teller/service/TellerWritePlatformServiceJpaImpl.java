@@ -19,6 +19,7 @@
 package org.apache.fineract.organisation.teller.service;
 
 import jakarta.persistence.PersistenceException;
+import java.util.Collections;
 import java.util.Map;
 import java.util.Set;
 import lombok.AllArgsConstructor;
@@ -62,6 +63,12 @@ import org.springframework.transaction.annotation.Transactional;
 @AllArgsConstructor
 @Slf4j
 public class TellerWritePlatformServiceJpaImpl implements TellerWritePlatformService {
+
+    /** The cashier fields that decide when the assignment applies, see {@link #updateCashierAllocation}. */
+    private static final Set<String> CASHIER_SCHEDULE_PARAMETERS = Set.of(TellerCommandFromApiJsonDeserializer.START_DATE,
+            TellerCommandFromApiJsonDeserializer.END_DATE, TellerCommandFromApiJsonDeserializer.IS_FULL_DAY,
+            TellerCommandFromApiJsonDeserializer.HOUR_START_TIME, TellerCommandFromApiJsonDeserializer.MIN_START_TIME,
+            TellerCommandFromApiJsonDeserializer.HOUR_END_TIME, TellerCommandFromApiJsonDeserializer.MIN_END_TIME);
 
     private final PlatformSecurityContext context;
     private final TellerCommandFromApiJsonDeserializer fromApiJsonDeserializer;
@@ -161,7 +168,6 @@ public class TellerWritePlatformServiceJpaImpl implements TellerWritePlatformSer
     @Override
     @Transactional
     public CommandProcessingResult deleteTeller(Long tellerId) {
-        // TODO Auto-generated method stub
 
         Teller teller = tellerRepositoryWrapper.findOneWithNotFoundDetection(tellerId);
         Set<Cashier> isTellerIdPresentInCashier = teller.getCashiers();
@@ -183,13 +189,13 @@ public class TellerWritePlatformServiceJpaImpl implements TellerWritePlatformSer
      * Guaranteed to throw an exception no matter what the data integrity issue is.
      */
     private void handleTellerDataIntegrityIssues(final JsonCommand command, final Throwable realCause, final Exception dve) {
-        if (realCause.getMessage().contains("m_tellers_name_unq")) {
+        if (realCause.getMessage().contains("m_tellers_office_name_unq")) {
             final String name = command.stringValueOfParameterNamed("name");
             throw new PlatformDataIntegrityException("error.msg.teller.duplicate.name", "Teller with name `" + name + "` already exists",
                     "name", name);
         }
 
-        log.error("Error occured.", dve);
+        log.error("Error occurred.", dve);
         throw ErrorHandler.getMappable(dve, "error.msg.teller.unknown.data.integrity.issue",
                 "Unknown data integrity issue with resource: " + realCause.getMessage());
     }
@@ -265,11 +271,18 @@ public class TellerWritePlatformServiceJpaImpl implements TellerWritePlatformSer
 
             final Cashier cashier = validateUserPriviledgeOnCashierAndRetrieve(currentUser, tellerId, cashierId);
 
+            final boolean staffChanged = !staff.getId().equals(cashier.getStaff().getId());
             cashier.setStaff(staff);
 
             // TODO - check if staff office and teller office match
 
             final Map<String, Object> changes = cashier.update(command);
+            // Only a new staff member, dates or hours can create an overlap, so other changes (e.g. the description)
+            // still
+            // work on an existing assignment that predates the overlap check
+            if (staffChanged || !Collections.disjoint(changes.keySet(), CASHIER_SCHEDULE_PARAMETERS)) {
+                this.cashierTransactionDataValidator.validateCashierAllowedDateAndTime(cashier, cashier.getTeller());
+            }
 
             if (!changes.isEmpty()) {
                 this.cashierRepository.saveAndFlush(cashier);
@@ -354,31 +367,6 @@ public class TellerWritePlatformServiceJpaImpl implements TellerWritePlatformSer
             final Cashier cashier = this.cashierRepository.findById(cashierId).orElseThrow(() -> new CashierNotFoundException(cashierId));
 
             this.fromApiJsonDeserializer.validateForCashTxnForCashier(command.json());
-
-            // TODO: can we please remove this whole block?!? this is 20 lines of dead code!!!
-            final String entityType = command.stringValueOfParameterNamed("entityType");
-            if (entityType != null) {
-                if (entityType.equals("loan account")) {
-                    // TODO : Check if loan account exists
-                    // LoanAccount loan = null;
-                    // if (loan == null) { throw new
-                    // LoanAccountFoundException(entityId); }
-                } else if (entityType.equals("savings account")) {
-                    // TODO : Check if loan account exists
-                    // SavingsAccount savingsaccount = null;
-                    // if (savingsaccount == null) { throw new
-                    // SavingsAccountNotFoundException(entityId); }
-
-                }
-                if (entityType.equals("client")) {
-                    // TODO: Check if client exists
-                    // Client client = null;
-                    // if (client == null) { throw new
-                    // ClientNotFoundException(entityId); }
-                } else {
-                    // TODO : Invalid type handling
-                }
-            }
 
             final CashierTransaction cashierTxn = CashierTransaction.fromJson(cashier, command);
             cashierTxn.setTxnType(txnType.getId());

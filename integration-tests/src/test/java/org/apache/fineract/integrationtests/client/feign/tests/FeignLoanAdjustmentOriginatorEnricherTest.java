@@ -20,13 +20,13 @@ package org.apache.fineract.integrationtests.client.feign.tests;
 
 import java.util.List;
 import org.apache.fineract.client.feign.FineractFeignClient;
-import org.apache.fineract.client.models.ChargeRequest;
 import org.apache.fineract.client.models.GetLoansLoanIdResponse;
 import org.apache.fineract.client.models.GetLoansLoanIdTransactions;
 import org.apache.fineract.client.models.PostLoansLoanIdChargesChargeIdRequest;
 import org.apache.fineract.client.models.PostLoansLoanIdChargesRequest;
 import org.apache.fineract.infrastructure.event.external.data.ExternalEventResponse;
 import org.apache.fineract.integrationtests.client.feign.FeignLoanTestBase;
+import org.apache.fineract.integrationtests.client.feign.helpers.FeignChargesHelper;
 import org.apache.fineract.integrationtests.client.feign.helpers.FeignExternalEventHelper;
 import org.apache.fineract.integrationtests.client.feign.helpers.FeignLoanOriginatorHelper;
 import org.apache.fineract.integrationtests.client.feign.modules.ExternalEventTestValidators;
@@ -40,30 +40,37 @@ public class FeignLoanAdjustmentOriginatorEnricherTest extends FeignLoanTestBase
 
     private static final String ADJUST_EVENT = "LoanAdjustTransactionBusinessEvent";
     private static final String ACCRUAL_EVENT = "LoanAccrualTransactionCreatedBusinessEvent";
+    // FINERACT-2684: the adjustment of a transaction is only posted while that transaction type's own event is enabled
+    // too, so each test also switches on the event of the transaction it undoes.
+    private static final String REPAYMENT_EVENT = "LoanTransactionMakeRepaymentPostBusinessEvent";
+    private static final String WAIVE_CHARGE_EVENT = "LoanWaiveChargeBusinessEvent";
 
     private static FineractFeignClient fineractClient;
     private static FeignLoanOriginatorHelper originatorHelper;
     private static FeignExternalEventHelper externalEventHelper;
+    private static FeignChargesHelper chargesHelper;
 
     @BeforeAll
     public static void setupOriginatorHelpers() {
         fineractClient = FineractFeignClientHelper.getFineractFeignClient();
         originatorHelper = new FeignLoanOriginatorHelper(fineractClient);
         externalEventHelper = new FeignExternalEventHelper(fineractClient);
+        chargesHelper = new FeignChargesHelper(fineractClient);
     }
 
     @Test
     public void testLoanAdjustTransactionEventContainsOriginators() {
         externalEventHelper.enableBusinessEvent(ADJUST_EVENT);
+        externalEventHelper.enableBusinessEvent(REPAYMENT_EVENT);
         try {
             final String originatorExternalId = FeignLoanOriginatorHelper.generateUniqueExternalId();
             final Long originatorId = originatorHelper.createOriginator(originatorExternalId, "Test Originator", "ACTIVE");
             final Long clientId = createClient();
-            final Long productId = loanHelper.createSimpleLoanProduct();
+            final Long productId = loanHelper.createSimpleLoanProduct().getResourceId();
             final String today = Utils.dateFormatter.format(Utils.getLocalDateOfTenant());
 
             // Create loan, attach originator, approve, disburse
-            final Long loanId = loanHelper.createSubmittedLoan(clientId, productId, today, 10000.0, 12);
+            final Long loanId = loanHelper.createSubmittedLoan(clientId, productId, today, 10000.0, 12).getLoanId();
             originatorHelper.attachOriginatorToLoan(loanId, originatorId);
             approveLoan(loanId, LoanRequestBuilders.approveLoan(10000.0, today));
             disburseLoan(loanId, LoanRequestBuilders.disburseLoan(10000.0, today));
@@ -80,15 +87,17 @@ public class FeignLoanAdjustmentOriginatorEnricherTest extends FeignLoanTestBase
             ExternalEventTestValidators.assertOriginatorsInField(event, "transactionToAdjust", originatorExternalId);
         } finally {
             externalEventHelper.disableBusinessEvent(ADJUST_EVENT);
+            externalEventHelper.disableBusinessEvent(REPAYMENT_EVENT);
         }
     }
 
     @Test
     public void testLoanAdjustTransactionEventWithNoOriginators() {
         externalEventHelper.enableBusinessEvent(ADJUST_EVENT);
+        externalEventHelper.enableBusinessEvent(REPAYMENT_EVENT);
         try {
             final Long clientId = createClient();
-            final Long productId = loanHelper.createSimpleLoanProduct();
+            final Long productId = loanHelper.createSimpleLoanProduct().getResourceId();
             final String today = Utils.dateFormatter.format(Utils.getLocalDateOfTenant());
 
             final Long loanId = createApproveAndDisburseLoan(clientId, productId, today, 10000.0, 12);
@@ -104,6 +113,7 @@ public class FeignLoanAdjustmentOriginatorEnricherTest extends FeignLoanTestBase
             ExternalEventTestValidators.assertNoOriginatorsInField(event, "transactionToAdjust");
         } finally {
             externalEventHelper.disableBusinessEvent(ADJUST_EVENT);
+            externalEventHelper.disableBusinessEvent(REPAYMENT_EVENT);
         }
     }
 
@@ -118,14 +128,14 @@ public class FeignLoanAdjustmentOriginatorEnricherTest extends FeignLoanTestBase
             final String today = Utils.dateFormatter.format(Utils.getLocalDateOfTenant());
 
             // Create loan with accrual accounting, attach originator, approve, disburse
-            final Long loanId = loanHelper.createSubmittedLoan(clientId, productId, today, 10000.0, 4);
+            final Long loanId = loanHelper.createSubmittedLoan(clientId, productId, today, 10000.0, 4).getLoanId();
             originatorHelper.attachOriginatorToLoan(loanId, originatorId);
             approveLoan(loanId, LoanRequestBuilders.approveLoan(10000.0, today));
             disburseLoan(loanId, LoanRequestBuilders.disburseLoan(10000.0, today));
 
             // Add a fee charge to the loan
             final Long chargeId = createFlatFeeCharge(100.0, "EUR");
-            ok(() -> fineractClient.loanCharges().executeLoanCharge(loanId, new PostLoansLoanIdChargesRequest().chargeId(chargeId)
+            ok(() -> fineractClient.loanCharges().createOrPayLoanCharge(loanId, new PostLoansLoanIdChargesRequest().chargeId(chargeId)
                     .amount(100.0).locale("en").dateFormat("dd MMMM yyyy").dueDate(today), (String) null));
 
             externalEventHelper.deleteAllExternalEvents();
@@ -145,6 +155,7 @@ public class FeignLoanAdjustmentOriginatorEnricherTest extends FeignLoanTestBase
     @Test
     public void testAdjustEventContainsOriginatorsAfterChargeWaiverReversal() {
         externalEventHelper.enableBusinessEvent(ADJUST_EVENT);
+        externalEventHelper.enableBusinessEvent(WAIVE_CHARGE_EVENT);
         try {
             final String originatorExternalId = FeignLoanOriginatorHelper.generateUniqueExternalId();
             final Long originatorId = originatorHelper.createOriginator(originatorExternalId, "Test Originator", "ACTIVE");
@@ -153,15 +164,17 @@ public class FeignLoanAdjustmentOriginatorEnricherTest extends FeignLoanTestBase
             final String today = Utils.dateFormatter.format(Utils.getLocalDateOfTenant());
 
             // Create loan with accrual accounting, attach originator, approve, disburse
-            final Long loanId = loanHelper.createSubmittedLoan(clientId, productId, today, 10000.0, 4);
+            final Long loanId = loanHelper.createSubmittedLoan(clientId, productId, today, 10000.0, 4).getLoanId();
             originatorHelper.attachOriginatorToLoan(loanId, originatorId);
             approveLoan(loanId, LoanRequestBuilders.approveLoan(10000.0, today));
             disburseLoan(loanId, LoanRequestBuilders.disburseLoan(10000.0, today));
 
-            // Add a fee charge and waive it
+            // Add a fee charge and waive it. EUR is deliberately not an organisation currency: the enabled waive charge
+            // event serializes the charge, which must still resolve its currency.
             final Long chargeId = createFlatFeeCharge(100.0, "EUR");
-            final Long loanChargeId = ok(() -> fineractClient.loanCharges().executeLoanCharge(loanId, new PostLoansLoanIdChargesRequest()
-                    .chargeId(chargeId).amount(100.0).locale("en").dateFormat("dd MMMM yyyy").dueDate(today), (String) null))
+            final Long loanChargeId = ok(
+                    () -> fineractClient.loanCharges().createOrPayLoanCharge(loanId, new PostLoansLoanIdChargesRequest().chargeId(chargeId)
+                            .amount(100.0).locale("en").dateFormat("dd MMMM yyyy").dueDate(today), (String) null))
                     .getResourceId();
 
             ok(() -> fineractClient.loanCharges().executeLoanChargeOnExistingCharge(loanId, loanChargeId,
@@ -184,19 +197,11 @@ public class FeignLoanAdjustmentOriginatorEnricherTest extends FeignLoanTestBase
             ExternalEventTestValidators.assertOriginatorsInField(event, "transactionToAdjust", originatorExternalId);
         } finally {
             externalEventHelper.disableBusinessEvent(ADJUST_EVENT);
+            externalEventHelper.disableBusinessEvent(WAIVE_CHARGE_EVENT);
         }
     }
 
     private Long createFlatFeeCharge(double amount, String currencyCode) {
-        return ok(() -> fineractClient.charges().createCharge(new ChargeRequest()//
-                .name("Originator Test Fee " + System.currentTimeMillis())//
-                .currencyCode(currencyCode)//
-                .chargeAppliesTo(1)//
-                .chargeTimeType(2)//
-                .chargeCalculationType(1)//
-                .chargePaymentMode(0)//
-                .amount(amount)//
-                .active(true)//
-                .locale("en"))).getResourceId();
+        return chargesHelper.createLoanSpecifiedDueDateCharge(amount, currencyCode).getResourceId();
     }
 }

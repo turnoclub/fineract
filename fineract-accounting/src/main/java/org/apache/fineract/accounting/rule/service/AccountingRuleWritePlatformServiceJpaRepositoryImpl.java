@@ -58,12 +58,12 @@ import org.springframework.transaction.annotation.Transactional;
 @Slf4j
 public class AccountingRuleWritePlatformServiceJpaRepositoryImpl implements AccountingRuleWritePlatformService {
 
-    private final AccountingRuleRepositoryWrapper accountingRuleRepositoryWrapper;
-    private final AccountingRuleRepository accountingRuleRepository;
-    private final GLAccountRepositoryWrapper accountRepositoryWrapper;
-    private final OfficeRepositoryWrapper officeRepositoryWrapper;
-    private final AccountingRuleCommandFromApiJsonDeserializer fromApiJsonDeserializer;
-    private final CodeValueRepository codeValueRepository;
+    protected final AccountingRuleRepositoryWrapper accountingRuleRepositoryWrapper;
+    protected final AccountingRuleRepository accountingRuleRepository;
+    protected final GLAccountRepositoryWrapper accountRepositoryWrapper;
+    protected final OfficeRepositoryWrapper officeRepositoryWrapper;
+    protected final AccountingRuleCommandFromApiJsonDeserializer fromApiJsonDeserializer;
+    protected final CodeValueRepository codeValueRepository;
 
     /**
      * @param command
@@ -77,7 +77,7 @@ public class AccountingRuleWritePlatformServiceJpaRepositoryImpl implements Acco
             throw new AccountingRuleDuplicateException();
         }
 
-        log.error("Error occured.", dve);
+        log.error("Error occurred.", dve);
         throw ErrorHandler.getMappable(dve, "error.msg.accounting.rule.unknown.data.integrity.issue",
                 "Unknown data integrity issue with resource Accounting Rule: " + realCause.getMessage());
     }

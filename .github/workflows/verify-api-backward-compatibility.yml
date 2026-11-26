@@ -2,6 +2,12 @@ name: Verify API Backward Compatibility
 
 on:
   workflow_call:
+    inputs:
+      upload_artifacts:
+        description: Upload reports and logs even when the job succeeds
+        required: false
+        default: false
+        type: boolean
     secrets:
       DEVELOCITY_ACCESS_KEY:
         required: false
@@ -12,7 +18,7 @@ permissions:
 jobs:
   api-compatibility-check:
     if: ${{ github.event_name == 'pull_request' }}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 60
 
     env:
@@ -20,7 +26,7 @@ jobs:
 
     steps:
       - name: Checkout base branch for baseline
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           repository: ${{ github.event.pull_request.base.repo.full_name }}
@@ -29,7 +35,7 @@ jobs:
           path: baseline
 
       - name: Checkout base branch for merged PR
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           repository: ${{ github.event.pull_request.base.repo.full_name }}
@@ -57,19 +63,19 @@ jobs:
 
           git merge --no-commit --no-ff FETCH_HEAD
 
-      - name: Set up JDK 21
-        uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5
+      - name: Set up JDK 25
+        uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
         with:
           distribution: 'zulu'
-          java-version: '21'
+          java-version: '25'
 
       - name: Generate baseline spec
         working-directory: baseline
-        run: ./gradlew :fineract-provider:resolve --no-daemon
+        run: ./gradlew :fineract-provider:resolve --no-daemon --no-configuration-cache
 
       - name: Generate merged PR spec
         working-directory: current
-        run: ./gradlew :fineract-provider:resolve --no-daemon
+        run: ./gradlew :fineract-provider:resolve --no-daemon --no-configuration-cache
 
       - name: Sanitize specs
         run: |
@@ -103,7 +109,7 @@ jobs:
         working-directory: current
         run: |
           set -o pipefail
-          ./gradlew --no-daemon :fineract-provider:checkBreakingChanges \
+          ./gradlew --no-daemon --no-configuration-cache :fineract-provider:checkBreakingChanges \
             -PapiBaseline="${GITHUB_WORKSPACE}/baseline/fineract-provider/build/resources/main/static/fineract.json" \
             -PapiNew="${GITHUB_WORKSPACE}/current/fineract-provider/build/resources/main/static/fineract.json" \
             -x buildJavaSdk \
@@ -211,8 +217,8 @@ jobs:
           echo "The API contract is backward compatible." >> $GITHUB_STEP_SUMMARY
 
       - name: Archive breaking change report
-        if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ failure() || inputs.upload_artifacts }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: api-compatibility-report
           path: current/fineract-provider/build/swagger-brake/

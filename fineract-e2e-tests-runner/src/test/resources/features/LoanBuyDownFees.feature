@@ -45,6 +45,7 @@ Feature: Buy Down Fees
     And Customer makes "AUTOPAY" repayment on "01 March 2024" with 33.72 EUR transaction amount
     When Admin sets the business date to "1 April 2024"
     When Admin runs inline COB job for Loan
+    And LoanBuyDownFeeAmortizationTransactionCreatedBusinessEvent is created on "31 March 2024"
     And Customer makes "AUTOPAY" repayment on "01 April 2024" with 33.73 EUR transaction amount
     Then Loan status will be "CLOSED_OBLIGATIONS_MET"
     And Loan Transactions tab has the following data:
@@ -60,7 +61,6 @@ Feature: Buy Down Fees
     And Buy down fee by external-id contains the following data:
       | Date            | Fee Amount | Amortized Amount | Not Yet Amortized Amount | Adjusted Amount | Charged Off Amount |
       | 01 January 2024 | 50.0       | 50.0             | 0.0                      | 0.0             | 0.0                |
-    And LoanBuyDownFeeAmortizationTransactionCreatedBusinessEvent is created on "31 March 2024"
 
   @TestRailId:C3827
   Scenario: Verify loan with Buy Down fees and full payment and daily amortization - UC1.2
@@ -118,6 +118,7 @@ Feature: Buy Down Fees
     And Customer makes "AUTOPAY" repayment on "01 March 2024" with 33.72 EUR transaction amount
     When Admin sets the business date to "1 April 2024"
     When Admin runs inline COB job for Loan
+    And LoanBuyDownFeeAmortizationTransactionCreatedBusinessEvent is created on "31 March 2024"
     And Customer makes "AUTOPAY" repayment on "01 April 2024" with 33.73 EUR transaction amount
     When Admin runs inline COB job for Loan
     Then Loan status will be "CLOSED_OBLIGATIONS_MET"
@@ -305,7 +306,6 @@ Feature: Buy Down Fees
     And Buy down fee by external-id contains the following data:
       | Date            | Fee Amount | Amortized Amount | Not Yet Amortized Amount | Adjusted Amount | Charged Off Amount |
       | 01 January 2024 | 50.0       | 50.0             | 0.0                      | 0.0             | 0.0                |
-    And LoanBuyDownFeeAmortizationTransactionCreatedBusinessEvent is created on "31 March 2024"
 
   @TestRailId:C3771
   Scenario: Verify loan with Buy Down fees and early payoff - UC2.1
@@ -1417,6 +1417,7 @@ Feature: Buy Down Fees
 # --- 2nd repayment on April,1 ---#
     When Admin sets the business date to "1 April 2024"
     When Admin runs inline COB job for Loan
+    And LoanBuyDownFeeAmortizationTransactionCreatedBusinessEvent is created on "31 March 2024"
     And Customer makes "AUTOPAY" repayment on "01 April 2024" with 33.73 EUR transaction amount
     Then Loan Transactions tab has the following data:
       | Transaction date | Transaction Type          | Amount | Principal | Interest | Fees | Penalties | Loan Balance | Reverted |
@@ -1430,7 +1431,6 @@ Feature: Buy Down Fees
     And Buy down fee by external-id contains the following data:
       | Date            | Fee Amount | Amortized Amount | Not Yet Amortized Amount | Adjusted Amount | Charged Off Amount |
       | 01 January 2024 | 50.0       | 40.0             | 0.0                      | 10.0            | 0.0                |
-    And LoanBuyDownFeeAmortizationTransactionCreatedBusinessEvent is created on "31 March 2024"
     When Loan Pay-off is made on "1 April 2024"
     Then Loan is closed with zero outstanding balance and it's all installments have obligations met
     Then Loan Transactions tab has the following data:
@@ -1533,6 +1533,7 @@ Feature: Buy Down Fees
 # --- 2nd repayment on April,1 ---#
     When Admin sets the business date to "1 April 2024"
     When Admin runs inline COB job for Loan
+    And LoanBuyDownFeeAmortizationTransactionCreatedBusinessEvent is created on "31 March 2024"
     And Customer makes "AUTOPAY" repayment on "01 April 2024" with 33.73 EUR transaction amount
     Then Loan Transactions tab has the following data:
       | Transaction date | Transaction Type          | Amount | Principal | Interest | Fees | Penalties | Loan Balance | Reverted |
@@ -1547,7 +1548,6 @@ Feature: Buy Down Fees
     And Buy down fee by external-id contains the following data:
       | Date            | Fee Amount | Amortized Amount | Not Yet Amortized Amount | Adjusted Amount | Charged Off Amount |
       | 01 January 2024 | 50.0       | 35.0             | 0.0                      | 15.0            | 0.0                |
-    And LoanBuyDownFeeAmortizationTransactionCreatedBusinessEvent is created on "31 March 2024"
     When Loan Pay-off is made on "1 April 2024"
     Then Loan is closed with zero outstanding balance and it's all installments have obligations met
     Then Loan Transactions tab has the following data:
@@ -2716,6 +2716,7 @@ Feature: Buy Down Fees
     And Customer makes "AUTOPAY" repayment on "01 March 2024" with 33.72 EUR transaction amount
     When Admin sets the business date to "1 April 2024"
     When Admin runs inline COB job for Loan
+    And LoanBuyDownFeeAmortizationTransactionCreatedBusinessEvent is created on "31 March 2024"
     And Customer makes "AUTOPAY" repayment on "01 April 2024" with 33.73 EUR transaction amount
     Then Loan status will be "CLOSED_OBLIGATIONS_MET"
     And Loan Transactions tab has the following data:
@@ -2735,7 +2736,6 @@ Feature: Buy Down Fees
     And Buy down fee by external-id contains the following data:
       | Date            | Fee Amount | Amortized Amount | Not Yet Amortized Amount | Adjusted Amount | Charged Off Amount |
       | 01 January 2024 | 50.0       | 50.0             | 0.0                      | 0.0             | 0.0                |
-    And LoanBuyDownFeeAmortizationTransactionCreatedBusinessEvent is created on "31 March 2024"
 
   @TestRailId:C3982
   Scenario: Verify Buy Down Fee reversal on same business date for non-merchant - UC2
@@ -3167,6 +3167,7 @@ Feature: Buy Down Fees
 # --- 2nd repayment on April,1 ---#
     When Admin sets the business date to "1 April 2024"
     When Admin runs inline COB job for Loan
+    And LoanBuyDownFeeAmortizationTransactionCreatedBusinessEvent is created on "31 March 2024"
     And Customer makes "AUTOPAY" repayment on "01 April 2024" with 33.73 EUR transaction amount
     Then Loan Transactions tab has the following data:
       | Transaction date | Transaction Type          | Amount | Principal | Interest | Fees | Penalties | Loan Balance | Reverted |
@@ -3180,7 +3181,6 @@ Feature: Buy Down Fees
     And Buy down fee by external-id contains the following data:
       | Date            | Fee Amount | Amortized Amount | Not Yet Amortized Amount | Adjusted Amount | Charged Off Amount |
       | 01 January 2024 | 50.0       | 40.0             | 0.0                      | 10.0            | 0.0                |
-    And LoanBuyDownFeeAmortizationTransactionCreatedBusinessEvent is created on "31 March 2024"
     When Loan Pay-off is made on "1 April 2024"
     Then Loan's all installments have obligations met
     Then Loan Transactions tab has the following data:
@@ -4079,11 +4079,7 @@ Feature: Buy Down Fees
     When Loan Pay-off is made on "16 April 2024"
     Then Loan is closed with zero outstanding balance and it's all installments have obligations met
 
-
-
-    ##
-  ## ISSUE:   Buydown amortizes slower after waiver-reversal
-  @TestRailId:CXXXX
+  @TestRailId:C115396
   Scenario Outline: Verify Buy Down Fee Amortization Works correctly after Buy Down Fee Adjustment Reversal
     ##Create and disburse a loan for 3-month period with buydown fees enabled (2026/03/11).
     When Admin sets the business date to "11 March 2026"
@@ -4175,7 +4171,7 @@ Feature: Buy Down Fees
       | LP2_PROGRESSIVE_ADVANCED_PAYMENT_ALLOCATION_BUYDOWN_FEES_NON_MERCHANT |
       | LP2_PROGRESSIVE_ADVANCED_PAYMENT_ALLOCATION_BUYDOWN_FEES_CLASSIFICATION_INCOME_MAP |
 
-
+  @TestRailId:C85357
   Scenario: Verify Buy Down Fee Amortization Works correctly after Buy Down Fee Adjustment Reversal buydown fee as fee
     ##Create and disburse a loan for 3-month period with buydown fees enabled (2026/03/11).
     When Admin sets the business date to "11 March 2026"
@@ -4258,6 +4254,7 @@ Feature: Buy Down Fees
     When Admin sets the business date to "12 June 2026"
     Then Admin runs inline COB job for Loan
 
+  @TestRailId:C85358
   Scenario: Verify loan with Buy Down fees as FEE income type and full payment
     When Admin sets the business date to "01 January 2024"
     And Admin creates a client with random data
@@ -4301,6 +4298,7 @@ Feature: Buy Down Fees
     And Customer makes "AUTOPAY" repayment on "01 March 2024" with 33.72 EUR transaction amount
     When Admin sets the business date to "1 April 2024"
     When Admin runs inline COB job for Loan
+    And LoanBuyDownFeeAmortizationTransactionCreatedBusinessEvent is created on "31 March 2024"
     And Customer makes "AUTOPAY" repayment on "01 April 2024" with 33.73 EUR transaction amount
     Then Loan status will be "CLOSED_OBLIGATIONS_MET"
     And Loan Transactions tab has the following data:
@@ -4316,8 +4314,8 @@ Feature: Buy Down Fees
     And Buy down fee by external-id contains the following data:
       | Date            | Fee Amount | Amortized Amount | Not Yet Amortized Amount | Adjusted Amount | Charged Off Amount |
       | 01 January 2024 | 50.0       | 50.0             | 0.0                      | 0.0             | 0.0                |
-    And LoanBuyDownFeeAmortizationTransactionCreatedBusinessEvent is created on "31 March 2024"
 
+  @TestRailId:C85359
   Scenario: Verify loan with Buy Down Fee adjustment as FEE income type and repayment transactions
     When Admin sets the business date to "01 January 2024"
     And Admin creates a client with random data
@@ -4393,6 +4391,7 @@ Feature: Buy Down Fees
     And LoanBuyDownFeeAdjustmentTransactionCreatedBusinessEvent is created on "01 March 2024"
     When Admin sets the business date to "1 April 2024"
     When Admin runs inline COB job for Loan
+    And LoanBuyDownFeeAmortizationTransactionCreatedBusinessEvent is created on "31 March 2024"
     And Customer makes "AUTOPAY" repayment on "01 April 2024" with 33.73 EUR transaction amount
     Then Loan Transactions tab has the following data:
       | Transaction date | Transaction Type          | Amount | Principal | Interest | Fees | Penalties | Loan Balance | Reverted |
@@ -4406,7 +4405,6 @@ Feature: Buy Down Fees
     And Buy down fee by external-id contains the following data:
       | Date            | Fee Amount | Amortized Amount | Not Yet Amortized Amount | Adjusted Amount | Charged Off Amount |
       | 01 January 2024 | 50.0       | 40.0             | 0.0                      | 10.0            | 0.0                |
-    And LoanBuyDownFeeAmortizationTransactionCreatedBusinessEvent is created on "31 March 2024"
     When Loan Pay-off is made on "1 April 2024"
     Then Loan is closed with zero outstanding balance and it's all installments have obligations met
     Then Loan Transactions tab has the following data:
@@ -4420,3 +4418,161 @@ Feature: Buy Down Fees
       | 01 April 2024    | Repayment                 | 33.73  | 33.34     | 0.39     | 0.0  | 0.0       | 33.52        | false    |
       | 01 April 2024    | Repayment                 | 33.91  | 33.52     | 0.39     | 0.0  | 0.0       | 0.0          | false    |
       | 01 April 2024    | Accrual                   | 0.01   | 0.0       | 0.01     | 0.0  | 0.0       | 0.0          | false    |
+
+  @TestRailId:C85355
+  Scenario: Verify Buy Down Fee amortization allocation mappings after loan re-open via repayment reversal
+    When Admin sets the business date to "1 January 2026"
+    And Admin creates a client with random data
+    When Admin creates a fully customized loan with the following data:
+      | LoanProduct                                              | submitted on date | with Principal | ANNUAL interest rate % | interest type     | interest calculation period | amortization type  | loanTermFrequency | loanTermFrequencyType | repaymentEvery | repaymentFrequencyType | numberOfRepayments | graceOnPrincipalPayment | graceOnInterestPayment | interest free period | Payment strategy            |
+      | LP2_PROGRESSIVE_ADVANCED_PAYMENT_ALLOCATION_BUYDOWN_FEES | 01 January 2026   | 250            | 7                      | DECLINING_BALANCE | DAILY                       | EQUAL_INSTALLMENTS | 3                 | MONTHS                | 1              | MONTHS                 | 3                  | 0                       | 0                      | 0                    | ADVANCED_PAYMENT_ALLOCATION |
+    And Admin successfully approves the loan on "1 January 2026" with "250" amount and expected disbursement date on "1 January 2026"
+    And Admin successfully disburse the loan on "1 January 2026" with "100" EUR transaction amount
+    Then Loan status will be "ACTIVE"
+    And Admin adds buy down fee with "AUTOPAY" payment type to the loan on "1 January 2026" with "50" EUR transaction amount
+    When Admin sets the business date to "02 January 2026"
+    And Admin runs inline COB job for Loan
+    Then Loan Transactions tab has the following data:
+      | Transaction date | Transaction Type          | Amount | Principal | Interest | Fees | Penalties | Loan Balance | Reverted | Replayed |
+      | 01 January 2026  | Disbursement              | 100.0  | 0.0       | 0.0      | 0.0  | 0.0       | 100.0        | false    | false    |
+      | 01 January 2026  | Buy Down Fee              | 50.0   | 0.0       | 50.0     | 0.0  | 0.0       | 0.0          | false    | false    |
+      | 01 January 2026  | Buy Down Fee Amortization | 0.56   | 0.0       | 0.56     | 0.0  | 0.0       | 0.0          | false    | false    |
+    And Loan Amortization Allocation Mapping for "BUY_DOWN_FEE" transaction created on "01 January 2026" contains the following data:
+      | Date            | Type | Amount |
+      | 01 January 2026 | AM   | 0.56   |
+    When Admin sets the business date to "03 January 2026"
+    When Loan Pay-off is made on "03 January 2026"
+    Then Loan status will be "CLOSED_OBLIGATIONS_MET"
+    And Loan Transactions tab has the following data:
+      | Transaction date | Transaction Type          | Amount | Principal | Interest | Fees | Penalties | Loan Balance | Reverted | Replayed |
+      | 01 January 2026  | Disbursement              | 100.0  | 0.0       | 0.0      | 0.0  | 0.0       | 100.0        | false    | false    |
+      | 01 January 2026  | Buy Down Fee              | 50.0   | 0.0       | 50.0     | 0.0  | 0.0       | 0.0          | false    | false    |
+      | 01 January 2026  | Buy Down Fee Amortization | 0.56   | 0.0       | 0.56     | 0.0  | 0.0       | 0.0          | false    | false    |
+      | 03 January 2026  | Repayment                 | 100.04 | 100.0     | 0.04     | 0.0  | 0.0       | 0.0          | false    | false    |
+      | 03 January 2026  | Accrual                   | 0.04   | 0.0       | 0.04     | 0.0  | 0.0       | 0.0          | false    | false    |
+      | 03 January 2026  | Buy Down Fee Amortization | 49.44  | 0.0       | 49.44    | 0.0  | 0.0       | 0.0          | false    | false    |
+    And Loan Amortization Allocation Mapping for "BUY_DOWN_FEE" transaction created on "01 January 2026" contains the following data:
+      | Date            | Type | Amount |
+      | 01 January 2026 | AM   | 0.56   |
+      | 03 January 2026 | AM   | 49.44  |
+    When Customer undo "1"th "Repayment" transaction made on "03 January 2026"
+    Then Loan status will be "ACTIVE"
+    And Loan Transactions tab has the following data:
+      | Transaction date | Transaction Type          | Amount | Principal | Interest | Fees | Penalties | Loan Balance | Reverted | Replayed |
+      | 01 January 2026  | Disbursement              | 100.0  | 0.0       | 0.0      | 0.0  | 0.0       | 100.0        | false    | false    |
+      | 01 January 2026  | Buy Down Fee              | 50.0   | 0.0       | 50.0     | 0.0  | 0.0       | 0.0          | false    | false    |
+      | 01 January 2026  | Buy Down Fee Amortization | 0.56   | 0.0       | 0.56     | 0.0  | 0.0       | 0.0          | false    | false    |
+      | 03 January 2026  | Repayment                 | 100.04 | 100.0     | 0.04     | 0.0  | 0.0       | 0.0          | true     | false    |
+      | 03 January 2026  | Accrual                   | 0.04   | 0.0       | 0.04     | 0.0  | 0.0       | 0.0          | false    | false    |
+      | 03 January 2026  | Buy Down Fee Amortization | 49.44  | 0.0       | 49.44    | 0.0  | 0.0       | 0.0          | false    | false    |
+    When Admin sets the business date to "04 January 2026"
+    And Admin runs inline COB job for Loan
+    And Loan Transactions tab has the following data:
+      | Transaction date | Transaction Type          | Amount | Principal | Interest | Fees | Penalties | Loan Balance | Reverted | Replayed |
+      | 01 January 2026  | Disbursement              | 100.0  | 0.0       | 0.0      | 0.0  | 0.0       | 100.0        | false    | false    |
+      | 01 January 2026  | Buy Down Fee              | 50.0   | 0.0       | 50.0     | 0.0  | 0.0       | 0.0          | false    | false    |
+      | 01 January 2026  | Buy Down Fee Amortization | 0.56   | 0.0       | 0.56     | 0.0  | 0.0       | 0.0          | false    | false    |
+      | 03 January 2026  | Repayment                 | 100.04 | 100.0     | 0.04     | 0.0  | 0.0       | 0.0          | true     | false    |
+      | 03 January 2026  | Accrual                   | 0.04   | 0.0       | 0.04     | 0.0  | 0.0       | 0.0          | false    | false    |
+      | 03 January 2026  | Buy Down Fee Amortization | 49.44  | 0.0       | 49.44    | 0.0  | 0.0       | 0.0          | false    | false    |
+    And Loan Amortization Allocation Mapping for "BUY_DOWN_FEE" transaction created on "01 January 2026" contains the following data:
+      | Date            | Type | Amount |
+      | 01 January 2026 | AM   | 0.56   |
+      | 03 January 2026 | AM   | 49.44  |
+    When Admin sets the business date to "05 January 2026"
+    And Admin runs inline COB job for Loan
+    And Loan Transactions tab has the following data:
+      | Transaction date | Transaction Type          | Amount | Principal | Interest | Fees | Penalties | Loan Balance | Reverted | Replayed |
+      | 01 January 2026  | Disbursement              | 100.0  | 0.0       | 0.0      | 0.0  | 0.0       | 100.0        | false    | false    |
+      | 01 January 2026  | Buy Down Fee              | 50.0   | 0.0       | 50.0     | 0.0  | 0.0       | 0.0          | false    | false    |
+      | 01 January 2026  | Buy Down Fee Amortization | 0.56   | 0.0       | 0.56     | 0.0  | 0.0       | 0.0          | false    | false    |
+      | 03 January 2026  | Repayment                 | 100.04 | 100.0     | 0.04     | 0.0  | 0.0       | 0.0          | true     | false    |
+      | 03 January 2026  | Accrual                   | 0.04   | 0.0       | 0.04     | 0.0  | 0.0       | 0.0          | false    | false    |
+      | 03 January 2026  | Buy Down Fee Amortization | 49.44  | 0.0       | 49.44    | 0.0  | 0.0       | 0.0          | false    | false    |
+      | 04 January 2026  | Accrual                   | 0.02   | 0.0       | 0.02     | 0.0  | 0.0       | 0.0          | false    | false    |
+    And Loan Amortization Allocation Mapping for "BUY_DOWN_FEE" transaction created on "01 January 2026" contains the following data:
+      | Date            | Type | Amount |
+      | 01 January 2026 | AM   | 0.56   |
+      | 03 January 2026 | AM   | 49.44  |
+
+    When Loan Pay-off is made on "05 January 2026"
+    Then Loan is closed with zero outstanding balance and it's all installments have obligations met
+
+  @TestRailId:C85356
+  Scenario: Verify Buy Down Fee amortization allocation mappings after loan re-open via payout refund reversal
+    When Admin sets the business date to "01 January 2026"
+    And Admin creates a client with random data
+    When Admin creates a fully customized loan with the following data:
+      | LoanProduct                                              | submitted on date | with Principal | ANNUAL interest rate % | interest type     | interest calculation period | amortization type  | loanTermFrequency | loanTermFrequencyType | repaymentEvery | repaymentFrequencyType | numberOfRepayments | graceOnPrincipalPayment | graceOnInterestPayment | interest free period | Payment strategy            |
+      | LP2_PROGRESSIVE_ADVANCED_PAYMENT_ALLOCATION_BUYDOWN_FEES | 01 January 2026   | 250            | 7                      | DECLINING_BALANCE | DAILY                       | EQUAL_INSTALLMENTS | 3                 | MONTHS                | 1              | MONTHS                 | 3                  | 0                       | 0                      | 0                    | ADVANCED_PAYMENT_ALLOCATION |
+    And Admin successfully approves the loan on "01 January 2026" with "250" amount and expected disbursement date on "01 January 2026"
+    And Admin successfully disburse the loan on "01 January 2026" with "100" EUR transaction amount
+    Then Loan status will be "ACTIVE"
+    And Admin adds buy down fee with "AUTOPAY" payment type to the loan on "01 January 2026" with "50" EUR transaction amount
+    When Admin sets the business date to "02 January 2026"
+    And Admin runs inline COB job for Loan
+    Then Loan Transactions tab has the following data:
+      | Transaction date | Transaction Type          | Amount | Principal | Interest | Fees | Penalties | Loan Balance | Reverted | Replayed |
+      | 01 January 2026  | Disbursement              | 100.0  | 0.0       | 0.0      | 0.0  | 0.0       | 100.0        | false    | false    |
+      | 01 January 2026  | Buy Down Fee              | 50.0   | 0.0       | 50.0     | 0.0  | 0.0       | 0.0          | false    | false    |
+      | 01 January 2026  | Buy Down Fee Amortization | 0.56   | 0.0       | 0.56     | 0.0  | 0.0       | 0.0          | false    | false    |
+    And Loan Amortization Allocation Mapping for "BUY_DOWN_FEE" transaction created on "01 January 2026" contains the following data:
+      | Date            | Type | Amount |
+      | 01 January 2026 | AM   | 0.56   |
+    When Admin sets the business date to "03 January 2026"
+    And Customer makes "PAYOUT_REFUND" transaction with "AUTOPAY" payment type on "03 January 2026" with 100.04 EUR transaction amount and self-generated Idempotency key
+    Then Loan status will be "CLOSED_OBLIGATIONS_MET"
+    And Loan Transactions tab has the following data:
+      | Transaction date | Transaction Type          | Amount | Principal | Interest | Fees | Penalties | Loan Balance | Reverted | Replayed |
+      | 01 January 2026  | Disbursement              | 100.0  | 0.0       | 0.0      | 0.0  | 0.0       | 100.0        | false    | false    |
+      | 01 January 2026  | Buy Down Fee              | 50.0   | 0.0       | 50.0     | 0.0  | 0.0       | 0.0          | false    | false    |
+      | 01 January 2026  | Buy Down Fee Amortization | 0.56   | 0.0       | 0.56     | 0.0  | 0.0       | 0.0          | false    | false    |
+      | 03 January 2026  | Payout Refund             | 100.04 | 100.0     | 0.04     | 0.0  | 0.0       | 0.0          | false    | false    |
+      | 03 January 2026  | Accrual                   | 0.04   | 0.0       | 0.04     | 0.0  | 0.0       | 0.0          | false    | false    |
+      | 03 January 2026  | Buy Down Fee Amortization | 49.44  | 0.0       | 49.44    | 0.0  | 0.0       | 0.0          | false    | false    |
+    And Loan Amortization Allocation Mapping for "BUY_DOWN_FEE" transaction created on "01 January 2026" contains the following data:
+      | Date            | Type | Amount |
+      | 01 January 2026 | AM   | 0.56   |
+      | 03 January 2026 | AM   | 49.44  |
+    When Customer undo "1"th "Payout Refund" transaction made on "03 January 2026"
+    Then Loan status will be "ACTIVE"
+    And Loan Transactions tab has the following data:
+      | Transaction date | Transaction Type          | Amount | Principal | Interest | Fees | Penalties | Loan Balance | Reverted | Replayed |
+      | 01 January 2026  | Disbursement              | 100.0  | 0.0       | 0.0      | 0.0  | 0.0       | 100.0        | false    | false    |
+      | 01 January 2026  | Buy Down Fee              | 50.0   | 0.0       | 50.0     | 0.0  | 0.0       | 0.0          | false    | false    |
+      | 01 January 2026  | Buy Down Fee Amortization | 0.56   | 0.0       | 0.56     | 0.0  | 0.0       | 0.0          | false    | false    |
+      | 03 January 2026  | Payout Refund             | 100.04 | 100.0     | 0.04     | 0.0  | 0.0       | 0.0          | true     | false    |
+      | 03 January 2026  | Accrual                   | 0.04   | 0.0       | 0.04     | 0.0  | 0.0       | 0.0          | false    | false    |
+      | 03 January 2026  | Buy Down Fee Amortization | 49.44  | 0.0       | 49.44    | 0.0  | 0.0       | 0.0          | false    | false    |
+    When Admin sets the business date to "4 January 2026"
+    And Admin runs inline COB job for Loan
+    And Loan Transactions tab has the following data:
+      | Transaction date | Transaction Type          | Amount | Principal | Interest | Fees | Penalties | Loan Balance | Reverted | Replayed |
+      | 01 January 2026  | Disbursement              | 100.0  | 0.0       | 0.0      | 0.0  | 0.0       | 100.0        | false    | false    |
+      | 01 January 2026  | Buy Down Fee              | 50.0   | 0.0       | 50.0     | 0.0  | 0.0       | 0.0          | false    | false    |
+      | 01 January 2026  | Buy Down Fee Amortization | 0.56   | 0.0       | 0.56     | 0.0  | 0.0       | 0.0          | false    | false    |
+      | 03 January 2026  | Payout Refund             | 100.04 | 100.0     | 0.04     | 0.0  | 0.0       | 0.0          | true     | false    |
+      | 03 January 2026  | Accrual                   | 0.04   | 0.0       | 0.04     | 0.0  | 0.0       | 0.0          | false    | false    |
+      | 03 January 2026  | Buy Down Fee Amortization | 49.44  | 0.0       | 49.44    | 0.0  | 0.0       | 0.0          | false    | false    |
+    And Loan Amortization Allocation Mapping for "BUY_DOWN_FEE" transaction created on "01 January 2026" contains the following data:
+      | Date            | Type | Amount |
+      | 01 January 2026 | AM   | 0.56   |
+      | 03 January 2026 | AM   | 49.44  |
+    When Admin sets the business date to "05 January 2026"
+    And Admin runs inline COB job for Loan
+    And Loan Transactions tab has the following data:
+      | Transaction date | Transaction Type          | Amount | Principal | Interest | Fees | Penalties | Loan Balance | Reverted | Replayed |
+      | 01 January 2026  | Disbursement              | 100.0  | 0.0       | 0.0      | 0.0  | 0.0       | 100.0        | false    | false    |
+      | 01 January 2026  | Buy Down Fee              | 50.0   | 0.0       | 50.0     | 0.0  | 0.0       | 0.0          | false    | false    |
+      | 01 January 2026  | Buy Down Fee Amortization | 0.56   | 0.0       | 0.56     | 0.0  | 0.0       | 0.0          | false    | false    |
+      | 03 January 2026  | Payout Refund             | 100.04 | 100.0     | 0.04     | 0.0  | 0.0       | 0.0          | true     | false    |
+      | 03 January 2026  | Accrual                   | 0.04   | 0.0       | 0.04     | 0.0  | 0.0       | 0.0          | false    | false    |
+      | 03 January 2026  | Buy Down Fee Amortization | 49.44  | 0.0       | 49.44    | 0.0  | 0.0       | 0.0          | false    | false    |
+      | 04 January 2026  | Accrual                   | 0.02   | 0.0       | 0.02     | 0.0  | 0.0       | 0.0          | false    | false    |
+    And Loan Amortization Allocation Mapping for "BUY_DOWN_FEE" transaction created on "01 January 2026" contains the following data:
+      | Date            | Type | Amount |
+      | 01 January 2026 | AM   | 0.56   |
+      | 03 January 2026 | AM   | 49.44  |
+
+    When Loan Pay-off is made on "05 January 2026"
+    Then Loan is closed with zero outstanding balance and it's all installments have obligations met

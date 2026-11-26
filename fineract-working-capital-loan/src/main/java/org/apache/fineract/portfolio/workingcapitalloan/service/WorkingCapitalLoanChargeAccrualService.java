@@ -1,0 +1,167 @@
+/**
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements. See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership. The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License. You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied. See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+package org.apache.fineract.portfolio.workingcapitalloan.service;
+
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.util.List;
+import java.util.function.Function;
+import lombok.RequiredArgsConstructor;
+import org.apache.fineract.infrastructure.configuration.domain.ChargeAccrualTimeConfig;
+import org.apache.fineract.infrastructure.configuration.domain.ConfigurationDomainService;
+import org.apache.fineract.infrastructure.core.service.ExternalIdFactory;
+import org.apache.fineract.infrastructure.core.service.MathUtil;
+import org.apache.fineract.infrastructure.event.business.domain.workingcapitalloan.transaction.WorkingCapitalLoanAccrualTransactionBusinessEvent;
+import org.apache.fineract.infrastructure.event.business.service.BusinessEventNotifierService;
+import org.apache.fineract.portfolio.loanaccount.domain.LoanTransactionRelationTypeEnum;
+import org.apache.fineract.portfolio.loanaccount.domain.LoanTransactionType;
+import org.apache.fineract.portfolio.workingcapitalloan.accounting.WorkingCapitalLoanAccountingProcessor;
+import org.apache.fineract.portfolio.workingcapitalloan.domain.WorkingCapitalLoan;
+import org.apache.fineract.portfolio.workingcapitalloan.domain.WorkingCapitalLoanCharge;
+import org.apache.fineract.portfolio.workingcapitalloan.domain.WorkingCapitalLoanTransaction;
+import org.apache.fineract.portfolio.workingcapitalloan.domain.WorkingCapitalLoanTransactionAllocation;
+import org.apache.fineract.portfolio.workingcapitalloan.domain.WorkingCapitalLoanTransactionFinder;
+import org.apache.fineract.portfolio.workingcapitalloan.domain.WorkingCapitalLoanTransactionRelation;
+import org.apache.fineract.portfolio.workingcapitalloan.domain.WorkingCapitalLoanTransactionRelationRepository;
+import org.apache.fineract.portfolio.workingcapitalloan.repository.WorkingCapitalLoanChargeRepository;
+import org.apache.fineract.portfolio.workingcapitalloan.repository.WorkingCapitalLoanTransactionAllocationRepository;
+import org.apache.fineract.portfolio.workingcapitalloan.repository.WorkingCapitalLoanTransactionRepository;
+import org.springframework.stereotype.Service;
+
+@Service
+@RequiredArgsConstructor
+public class WorkingCapitalLoanChargeAccrualService {
+
+    private final ConfigurationDomainService configurationDomainService;
+    private final WorkingCapitalLoanChargeRepository chargeRepository;
+    private final WorkingCapitalLoanTransactionRepository transactionRepository;
+    private final WorkingCapitalLoanTransactionAllocationRepository allocationRepository;
+    private final WorkingCapitalLoanTransactionRelationRepository relationRepository;
+    private final WorkingCapitalLoanAccountingProcessor accountingProcessor;
+    private final WorkingCapitalLoanTransactionFinder transactionFinder;
+    private final BusinessEventNotifierService businessEventNotifierService;
+    private final ExternalIdFactory externalIdFactory;
+
+    /**
+     * When {@code wcl-charge-accrual-time} is real-time, posts the charge accrual immediately on add. The COB sweep
+     * always remains responsible for catching charges that were not accrued yet (for example after switching from EOD
+     * to real-time), gated by {@code charge-accrual-date}; {@link #createChargeAccrualIfMissing} keeps both paths
+     * idempotent.
+     */
+    public void processOnChargeAdded(final WorkingCapitalLoan loan, final WorkingCapitalLoanCharge charge) {
+        if (isAccrualPostingDisabled(loan)) {
+            return;
+        }
+        if (isRealTimeChargeAccrual()) {
+            createChargeAccrualIfMissing(loan, charge, charge.getSubmittedOnDate());
+        }
+    }
+
+    /**
+     * Posts pending charge accruals during COB according to {@code charge-accrual-date}, regardless of
+     * {@code wcl-charge-accrual-time}. Real-time only adds an earlier post-on-add path; it must not disable this sweep,
+     * otherwise charges added under EOD and left unaccrued when the config flips to real-time would only be recognized
+     * at loan closure.
+     */
+    public void processChargeAccrualsOnCOB(final WorkingCapitalLoan loan, final LocalDate businessDate) {
+        if (isAccrualPostingDisabled(loan)) {
+            return;
+        }
+        final Function<WorkingCapitalLoanCharge, LocalDate> accrualDate = switch (configurationDomainService
+                .getAccrualDateConfigForCharge()) {
+            case SUBMITTED_DATE -> WorkingCapitalLoanCharge::getSubmittedOnDate;
+            case DUE_DATE -> WorkingCapitalLoanCharge::getDueDate;
+        };
+        chargeRepository.findByLoanIdAndActiveTrueOrderByDueDateAscIdAsc(loan.getId()).stream()
+                .filter(charge -> accrualDate.apply(charge) != null && !accrualDate.apply(charge).isAfter(businessDate))
+                .forEach(charge -> createChargeAccrualIfMissing(loan, charge, accrualDate.apply(charge)));
+    }
+
+    /**
+     * Accrues any pending charge income once the loan has reached a closed or overpaid state, no matter which operation
+     * closed it (repayment, goodwill credit, charge adjustment, credit balance refund, discount-fee adjustment). It is
+     * a no-op while the loan is still active, so callers can invoke it unconditionally after any balance-changing
+     * operation. Mirrors how the term/progressive loan reacts to loan-closure events.
+     */
+    public void accrueOnClosure(final WorkingCapitalLoan loan, final LocalDate closingDate) {
+        if (!loan.isClosedObligationsMet() && !loan.isClosedWrittenOff() && !loan.isOverpaid()) {
+            return;
+        }
+        processClosureAccruals(loan, closingDate);
+    }
+
+    /**
+     * Posts, on early closure, any pending charge accrual that has not been recognized yet. Once the loan is closed it
+     * is no longer picked up by the end-of-day job, so the accrual is accelerated to the closing date to make sure the
+     * income is recognized. This runs regardless of the {@code charge-accrual-date} / {@code wcl-charge-accrual-time}
+     * modes: a charge that already reached its accrual target is left alone (the common case in real-time mode, and in
+     * submitted-date EOD mode after COB), while charges that slipped through every accrual step are caught here.
+     */
+    public void processClosureAccruals(final WorkingCapitalLoan loan, final LocalDate closingDate) {
+        if (isAccrualPostingDisabled(loan)) {
+            return;
+        }
+        final List<WorkingCapitalLoanCharge> activeCharges = chargeRepository.findByLoanIdAndActiveTrueOrderByDueDateAscIdAsc(loan.getId());
+        activeCharges.forEach(charge -> createChargeAccrualIfMissing(loan, charge, closingDate));
+    }
+
+    private boolean isAccrualPostingDisabled(final WorkingCapitalLoan loan) {
+        return !loan.getLoanProduct().getAccountingRule().isAccrualWithDeferredRevenueAmortization();
+    }
+
+    private void createChargeAccrualIfMissing(final WorkingCapitalLoan loan, final WorkingCapitalLoanCharge charge,
+            final LocalDate accrualDate) {
+        // Not gated on the outstanding amount: that would skip fully-settled charges and leave their income
+        // unrecognized, with the receivable/income pair un-netted. Only the waived part is left out of the target:
+        // nothing further is recognized on a debt the borrower no longer owes. Income recognized before the waiver
+        // is not unwound here.
+        //
+        // Chasing a target rather than gating on "already accrued": undoing a waiver raises the target again, so the
+        // next run tops the recognized income back up instead of leaving it unrecognized forever.
+        final BigDecimal target = MathUtil.subtractToZero(charge.getAmount(), charge.getAmountWaived());
+        final BigDecimal toAccrue = MathUtil.subtractToZero(target, getAccruedAmount(charge));
+        if (accrualDate == null || !MathUtil.isGreaterThanZero(toAccrue)) {
+            return;
+        }
+        final WorkingCapitalLoanTransaction accrualTransaction = WorkingCapitalLoanTransaction.accrual(loan, externalIdFactory.create(),
+                toAccrue, accrualDate);
+        final WorkingCapitalLoanTransactionRelation relation = WorkingCapitalLoanTransactionRelation.linkToCharge(accrualTransaction,
+                charge, LoanTransactionRelationTypeEnum.RELATED);
+        accrualTransaction.getLoanTransactionRelations().add(relation);
+
+        transactionRepository.saveAndFlush(accrualTransaction);
+
+        final WorkingCapitalLoanTransactionAllocation allocation = WorkingCapitalLoanTransactionAllocation
+                .forChargeAccrual(accrualTransaction, toAccrue, charge.isPenaltyCharge());
+        allocationRepository.saveAndFlush(allocation);
+        accountingProcessor.postJournalEntries(loan, accrualTransaction, allocation,
+                transactionFinder.isAfterActiveChargeOffForAccountingRouting(loan, accrualTransaction));
+
+        businessEventNotifierService
+                .notifyPostBusinessEvent(new WorkingCapitalLoanAccrualTransactionBusinessEvent(accrualTransaction, loan.getId()));
+    }
+
+    public BigDecimal getAccruedAmount(final WorkingCapitalLoanCharge charge) {
+        return MathUtil.nullToZero(relationRepository.fetchTransactionAmountForCharge(charge, LoanTransactionType.ACCRUAL));
+    }
+
+    private boolean isRealTimeChargeAccrual() {
+        return configurationDomainService.getWclChargeAccrualTime() == ChargeAccrualTimeConfig.REAL_TIME;
+    }
+}

@@ -24,6 +24,7 @@ import org.apache.fineract.organisation.monetary.data.CurrencyData;
 import org.apache.fineract.portfolio.common.domain.DaysInMonthType;
 import org.apache.fineract.portfolio.common.domain.DaysInYearCustomStrategyType;
 import org.apache.fineract.portfolio.common.domain.DaysInYearType;
+import org.apache.fineract.portfolio.common.domain.MonthEndDueDateStrategy;
 import org.apache.fineract.portfolio.common.domain.PeriodFrequencyType;
 import org.apache.fineract.portfolio.loanaccount.loanschedule.domain.LoanScheduleProcessingType;
 import org.apache.fineract.portfolio.loanproduct.domain.AmortizationMethod;
@@ -49,6 +50,10 @@ public class LoanConfigurationDetails implements ILoanConfigurationDetails {
     private final AmortizationMethod amortizationMethod;
     private final PeriodFrequencyType repaymentPeriodFrequencyType;
     private final Integer repaymentEvery;
+    @Getter
+    private final Integer firstRepaymentDayOfMonth;
+    @Getter
+    private final Integer secondRepaymentDayOfMonth;
     private final Integer numberOfRepayments;
     private final boolean interestRecognitionOnDisbursementDate;
     private final DaysInYearCustomStrategyType daysInYearCustomStrategy;
@@ -63,17 +68,20 @@ public class LoanConfigurationDetails implements ILoanConfigurationDetails {
     private final boolean allowFullTermForTranche;
     @Getter
     private final LoanScheduleProcessingType loanScheduleProcessingType;
+    @Getter
+    private final MonthEndDueDateStrategy monthEndDueDateStrategy;
 
     public LoanConfigurationDetails(CurrencyData currency, BigDecimal interestRatePerPeriod, BigDecimal annualNominalInterestRate,
             Integer interestChargingGrace, Integer interestPaymentGrace, Integer principalGrace,
             Integer recurringMoratoriumOnPrincipalPeriods, InterestMethod interestMethod,
             InterestCalculationPeriodMethod interestCalculationPeriodMethod, DaysInYearType daysInYearType, DaysInMonthType daysInMonthType,
             AmortizationMethod amortizationMethod, PeriodFrequencyType repaymentPeriodFrequencyType, Integer repaymentEvery,
-            Integer numberOfRepayments, boolean interestRecognitionOnDisbursementDate,
-            DaysInYearCustomStrategyType daysInYearCustomStrategy, boolean allowPartialPeriodInterestCalculation,
-            boolean isInterestRecalculationEnabled, RecalculationFrequencyType restFrequencyType,
-            LoanPreCloseInterestCalculationStrategy preCloseInterestCalculationStrategy, boolean allowFullTermForTranche,
-            LoanScheduleProcessingType loanScheduleProcessingType) {
+            Integer firstRepaymentDayOfMonth, Integer secondRepaymentDayOfMonth, Integer numberOfRepayments,
+            boolean interestRecognitionOnDisbursementDate, DaysInYearCustomStrategyType daysInYearCustomStrategy,
+            boolean allowPartialPeriodInterestCalculation, boolean isInterestRecalculationEnabled,
+            RecalculationFrequencyType restFrequencyType, LoanPreCloseInterestCalculationStrategy preCloseInterestCalculationStrategy,
+            boolean allowFullTermForTranche, LoanScheduleProcessingType loanScheduleProcessingType,
+            MonthEndDueDateStrategy monthEndDueDateStrategy) {
         this.currency = currency;
         this.interestRatePerPeriod = interestRatePerPeriod;
         this.annualNominalInterestRate = annualNominalInterestRate;
@@ -88,6 +96,8 @@ public class LoanConfigurationDetails implements ILoanConfigurationDetails {
         this.amortizationMethod = amortizationMethod;
         this.repaymentPeriodFrequencyType = repaymentPeriodFrequencyType;
         this.repaymentEvery = repaymentEvery;
+        this.firstRepaymentDayOfMonth = firstRepaymentDayOfMonth;
+        this.secondRepaymentDayOfMonth = secondRepaymentDayOfMonth;
         this.numberOfRepayments = numberOfRepayments;
         this.interestRecognitionOnDisbursementDate = interestRecognitionOnDisbursementDate;
         this.daysInYearCustomStrategy = daysInYearCustomStrategy;
@@ -97,6 +107,7 @@ public class LoanConfigurationDetails implements ILoanConfigurationDetails {
         this.preCloseInterestCalculationStrategy = preCloseInterestCalculationStrategy;
         this.allowFullTermForTranche = allowFullTermForTranche;
         this.loanScheduleProcessingType = loanScheduleProcessingType;
+        this.monthEndDueDateStrategy = monthEndDueDateStrategy;
     }
 
     private Integer defaultToNullIfZero(final Integer value) {

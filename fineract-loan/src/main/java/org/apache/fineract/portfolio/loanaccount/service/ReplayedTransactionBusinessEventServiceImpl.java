@@ -29,18 +29,15 @@ import org.apache.fineract.portfolio.loanaccount.domain.LoanTransactionRepositor
 @RequiredArgsConstructor
 public class ReplayedTransactionBusinessEventServiceImpl implements ReplayedTransactionBusinessEventService {
 
-    private final BusinessEventNotifierService businessEventNotifierService;
-    private final LoanTransactionRepository loanTransactionRepository;
+    protected final BusinessEventNotifierService businessEventNotifierService;
+    protected final LoanTransactionRepository loanTransactionRepository;
 
     @Override
     public void raiseTransactionReplayedEvents(final ChangedTransactionDetail changedTransactionDetail) {
         if (changedTransactionDetail == null || changedTransactionDetail.getTransactionChanges().isEmpty()) {
             return;
         }
-        // Extra safety net to avoid event leaking
-        try {
-            businessEventNotifierService.startExternalEventRecording();
-
+        businessEventNotifierService.withExternalEventRecording(() -> {
             for (TransactionChangeData change : changedTransactionDetail.getTransactionChanges()) {
                 final LoanTransaction newTransaction = change.getNewTransaction();
                 final LoanTransaction oldTransaction = change.getOldTransaction();
@@ -53,10 +50,6 @@ public class ReplayedTransactionBusinessEventServiceImpl implements ReplayedTran
                     businessEventNotifierService.notifyPostBusinessEvent(new LoanAdjustTransactionBusinessEvent(data));
                 }
             }
-            businessEventNotifierService.stopExternalEventRecording();
-        } catch (Exception e) {
-            businessEventNotifierService.resetEventRecording();
-            throw e;
-        }
+        });
     }
 }

@@ -20,10 +20,12 @@ package org.apache.fineract.notification.data;
 
 import java.io.Serializable;
 import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 import java.util.Set;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import lombok.experimental.Accessors;
+import org.apache.fineract.infrastructure.core.service.DateUtils;
 
 @Data
 @NoArgsConstructor
@@ -42,11 +44,12 @@ public class NotificationData implements Serializable {
     private boolean isSystemGenerated;
     private String tenantIdentifier;
     private String createdAt;
+    private OffsetDateTime createdAtTenant;
     private Long officeId;
     private Set<Long> userIds;
 
     public NotificationData(final Long id, final String objectType, final Long objectId, final Long actorId, final String action,
-            final String content, final boolean isSystemGenerated, final LocalDateTime createdAt) {
+            final String content, final boolean isSystemGenerated, final boolean isRead, final LocalDateTime createdAt) {
         this.id = id;
         this.objectType = objectType;
         this.objectId = objectId;
@@ -54,6 +57,13 @@ public class NotificationData implements Serializable {
         this.action = action;
         this.content = content;
         this.isSystemGenerated = isSystemGenerated;
+        this.isRead = isRead;
         this.createdAt = createdAt == null ? null : createdAt.toString();
+        this.createdAtTenant = createdAt == null ? null : toTenantDateTime(createdAt);
+    }
+
+    private static OffsetDateTime toTenantDateTime(final LocalDateTime systemDateTime) {
+        return systemDateTime.atZone(DateUtils.getSystemZoneId()).withZoneSameInstant(DateUtils.getDateTimeZoneOfTenant())
+                .toOffsetDateTime();
     }
 }

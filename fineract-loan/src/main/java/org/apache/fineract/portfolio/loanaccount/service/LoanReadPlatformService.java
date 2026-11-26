@@ -42,8 +42,8 @@ import org.apache.fineract.portfolio.loanaccount.domain.LoanTransactionType;
 import org.apache.fineract.portfolio.loanaccount.loanschedule.data.LoanScheduleData;
 import org.apache.fineract.portfolio.loanaccount.loanschedule.data.OverdueLoanScheduleData;
 import org.apache.fineract.portfolio.loanaccount.loanschedule.domain.LoanScheduleType;
+import org.jspecify.annotations.NonNull;
 import org.springframework.data.domain.Pageable;
-import org.springframework.lang.NonNull;
 
 public interface LoanReadPlatformService {
 
@@ -80,7 +80,7 @@ public interface LoanReadPlatformService {
 
     LoanAccountData retrieveTemplateWithCompleteGroupAndProductDetails(Long groupId, Long productId);
 
-    LoanAccountData retrieveLoanProductDetailsTemplate(Long productId, Long clientId, Long groupId);
+    LoanAccountData retrieveLoanProductDetailsTemplate(Long productId, Long clientId, Long groupId, Long officeId);
 
     Collection<CalendarData> retrieveCalendars(Long groupId);
 
@@ -120,6 +120,8 @@ public interface LoanReadPlatformService {
     List<Long> fetchLoansForInterestRecalculation(Integer pageSize, Long maxLoanIdInList, String officeHierarchy);
 
     LoanTransactionData retrieveLoanPrePaymentTemplate(LoanTransactionType repaymentTransactionType, Long loanId, LocalDate onDate);
+
+    LoanTransactionData retrieveLoanEarlyTerminationTemplate(Long loanId, LocalDate onDate);
 
     boolean isGuaranteeRequired(Long loanId);
 

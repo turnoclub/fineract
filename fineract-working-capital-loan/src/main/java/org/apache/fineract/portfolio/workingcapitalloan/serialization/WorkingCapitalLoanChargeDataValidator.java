@@ -33,9 +33,12 @@ import lombok.RequiredArgsConstructor;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.fineract.infrastructure.core.data.ApiParameterError;
 import org.apache.fineract.infrastructure.core.data.DataValidatorBuilder;
+import org.apache.fineract.infrastructure.core.exception.GeneralPlatformDomainRuleException;
 import org.apache.fineract.infrastructure.core.exception.InvalidJsonException;
 import org.apache.fineract.infrastructure.core.exception.PlatformApiDataValidationException;
 import org.apache.fineract.infrastructure.core.serialization.FromJsonHelper;
+import org.apache.fineract.portfolio.charge.domain.ChargeTimeType;
+import org.apache.fineract.portfolio.loanaccount.domain.LoanStatus;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -43,6 +46,52 @@ import org.springframework.stereotype.Service;
 public class WorkingCapitalLoanChargeDataValidator {
 
     private final FromJsonHelper fromJsonHelper;
+
+    public void validateChargeAdjustmentRequest(final String json) {
+        if (StringUtils.isBlank(json)) {
+            throw new InvalidJsonException();
+        }
+
+        final Set<String> allowedParameters = new HashSet<>(
+                Arrays.asList(WorkingCapitalLoanChargeConstants.amountParamName, WorkingCapitalLoanChargeConstants.externalIdParamName,
+                        WorkingCapitalLoanChargeConstants.localeParamName, WorkingCapitalLoanChargeConstants.dateFormatParamName,
+                        WorkingCapitalLoanChargeConstants.noteParamName, WorkingCapitalLoanChargeConstants.paymentDetailsParamName,
+                        WorkingCapitalLoanChargeConstants.paymentTypeIdParamName, WorkingCapitalLoanChargeConstants.accountNumberParamName,
+                        WorkingCapitalLoanChargeConstants.checkNumberParamName, WorkingCapitalLoanChargeConstants.routingCodeParamName,
+                        WorkingCapitalLoanChargeConstants.receiptNumberParamName, WorkingCapitalLoanChargeConstants.bankNumberParamName));
+
+        final Type typeOfMap = new TypeToken<Map<String, Object>>() {}.getType();
+        fromJsonHelper.checkForUnsupportedParameters(typeOfMap, json, allowedParameters);
+
+        final List<ApiParameterError> dataValidationErrors = new ArrayList<>();
+        final DataValidatorBuilder baseDataValidator = new DataValidatorBuilder(dataValidationErrors)
+                .resource("workingCapitalLoanChargeAdjustment");
+
+        final JsonElement element = this.fromJsonHelper.parse(json);
+
+        final BigDecimal amount = this.fromJsonHelper.extractBigDecimalWithLocaleNamed(WorkingCapitalLoanChargeConstants.amountParamName,
+                element);
+        baseDataValidator.reset().parameter(WorkingCapitalLoanChargeConstants.amountParamName).value(amount).notNull().positiveAmount();
+
+        throwExceptionIfValidationWarningsExist(dataValidationErrors);
+    }
+
+    /**
+     * An amount is rejected as an unsupported parameter rather than silently ignored - that is what makes "no partial
+     * waiver option" enforceable.
+     */
+    public void validateChargeWaiverRequest(final String json) {
+        if (StringUtils.isBlank(json)) {
+            throw new InvalidJsonException();
+        }
+
+        final Set<String> allowedParameters = new HashSet<>(
+                Arrays.asList(WorkingCapitalLoanChargeConstants.externalIdParamName, WorkingCapitalLoanChargeConstants.localeParamName,
+                        WorkingCapitalLoanChargeConstants.dateFormatParamName, WorkingCapitalLoanChargeConstants.noteParamName));
+
+        final Type typeOfMap = new TypeToken<Map<String, Object>>() {}.getType();
+        fromJsonHelper.checkForUnsupportedParameters(typeOfMap, json, allowedParameters);
+    }
 
     public void validateCreateLoanCharge(final String json) {
         if (StringUtils.isBlank(json)) {
@@ -77,6 +126,30 @@ public class WorkingCapitalLoanChargeDataValidator {
 
         throwExceptionIfValidationWarningsExist(dataValidationErrors);
 
+    }
+
+    /**
+     * The WC add-charge path never checks {@code chargeAppliesTo}, so this time-type guard is also what stops a
+     * term-loan charge product from being attached to a WC account; removing it requires adding that check instead.
+     */
+    public void validateCreateLoanChargeAgainstLoan(final LoanStatus loanStatus, final ChargeTimeType chargeTimeType,
+            final LocalDate dueDate, final LocalDate businessDate) {
+        if (chargeTimeType == null || !ChargeTimeType.validWorkingCapitalLoanAccount().contains(chargeTimeType)) {
+            final String chargeTimeCode = chargeTimeType == null ? null : chargeTimeType.getCode();
+            throw new GeneralPlatformDomainRuleException("error.msg.wc.loan.charge.time.type.not.supported",
+                    "Charge time type " + chargeTimeType + " is not supported on a Working Capital Loan.", chargeTimeCode);
+        }
+        if (dueDate == null) {
+            throw new PlatformApiDataValidationException("field.is.mandatory", "Field is mandatory",
+                    WorkingCapitalLoanChargeConstants.dueDateParamName);
+        }
+        if (dueDate.isBefore(businessDate)) {
+            throw new PlatformApiDataValidationException("dueDate.cannot.be.in.the.past", "DueDate cannot be in the past",
+                    WorkingCapitalLoanChargeConstants.dueDateParamName);
+        }
+        if (!(loanStatus.isActive() || loanStatus.isClosedObligationsMet() || loanStatus.isOverpaid())) {
+            throw new PlatformApiDataValidationException("loan.should.be.active", "Loan should be in active status", "workingCapitalLoan");
+        }
     }
 
     private void throwExceptionIfValidationWarningsExist(final List<ApiParameterError> dataValidationErrors) {

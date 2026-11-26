@@ -29,18 +29,20 @@ import org.quartz.JobExecutionContext;
 import org.quartz.JobKey;
 import org.quartz.Trigger;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Isolation;
-import org.springframework.transaction.annotation.Transactional;
 
 @Slf4j
 @Component
 @RequiredArgsConstructor
 public class SchedulerVetoer {
 
-    private final SchedularWritePlatformService schedularService;
+    private final SchedulerWritePlatformService schedulerService;
     private final BusinessDateReadPlatformService businessDateReadPlatformService;
 
-    @Transactional(isolation = Isolation.READ_COMMITTED)
+    // Intentionally NOT @Transactional: the only write happens in
+    // SchedularWritePlatformService#processJobDetailForExecution, which runs in its own
+    // REQUIRES_NEW transaction. Keeping veto() non-transactional ensures the pessimistic
+    // job-claim lock is held only for the duration of that inner transaction, and lets the
+    // @Retry on processJobDetailForExecution re-run each attempt in a fresh transaction.
     public boolean veto(Trigger trigger, JobExecutionContext context) {
         String tenantIdentifier = trigger.getJobDataMap().getString(SchedulerServiceConstants.TENANT_IDENTIFIER);
         HashMap<BusinessDateType, LocalDate> businessDates = businessDateReadPlatformService.getBusinessDates();
@@ -51,7 +53,7 @@ public class SchedulerVetoer {
         if (context.getMergedJobDataMap().containsKey(SchedulerServiceConstants.TRIGGER_TYPE_REFERENCE)) {
             triggerType = context.getMergedJobDataMap().getString(SchedulerServiceConstants.TRIGGER_TYPE_REFERENCE);
         }
-        boolean vetoJob = schedularService.processJobDetailForExecution(jobKey, triggerType);
+        boolean vetoJob = schedulerService.processJobDetailForExecution(jobKey, triggerType);
         if (vetoJob) {
             log.warn(
                     "vetoJobExecution() WILL veto the execution (returning vetoJob == true; the job's execute method will NOT be called); tenant={}, jobKey={}, triggerType={}, trigger={}, context={}",

@@ -33,8 +33,7 @@ import org.apache.fineract.infrastructure.codes.domain.CodeValueRepository;
 import org.apache.fineract.infrastructure.core.api.JsonCommand;
 import org.apache.fineract.infrastructure.core.serialization.FromJsonHelper;
 import org.apache.fineract.portfolio.PortfolioProductType;
-import org.apache.fineract.portfolio.charge.domain.ChargeRepositoryWrapper;
-import org.apache.fineract.portfolio.paymenttype.domain.PaymentTypeRepositoryWrapper;
+import org.apache.fineract.portfolio.paymenttype.domain.PaymentTypeRepository;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -42,10 +41,10 @@ public class SavingsProductToGLAccountMappingHelper extends ProductToGLAccountMa
 
     public SavingsProductToGLAccountMappingHelper(final GLAccountRepository glAccountRepository,
             final ProductToGLAccountMappingRepository glAccountMappingRepository, final FromJsonHelper fromApiJsonHelper,
-            final ChargeRepositoryWrapper chargeRepositoryWrapper, final GLAccountRepositoryWrapper accountRepositoryWrapper,
-            final PaymentTypeRepositoryWrapper paymentTypeRepositoryWrapper, final CodeValueRepository codeValueRepository) {
-        super(glAccountRepository, glAccountMappingRepository, fromApiJsonHelper, chargeRepositoryWrapper, accountRepositoryWrapper,
-                paymentTypeRepositoryWrapper, codeValueRepository);
+            final AccountingChargeReadService accountingChargeReadService, final GLAccountRepositoryWrapper accountRepositoryWrapper,
+            final PaymentTypeRepository paymentTypeRepository, final CodeValueRepository codeValueRepository) {
+        super(glAccountRepository, glAccountMappingRepository, fromApiJsonHelper, accountingChargeReadService, accountRepositoryWrapper,
+                paymentTypeRepository, codeValueRepository);
     }
 
     /***
@@ -155,9 +154,9 @@ public class SavingsProductToGLAccountMappingHelper extends ProductToGLAccountMa
         final Long writeOffId = this.fromApiJsonHelper.extractLongNamed(SavingProductAccountingParams.LOSSES_WRITTEN_OFF.getValue(),
                 element);
         switch (accountingRuleType) {
-            case NONE:
-            break;
-            case CASH_BASED:
+            case NONE -> {
+            }
+            case CASH_BASED -> {
                 changes.put(SavingProductAccountingParams.SAVINGS_CONTROL.getValue(), savingsControlId);
                 changes.put(SavingProductAccountingParams.SAVINGS_REFERENCE.getValue(), savingsReferenceId);
                 changes.put(SavingProductAccountingParams.INTEREST_ON_SAVINGS.getValue(), interestOnSavingsId);
@@ -167,8 +166,8 @@ public class SavingsProductToGLAccountMappingHelper extends ProductToGLAccountMa
                 changes.put(SavingProductAccountingParams.OVERDRAFT_PORTFOLIO_CONTROL.getValue(), overdraftControlId);
                 changes.put(SavingProductAccountingParams.INCOME_FROM_INTEREST.getValue(), incomeFromInterest);
                 changes.put(SavingProductAccountingParams.LOSSES_WRITTEN_OFF.getValue(), writeOffId);
-            break;
-            case ACCRUAL_PERIODIC:
+            }
+            case ACCRUAL_PERIODIC -> {
                 final Long feeReceivableId = this.fromApiJsonHelper
                         .extractLongNamed(SavingProductAccountingParams.FEES_RECEIVABLE.getValue(), element);
                 final Long penaltyReceivableId = this.fromApiJsonHelper
@@ -188,9 +187,9 @@ public class SavingsProductToGLAccountMappingHelper extends ProductToGLAccountMa
                 changes.put(SavingProductAccountingParams.FEES_RECEIVABLE.getValue(), feeReceivableId);
                 changes.put(SavingProductAccountingParams.PENALTIES_RECEIVABLE.getValue(), penaltyReceivableId);
                 changes.put(SavingProductAccountingParams.INTEREST_PAYABLE.getValue(), interestPayableId);
-            break;
-            case ACCRUAL_UPFRONT:
-            break;
+            }
+            case ACCRUAL_UPFRONT -> {
+            }
         }
         return changes;
     }
@@ -206,9 +205,9 @@ public class SavingsProductToGLAccountMappingHelper extends ProductToGLAccountMa
     public void handleChangesToSavingsProductToGLAccountMappings(final Long savingsProductId, final Map<String, Object> changes,
             final JsonElement element, final AccountingRuleType accountingRuleType) {
         switch (accountingRuleType) {
-            case NONE:
-            break;
-            case CASH_BASED:
+            case NONE -> {
+            }
+            case CASH_BASED -> {
                 // asset
                 mergeSavingsToAssetAccountMappingChanges(element, SavingProductAccountingParams.SAVINGS_REFERENCE.getValue(),
                         savingsProductId, CashAccountsForSavings.SAVINGS_REFERENCE.getValue(),
@@ -248,8 +247,8 @@ public class SavingsProductToGLAccountMappingHelper extends ProductToGLAccountMa
                         CashAccountsForSavings.TRANSFERS_SUSPENSE.toString(), changes);
                 createOrmergeSavingsToLiabilityAccountMappingChanges(element, SavingProductAccountingParams.ESCHEAT_LIABILITY.getValue(),
                         savingsProductId, CashAccountsForSavings.ESCHEAT_LIABILITY.getValue(), changes);
-            break;
-            case ACCRUAL_PERIODIC:
+            }
+            case ACCRUAL_PERIODIC -> {
                 // asset
                 mergeSavingsToAssetAccountMappingChanges(element, SavingProductAccountingParams.SAVINGS_REFERENCE.getValue(),
                         savingsProductId, AccrualAccountsForSavings.SAVINGS_REFERENCE.getValue(),
@@ -308,10 +307,9 @@ public class SavingsProductToGLAccountMappingHelper extends ProductToGLAccountMa
 
                 createOrmergeSavingsToLiabilityAccountMappingChanges(element, SavingProductAccountingParams.ESCHEAT_LIABILITY.getValue(),
                         savingsProductId, AccrualAccountsForSavings.ESCHEAT_LIABILITY.getValue(), changes);
-
-            break;
-            case ACCRUAL_UPFRONT:
-            break;
+            }
+            case ACCRUAL_UPFRONT -> {
+            }
         }
     }
 

@@ -27,10 +27,14 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import lombok.RequiredArgsConstructor;
+import org.apache.fineract.client.models.AdvancedPaymentData;
 import org.apache.fineract.client.models.AllowAttributeOverrides;
+import org.apache.fineract.client.models.CreditAllocationData;
+import org.apache.fineract.client.models.CreditAllocationOrder;
 import org.apache.fineract.client.models.GetLoanPaymentChannelToFundSourceMappings;
 import org.apache.fineract.client.models.LoanProductChargeData;
 import org.apache.fineract.client.models.LoanProductChargeToGLAccountMapper;
+import org.apache.fineract.client.models.PaymentAllocationOrder;
 import org.apache.fineract.client.models.PostChargeOffReasonToExpenseAccountMappings;
 import org.apache.fineract.client.models.PostLoanProductsRequest;
 import org.apache.fineract.test.data.AccountingRule;
@@ -56,6 +60,7 @@ import org.apache.fineract.test.data.accounttype.DefaultAccountType;
 import org.apache.fineract.test.data.codevalue.CodeValueResolver;
 import org.apache.fineract.test.data.codevalue.DefaultCodeValue;
 import org.apache.fineract.test.data.delinquency.DelinquencyBucketResolver;
+import org.apache.fineract.test.data.loanproduct.DefaultLoanProduct;
 import org.apache.fineract.test.data.paymenttype.DefaultPaymentType;
 import org.apache.fineract.test.data.paymenttype.PaymentTypeResolver;
 import org.apache.fineract.test.helper.CodeHelper;
@@ -95,6 +100,8 @@ public class LoanProductsRequestFactory {
     public static final String DESCRIPTION_INTEREST_DECLINING = "30 days repayment with 12% interest - DECLINING BALANCE";
     public static final String DESCRIPTION_INTEREST_DECLINING_BALANCE_DAILY_RECALCULATION_COMPOUNDING_MONTHLY = "LP1-1MONTH with 12% DECLINING BALANCE interest, interest period: Daily, Interest recalculation-Monthly, Compounding:Interest";
     public static final String DESCRIPTION_INTEREST_DECLINING_BALANCE_DAILY_RECALCULATION_COMPOUNDING_NONE = "LP1 with 12% DECLINING BALANCE interest, interest period: Daily, Interest recalculation-Daily, Compounding:none";
+    public static final String DESCRIPTION_LP1_MONTH_END_DUE_DATE = "LP1 monthly repayment with month end due date strategy";
+    public static final String DESCRIPTION_LP2_MONTH_END_DUE_DATE = "LP2 monthly repayment with month end due date strategy";
     public static final Long FUND_ID = FundId.LENDER_A.value;
     public static final String CURRENCY_CODE = "EUR";
     public static final String CURRENCY_CODE_USD = "USD";
@@ -1900,6 +1907,168 @@ public class LoanProductsRequestFactory {
                 .buyDownExpenseAccountId(accountTypeResolver.resolve(DefaultAccountType.BUY_DOWN_EXPENSE))//
                 .incomeFromBuyDownAccountId(accountTypeResolver.resolve(DefaultAccountType.INCOME_FROM_BUY_DOWN)).dateFormat(DATE_FORMAT)//
                 .locale(LOCALE_EN);//
+    }
+
+    public PostLoanProductsRequest defaultLoanProductsRequestLP1MonthEndDueDateClampActual() {
+        return createBaseLP1MonthEndDueDateRequest(PostLoanProductsRequest.MonthEndDueDateStrategyEnum.LAST_DAY_OF_MONTH, DAYS_IN_YEAR_TYPE,
+                DAYS_IN_MONTH_TYPE);
+    }
+
+    public PostLoanProductsRequest defaultLoanProductsRequestLP1MonthEndDueDateRollActual() {
+        return createBaseLP1MonthEndDueDateRequest(PostLoanProductsRequest.MonthEndDueDateStrategyEnum.FIRST_DAY_OF_NEXT_MONTH,
+                DAYS_IN_YEAR_TYPE, DAYS_IN_MONTH_TYPE);
+    }
+
+    public PostLoanProductsRequest defaultLoanProductsRequestLP1MonthEndDueDateClamp36030() {
+        return createBaseLP1MonthEndDueDateRequest(PostLoanProductsRequest.MonthEndDueDateStrategyEnum.LAST_DAY_OF_MONTH,
+                DAYS_IN_YEAR_TYPE_360, DAYS_IN_MONTH_TYPE_30);
+    }
+
+    public PostLoanProductsRequest defaultLoanProductsRequestLP1MonthEndDueDateRoll36030() {
+        return createBaseLP1MonthEndDueDateRequest(PostLoanProductsRequest.MonthEndDueDateStrategyEnum.FIRST_DAY_OF_NEXT_MONTH,
+                DAYS_IN_YEAR_TYPE_360, DAYS_IN_MONTH_TYPE_30);
+    }
+
+    public PostLoanProductsRequest defaultLoanProductsRequestLP2MonthEndDueDateClampActual() {
+        return createBaseLP2MonthEndDueDateRequest(PostLoanProductsRequest.MonthEndDueDateStrategyEnum.LAST_DAY_OF_MONTH, DAYS_IN_YEAR_TYPE,
+                DAYS_IN_MONTH_TYPE);
+    }
+
+    public PostLoanProductsRequest defaultLoanProductsRequestLP2MonthEndDueDateRollActual() {
+        return createBaseLP2MonthEndDueDateRequest(PostLoanProductsRequest.MonthEndDueDateStrategyEnum.FIRST_DAY_OF_NEXT_MONTH,
+                DAYS_IN_YEAR_TYPE, DAYS_IN_MONTH_TYPE);
+    }
+
+    public PostLoanProductsRequest defaultLoanProductsRequestLP2MonthEndDueDateRollActualInterestRecalc() {
+        return createBaseLP2MonthEndDueDateRequest(PostLoanProductsRequest.MonthEndDueDateStrategyEnum.FIRST_DAY_OF_NEXT_MONTH,
+                DAYS_IN_YEAR_TYPE, DAYS_IN_MONTH_TYPE)//
+                .isInterestRecalculationEnabled(true)//
+                .preClosureInterestCalculationStrategy(PRE_CLOSURE_INTEREST_CALCULATION_RULE_TILL_PRE_CLOSE_DATE)//
+                .rescheduleStrategyMethod(AdvancePaymentsAdjustmentType.ADJUST_LAST_UNPAID_PERIOD.value)//
+                .interestRecalculationCompoundingMethod(INTEREST_RECALCULATION_COMPOUND_METHOD_NONE)//
+                .recalculationRestFrequencyType(FREQUENCY_FOR_RECALCULATE_OUTSTANDING_DAILY)//
+                .recalculationRestFrequencyInterval(1);
+    }
+
+    public PostLoanProductsRequest defaultLoanProductsRequestLP2MonthEndDueDateClamp36030() {
+        return createBaseLP2MonthEndDueDateRequest(PostLoanProductsRequest.MonthEndDueDateStrategyEnum.LAST_DAY_OF_MONTH,
+                DAYS_IN_YEAR_TYPE_360, DAYS_IN_MONTH_TYPE_30);
+    }
+
+    public PostLoanProductsRequest defaultLoanProductsRequestLP2MonthEndDueDateRoll36030() {
+        return createBaseLP2MonthEndDueDateRequest(PostLoanProductsRequest.MonthEndDueDateStrategyEnum.FIRST_DAY_OF_NEXT_MONTH,
+                DAYS_IN_YEAR_TYPE_360, DAYS_IN_MONTH_TYPE_30);
+    }
+
+    private PostLoanProductsRequest createBaseLP1MonthEndDueDateRequest(
+            PostLoanProductsRequest.MonthEndDueDateStrategyEnum monthEndDueDateStrategy, Integer daysInYearType, Integer daysInMonthType) {
+        return defaultLoanProductsRequestLP1InterestDeclining()//
+                .description(DESCRIPTION_LP1_MONTH_END_DUE_DATE)//
+                .repaymentEvery(1)//
+                .repaymentFrequencyType(REPAYMENT_FREQUENCY_TYPE_MONTHS)//
+                .numberOfRepayments(3)//
+                .principal(10000.0)//
+                .minPrincipal(100.0)//
+                .maxPrincipal(100000.0)//
+                .daysInYearType(daysInYearType)//
+                .daysInMonthType(daysInMonthType)//
+                .loanScheduleType("CUMULATIVE")//
+                .loanScheduleProcessingType((String) null)//
+                .monthEndDueDateStrategy(monthEndDueDateStrategy);
+    }
+
+    private PostLoanProductsRequest createBaseLP2MonthEndDueDateRequest(
+            PostLoanProductsRequest.MonthEndDueDateStrategyEnum monthEndDueDateStrategy, Integer daysInYearType, Integer daysInMonthType) {
+        return defaultLoanProductsRequestLP2Emi()//
+                .description(DESCRIPTION_LP2_MONTH_END_DUE_DATE)//
+                .repaymentEvery(1)//
+                .repaymentFrequencyType(REPAYMENT_FREQUENCY_TYPE_MONTHS)//
+                .numberOfRepayments(3)//
+                .principal(10000.0)//
+                .minPrincipal(100.0)//
+                .maxPrincipal(100000.0)//
+                .daysInYearType(daysInYearType)//
+                .daysInMonthType(daysInMonthType)//
+                .paymentAllocation(createDefaultPaymentAllocation())//
+                .monthEndDueDateStrategy(monthEndDueDateStrategy);
+    }
+
+    /**
+     * LP2 with auto down payment and advanced payment allocation, the given charge attached at product level
+     * (LP2_DOWNPAYMENT_AUTO_ADV_PMT_ALLOC_DP_FEE_ON_PRODUCT)
+     */
+    public PostLoanProductsRequest defaultLoanProductsRequestLP2DownPaymentFeeOnProduct(final Long chargeId) {
+        return defaultLoanProductsRequestLP2()//
+                .name(DefaultLoanProduct.LP2_DOWNPAYMENT_AUTO_ADV_PMT_ALLOC_DP_FEE_ON_PRODUCT.getName())//
+                .transactionProcessingStrategyCode(ADVANCED_PAYMENT_ALLOCATION.getValue())//
+                .loanScheduleType("PROGRESSIVE")//
+                .charges(List.of(new LoanProductChargeData().id(chargeId)))//
+                .paymentAllocation(List.of(//
+                        createPaymentAllocation("DEFAULT", "NEXT_INSTALLMENT"), //
+                        createPaymentAllocation("GOODWILL_CREDIT", "LAST_INSTALLMENT"), //
+                        createPaymentAllocation("MERCHANT_ISSUED_REFUND", "REAMORTIZATION"), //
+                        createPaymentAllocation("PAYOUT_REFUND", "NEXT_INSTALLMENT")));//
+    }
+
+    /**
+     * Progressive LP2 without down payment, the given charge attached at product level
+     */
+    public PostLoanProductsRequest defaultLoanProductsRequestLP2WithoutDownPayment(final Long chargeId) {
+        return defaultLoanProductsRequestLP2InterestDailyRecalculation()//
+                .charges(List.of(new LoanProductChargeData().id(chargeId)))//
+                .paymentAllocation(createDefaultPaymentAllocation());//
+    }
+
+    /**
+     * LP2 EMI with accrual accounting and the default advanced payment allocation
+     */
+    public PostLoanProductsRequest defaultLoanProductsRequestLP2EmiAdvancedPaymentAllocation() {
+        return defaultLoanProductsRequestLP2Emi()//
+                .paymentAllocation(createDefaultPaymentAllocation());
+    }
+
+    public PostLoanProductsRequest defaultLoanProductsRequestLP2EmiWithCreditAllocation(final List<CreditAllocationData> creditAllocation) {
+        return defaultLoanProductsRequestLP2Emi()//
+                .daysInYearType(DaysInYearType.DAYS360.value)//
+                .daysInMonthType(DaysInMonthType.DAYS30.value)//
+                .paymentAllocation(createDefaultPaymentAllocation())//
+                .creditAllocation(creditAllocation);
+    }
+
+    public static CreditAllocationData createCreditAllocation(final String transactionType, final String creditAllocationStrategy,
+            final List<String> creditAllocationRules) {
+        final CreditAllocationData creditAllocationData = new CreditAllocationData().transactionType(transactionType)
+                .creditAllocationStrategy(creditAllocationStrategy);
+        if (creditAllocationRules != null) {
+            final List<CreditAllocationOrder> creditAllocationOrders = new ArrayList<>();
+            for (int i = 0; i < creditAllocationRules.size(); i++) {
+                creditAllocationOrders.add(new CreditAllocationOrder().creditAllocationRule(creditAllocationRules.get(i)).order(i + 1));
+            }
+            creditAllocationData.setCreditAllocationOrder(creditAllocationOrders);
+        }
+        return creditAllocationData;
+    }
+
+    private List<AdvancedPaymentData> createDefaultPaymentAllocation() {
+        return List.of(createPaymentAllocation("DEFAULT", "NEXT_INSTALLMENT"));
+    }
+
+    private AdvancedPaymentData createPaymentAllocation(final String transactionType, final String futureInstallmentAllocationRule) {
+        List<PaymentAllocationOrder> allocationOrder = List.of(
+                new PaymentAllocationOrder().paymentAllocationRule("PAST_DUE_PENALTY").order(1),
+                new PaymentAllocationOrder().paymentAllocationRule("PAST_DUE_FEE").order(2),
+                new PaymentAllocationOrder().paymentAllocationRule("PAST_DUE_PRINCIPAL").order(3),
+                new PaymentAllocationOrder().paymentAllocationRule("PAST_DUE_INTEREST").order(4),
+                new PaymentAllocationOrder().paymentAllocationRule("DUE_PENALTY").order(5),
+                new PaymentAllocationOrder().paymentAllocationRule("DUE_FEE").order(6),
+                new PaymentAllocationOrder().paymentAllocationRule("DUE_PRINCIPAL").order(7),
+                new PaymentAllocationOrder().paymentAllocationRule("DUE_INTEREST").order(8),
+                new PaymentAllocationOrder().paymentAllocationRule("IN_ADVANCE_PENALTY").order(9),
+                new PaymentAllocationOrder().paymentAllocationRule("IN_ADVANCE_FEE").order(10),
+                new PaymentAllocationOrder().paymentAllocationRule("IN_ADVANCE_PRINCIPAL").order(11),
+                new PaymentAllocationOrder().paymentAllocationRule("IN_ADVANCE_INTEREST").order(12));
+        return new AdvancedPaymentData().transactionType(transactionType).futureInstallmentAllocationRule(futureInstallmentAllocationRule)
+                .paymentAllocationOrder(allocationOrder);
     }
 
     public String generateShortNameSafely() {

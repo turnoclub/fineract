@@ -38,9 +38,12 @@ import org.apache.commons.lang3.StringUtils;
 import org.apache.fineract.commands.data.AuditData;
 import org.apache.fineract.commands.data.AuditSearchData;
 import org.apache.fineract.commands.data.ProcessingResultLookup;
+import org.apache.fineract.commands.data.request.AuditRequest;
+import org.apache.fineract.commands.exception.CommandNotFoundException;
 import org.apache.fineract.infrastructure.core.data.PaginationParameters;
 import org.apache.fineract.infrastructure.core.data.PaginationParametersDataValidator;
 import org.apache.fineract.infrastructure.core.domain.JdbcSupport;
+import org.apache.fineract.infrastructure.core.exception.PlatformApiDataValidationException;
 import org.apache.fineract.infrastructure.core.exception.PlatformDataIntegrityException;
 import org.apache.fineract.infrastructure.core.serialization.FromJsonHelper;
 import org.apache.fineract.infrastructure.core.service.Page;
@@ -68,6 +71,7 @@ import org.apache.fineract.portfolio.savings.service.SavingsProductReadPlatformS
 import org.apache.fineract.useradministration.data.AppUserData;
 import org.apache.fineract.useradministration.domain.AppUser;
 import org.apache.fineract.useradministration.service.AppUserReadPlatformService;
+import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 
@@ -75,9 +79,13 @@ import org.springframework.jdbc.core.RowMapper;
 @Slf4j
 public class AuditReadPlatformServiceImpl implements AuditReadPlatformService {
 
-    private static final Set<String> supportedOrderByValues = new HashSet<>(Arrays.asList("id", "actionName", "entityName", "resourceId",
-            "subresourceId", "madeOnDate", "checkedOnDate", "officeName", "groupName", "clientName", "loanAccountNo", "savingsAccountNo",
-            "clientId", "loanId", "maker", "checker", "processingResult"));
+    private static final Set<String> supportedOrderByValues = new HashSet<>(
+            Arrays.asList("id", "actionName", "entityName", "resourceId", "subresourceId", "madeOnDate", "checkedOnDate", "officeName",
+                    "groupName", "clientName", "loanAccountNo", "savingsAccountNo", "clientId", "loanId", "maker", "checker",
+                    "processingResult", "officeId", "groupId", "savingsAccountId", "productId", "transactionId", "resourceExternalId",
+                    "subresourceExternalId", "loanExternalId", "submittedOfficeId", "submittedGroupId", "submittedClientId",
+                    "submittedLoanId", "submittedSavingsAccountId", "submittedProductId", "submittedTransactionId", "submittedResourceId",
+                    "submittedResourceExternalId", "submittedSubresourceId", "submittedSubresourceExternalId", "submittedLoanExternalId"));
 
     private final JdbcTemplate jdbcTemplate;
     private final PlatformSecurityContext context;
@@ -97,31 +105,50 @@ public class AuditReadPlatformServiceImpl implements AuditReadPlatformService {
 
     private static final class AuditMapper implements RowMapper<AuditData> {
 
-        public String schema(final boolean includeJson, final String hierarchy) {
+        private String schema(final boolean includeJson, final String hierarchy) {
 
             String commandAsJsonString = "";
             if (includeJson) {
                 commandAsJsonString = ", aud.command_as_json as commandAsJson ";
             }
 
-            String partSql = " aud.id as id, aud.action_name as actionName, aud.entity_name as entityName,"
-                    + " aud.resource_id as resourceId, aud.subresource_id as subresourceId,aud.client_id as clientId, aud.loan_id as loanId,"
+            String partSql = " aud.id as id, aud.action_name as actionName, aud.entity_name as entityName," + " "
+                    + AuditColumns.returned("resource_id") + " as resourceId, " + AuditColumns.returned("subresource_id")
+                    + " as subresourceId, " + AuditColumns.returned("client_id") + " as clientId, " + AuditColumns.returned("loan_id")
+                    + " as loanId,"
                     + " mk.username as maker, aud.made_on_date as madeOnDate, aud.made_on_date_utc as madeOnDateUTC, aud.api_get_url as resourceGetUrl, "
                     + "ck.username as checker, aud.checked_on_date as checkedOnDate, aud.checked_on_date_utc as checkedOnDateUTC,  ev.enum_value as processingResult "
                     + commandAsJsonString + ", "
                     + " o.name as officeName, gl.level_name as groupLevelName, g.display_name as groupName, c.display_name as clientName, "
-                    + " l.account_no as loanAccountNo, s.account_no as savingsAccountNo , aud.client_ip  as ip "
-                    + " from m_portfolio_command_source aud " + " left join m_appuser mk on mk.id = aud.maker_id"
-                    + " left join m_appuser ck on ck.id = aud.checker_id" + " left join m_office o on o.id = aud.office_id"
-                    + " left join m_group g on g.id = aud.group_id" + " left join m_group_level gl on gl.id = g.level_id"
-                    + " left join m_client c on c.id = aud.client_id" + " left join m_loan l on l.id = aud.loan_id"
-                    + " left join m_savings_account s on s.id = aud.savings_account_id"
+                    + " l.account_no as loanAccountNo, s.account_no as savingsAccountNo , aud.client_ip  as ip, "
+                    + AuditColumns.returned("office_id") + " as officeId, " + AuditColumns.returned("group_id") + " as groupId, "
+                    + AuditColumns.returned("savings_account_id") + " as savingsAccountId, " + AuditColumns.returned("product_id")
+                    + " as productId, " + AuditColumns.returned("transaction_id") + " as transactionId, "
+                    + AuditColumns.returned("resource_external_id") + " as resourceExternalId, "
+                    + AuditColumns.returned("subresource_external_id") + " as subresourceExternalId, "
+                    + AuditColumns.returned("loan_external_id") + " as loanExternalId, " + AuditColumns.submitted("office_id")
+                    + " as submittedOfficeId, " + AuditColumns.submitted("group_id") + " as submittedGroupId, "
+                    + AuditColumns.submitted("client_id") + " as submittedClientId, " + AuditColumns.submitted("loan_id")
+                    + " as submittedLoanId, " + AuditColumns.submitted("savings_account_id") + " as submittedSavingsAccountId, "
+                    + AuditColumns.submitted("product_id") + " as submittedProductId, " + AuditColumns.submitted("transaction_id")
+                    + " as submittedTransactionId, " + AuditColumns.submitted("resource_id") + " as submittedResourceId, "
+                    + AuditColumns.submitted("resource_external_id") + " as submittedResourceExternalId, "
+                    + AuditColumns.submitted("subresource_id") + " as submittedSubresourceId, "
+                    + AuditColumns.submitted("subresource_external_id") + " as submittedSubresourceExternalId, "
+                    + AuditColumns.submitted("loan_external_id") + " as submittedLoanExternalId " + " from m_portfolio_command_source aud "
+                    + " left join m_appuser mk on mk.id = aud.maker_id" + " left join m_appuser ck on ck.id = aud.checker_id"
+                    + " left join m_office o on o.id = " + AuditColumns.returned("office_id") + " left join m_group g on g.id = "
+                    + AuditColumns.returned("group_id") + " left join m_group_level gl on gl.id = g.level_id"
+                    + " left join m_client c on c.id = " + AuditColumns.returned("client_id") + " left join m_loan l on l.id = "
+                    + AuditColumns.returned("loan_id") + " left join m_savings_account s on s.id = "
+                    + AuditColumns.returned("savings_account_id")
                     + " left join r_enum_value ev on ev.enum_name = 'processing_result_enum' and ev.enum_id = aud.status";
 
             // data scoping: head office (hierarchy = ".") can see all audit
             // entries
             if (!hierarchy.equals(".")) {
-                partSql += " join m_office o2 on o2.id = aud.office_id and o2.hierarchy like '" + hierarchy + "%' ";
+                partSql += " join m_office o2 on o2.id = " + AuditColumns.returned("office_id") + " and o2.hierarchy like '" + hierarchy
+                        + "%' ";
             }
 
             return partSql;
@@ -164,9 +191,32 @@ public class AuditReadPlatformServiceImpl implements AuditReadPlatformService {
             ZonedDateTime madeOnDate = madeOnDateUTC != null ? madeOnDateUTC.toZonedDateTime() : madeOnDateTenant;
             ZonedDateTime checkedOnDate = checkedOnDateUTC != null ? checkedOnDateUTC.toZonedDateTime() : checkedOnDateTenant;
 
-            return new AuditData(id, actionName, entityName, resourceId, subresourceId, maker, madeOnDate, checker, checkedOnDate,
-                    processingResult, commandAsJson, officeName, groupLevelName, groupName, clientName, loanAccountNo, savingsAccountNo,
-                    clientId, loanId, resourceGetUrl, ip);
+            return AuditData.builder().id(id).actionName(actionName).entityName(entityName).resourceId(resourceId)
+                    .subresourceId(subresourceId).maker(maker).madeOnDate(madeOnDate).checker(checker).checkedOnDate(checkedOnDate)
+                    .processingResult(processingResult).commandAsJson(commandAsJson).officeName(officeName).groupLevelName(groupLevelName)
+                    .groupName(groupName).clientName(clientName).loanAccountNo(loanAccountNo).savingsAccountNo(savingsAccountNo)
+                    .clientId(clientId).loanId(loanId).url(resourceGetUrl).ip(ip) //
+                    .officeId(JdbcSupport.getLong(rs, "officeId")) //
+                    .groupId(JdbcSupport.getLong(rs, "groupId")) //
+                    .savingsAccountId(JdbcSupport.getLong(rs, "savingsAccountId")) //
+                    .productId(JdbcSupport.getLong(rs, "productId")) //
+                    .transactionId(rs.getString("transactionId")) //
+                    .resourceExternalId(rs.getString("resourceExternalId")) //
+                    .subresourceExternalId(rs.getString("subresourceExternalId")) //
+                    .loanExternalId(rs.getString("loanExternalId")) //
+                    .submittedOfficeId(JdbcSupport.getLong(rs, "submittedOfficeId")) //
+                    .submittedGroupId(JdbcSupport.getLong(rs, "submittedGroupId")) //
+                    .submittedClientId(JdbcSupport.getLong(rs, "submittedClientId")) //
+                    .submittedLoanId(JdbcSupport.getLong(rs, "submittedLoanId")) //
+                    .submittedSavingsAccountId(JdbcSupport.getLong(rs, "submittedSavingsAccountId")) //
+                    .submittedProductId(JdbcSupport.getLong(rs, "submittedProductId")) //
+                    .submittedTransactionId(rs.getString("submittedTransactionId")) //
+                    .submittedResourceId(JdbcSupport.getLong(rs, "submittedResourceId")) //
+                    .submittedResourceExternalId(rs.getString("submittedResourceExternalId")) //
+                    .submittedSubresourceId(JdbcSupport.getLong(rs, "submittedSubresourceId")) //
+                    .submittedSubresourceExternalId(rs.getString("submittedSubresourceExternalId")) //
+                    .submittedLoanExternalId(rs.getString("submittedLoanExternalId")) //
+                    .build();
         }
     }
 
@@ -257,9 +307,11 @@ public class AuditReadPlatformServiceImpl implements AuditReadPlatformService {
 
         final String sql = "select " + rm.schema(true, hierarchy) + " where aud.id = ? ";
 
-        final AuditData auditResult = this.jdbcTemplate.queryForObject(sql, rm, auditId); // NOSONAR
-
-        return replaceIdsOnAuditData(auditResult);
+        try {
+            return replaceIdsOnAuditData(this.jdbcTemplate.queryForObject(sql, rm, auditId)); // NOSONAR
+        } catch (final EmptyResultDataAccessException e) {
+            throw new CommandNotFoundException(auditId, e);
+        }
     }
 
     private AuditData replaceIdsOnAuditData(final AuditData auditResult) {
@@ -450,6 +502,88 @@ public class AuditReadPlatformServiceImpl implements AuditReadPlatformService {
         return new AuditSearchData(appUsers, actionNames, entityNames, processingResults);
     }
 
+    @Override
+    public SQLBuilder getExtraCriteria(final AuditRequest auditRequest) {
+        final SQLBuilder extraCriteria = new SQLBuilder();
+        extraCriteria.addNonNullCriteria("aud.action_name = ", auditRequest.getActionName());
+        if (auditRequest.getEntityName() != null) {
+            extraCriteria.addCriteria("aud.entity_name like", auditRequest.getEntityName() + "%");
+        }
+        AuditColumns.addReturnedCriteria(extraCriteria, "resource_id", auditRequest.getResourceId());
+        extraCriteria.addNonNullCriteria("aud.maker_id = ", auditRequest.getMakerId());
+        extraCriteria.addNonNullCriteria("aud.checker_id = ", auditRequest.getCheckerId());
+        if (auditRequest.getMakerDateTimeFrom() != null) {
+            extraCriteria.addSubOperation((SQLBuilder criteria) -> {
+                criteria.addNonNullCriteria("aud.made_on_date >= ", auditRequest.getMakerDateTimeFrom(),
+                        SQLBuilder.WhereLogicalOperator.NONE);
+                criteria.addNonNullCriteria("aud.made_on_date_utc >= ", auditRequest.getMakerDateTimeFrom(),
+                        SQLBuilder.WhereLogicalOperator.OR);
+            });
+        }
+        if (auditRequest.getMakerDateTimeTo() != null) {
+            extraCriteria.addSubOperation((SQLBuilder criteria) -> {
+                criteria.addNonNullCriteria("aud.made_on_date <= ", auditRequest.getMakerDateTimeTo(),
+                        SQLBuilder.WhereLogicalOperator.NONE);
+                criteria.addNonNullCriteria("aud.made_on_date_utc <= ", auditRequest.getMakerDateTimeTo(),
+                        SQLBuilder.WhereLogicalOperator.OR);
+            });
+        }
+        if (auditRequest.getCheckerDateTimeFrom() != null) {
+            extraCriteria.addSubOperation((SQLBuilder criteria) -> {
+                criteria.addNonNullCriteria("aud.checked_on_date >= ", auditRequest.getCheckerDateTimeFrom(),
+                        SQLBuilder.WhereLogicalOperator.NONE);
+                criteria.addNonNullCriteria("aud.checked_on_date_utc >= ", auditRequest.getCheckerDateTimeFrom(),
+                        SQLBuilder.WhereLogicalOperator.OR);
+            });
+        }
+        if (auditRequest.getCheckerDateTimeTo() != null) {
+            extraCriteria.addSubOperation((SQLBuilder criteria) -> {
+                criteria.addNonNullCriteria("aud.checked_on_date <= ", auditRequest.getCheckerDateTimeTo(),
+                        SQLBuilder.WhereLogicalOperator.NONE);
+                criteria.addNonNullCriteria("aud.checked_on_date_utc <= ", auditRequest.getCheckerDateTimeTo(),
+                        SQLBuilder.WhereLogicalOperator.OR);
+            });
+        }
+        extraCriteria.addNonNullCriteria("aud.status = ", parseStatus(auditRequest.getStatus()));
+        AuditColumns.addReturnedCriteria(extraCriteria, "office_id", auditRequest.getOfficeId());
+        AuditColumns.addReturnedCriteria(extraCriteria, "group_id", auditRequest.getGroupId());
+        AuditColumns.addReturnedCriteria(extraCriteria, "client_id", auditRequest.getClientId());
+        AuditColumns.addReturnedCriteria(extraCriteria, "loan_id", auditRequest.getLoanId());
+        AuditColumns.addReturnedCriteria(extraCriteria, "savings_account_id", auditRequest.getSavingsAccountId());
+        AuditColumns.addReturnedCriteria(extraCriteria, "product_id", auditRequest.getProductId());
+        AuditColumns.addReturnedCriteria(extraCriteria, "transaction_id", auditRequest.getTransactionId());
+        AuditColumns.addReturnedCriteria(extraCriteria, "subresource_id", auditRequest.getSubresourceId());
+        AuditColumns.addReturnedCriteria(extraCriteria, "resource_external_id", auditRequest.getResourceExternalId());
+        AuditColumns.addReturnedCriteria(extraCriteria, "subresource_external_id", auditRequest.getSubresourceExternalId());
+        AuditColumns.addReturnedCriteria(extraCriteria, "loan_external_id", auditRequest.getLoanExternalId());
+        AuditColumns.addSubmittedCriteria(extraCriteria, "office_id", auditRequest.getSubmittedOfficeId());
+        AuditColumns.addSubmittedCriteria(extraCriteria, "group_id", auditRequest.getSubmittedGroupId());
+        AuditColumns.addSubmittedCriteria(extraCriteria, "client_id", auditRequest.getSubmittedClientId());
+        AuditColumns.addSubmittedCriteria(extraCriteria, "loan_id", auditRequest.getSubmittedLoanId());
+        AuditColumns.addSubmittedCriteria(extraCriteria, "savings_account_id", auditRequest.getSubmittedSavingsAccountId());
+        AuditColumns.addSubmittedCriteria(extraCriteria, "product_id", auditRequest.getSubmittedProductId());
+        AuditColumns.addSubmittedCriteria(extraCriteria, "transaction_id", auditRequest.getSubmittedTransactionId());
+        AuditColumns.addSubmittedCriteria(extraCriteria, "resource_id", auditRequest.getSubmittedResourceId());
+        AuditColumns.addSubmittedCriteria(extraCriteria, "resource_external_id", auditRequest.getSubmittedResourceExternalId());
+        AuditColumns.addSubmittedCriteria(extraCriteria, "subresource_id", auditRequest.getSubmittedSubresourceId());
+        AuditColumns.addSubmittedCriteria(extraCriteria, "subresource_external_id", auditRequest.getSubmittedSubresourceExternalId());
+        AuditColumns.addSubmittedCriteria(extraCriteria, "loan_external_id", auditRequest.getSubmittedLoanExternalId());
+
+        return extraCriteria;
+    }
+
+    private static Integer parseStatus(final String status) {
+        if (StringUtils.isBlank(status)) {
+            return null;
+        }
+        try {
+            return Integer.valueOf(status.trim());
+        } catch (NumberFormatException e) {
+            throw new PlatformApiDataValidationException("validation.msg.audit.status.not.integer",
+                    "The parameter `status` must be an integer.", "status", e, status);
+        }
+    }
+
     private String makercheckerCapabilityOnly(final String useType, final AppUser currentUser) {
         String sql = "";
         Boolean isLimitedChecker = false;
@@ -500,7 +634,7 @@ public class AuditReadPlatformServiceImpl implements AuditReadPlatformService {
             return new ProcessingResultLookup(id, status);
         }
 
-        public String schema() {
+        private String schema() {
             return " select enum_id as id, enum_value as status from r_enum_value where enum_name = 'processing_result_enum' "
                     + " order by enum_id";
         }

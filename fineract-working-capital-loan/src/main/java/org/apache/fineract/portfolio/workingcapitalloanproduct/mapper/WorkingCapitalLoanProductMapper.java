@@ -21,7 +21,6 @@ package org.apache.fineract.portfolio.workingcapitalloanproduct.mapper;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicInteger;
 import org.apache.fineract.infrastructure.core.config.MapstructMapperConfig;
 import org.apache.fineract.infrastructure.core.data.StringEnumOptionData;
 import org.apache.fineract.infrastructure.core.domain.ExternalId;
@@ -37,11 +36,13 @@ import org.apache.fineract.portfolio.workingcapitalloanproduct.data.WorkingCapit
 import org.apache.fineract.portfolio.workingcapitalloanproduct.data.WorkingCapitalPaymentAllocationData;
 import org.apache.fineract.portfolio.workingcapitalloanproduct.domain.WorkingCapitalAccountingRuleType;
 import org.apache.fineract.portfolio.workingcapitalloanproduct.domain.WorkingCapitalAmortizationType;
+import org.apache.fineract.portfolio.workingcapitalloanproduct.domain.WorkingCapitalLoanBreachStartType;
 import org.apache.fineract.portfolio.workingcapitalloanproduct.domain.WorkingCapitalLoanDelinquencyStartType;
 import org.apache.fineract.portfolio.workingcapitalloanproduct.domain.WorkingCapitalLoanProduct;
 import org.apache.fineract.portfolio.workingcapitalloanproduct.domain.WorkingCapitalLoanProductConfigurableAttributes;
 import org.apache.fineract.portfolio.workingcapitalloanproduct.domain.WorkingCapitalLoanProductPaymentAllocationRule;
 import org.apache.fineract.portfolio.workingcapitalloanproduct.domain.WorkingCapitalPaymentAllocationType;
+import org.apache.fineract.portfolio.workingcapitalloanproduct.domain.WorkingCapitalPaymentAmountCalculationStrategy;
 import org.mapstruct.Mapper;
 import org.mapstruct.Mapping;
 import org.mapstruct.Named;
@@ -64,6 +65,13 @@ public interface WorkingCapitalLoanProductMapper {
     @Mapping(target = "minPeriodPaymentRate", source = "minMaxConstraints.minPeriodPaymentRate")
     @Mapping(target = "periodPaymentRate", source = "relatedDetail.periodPaymentRate")
     @Mapping(target = "maxPeriodPaymentRate", source = "minMaxConstraints.maxPeriodPaymentRate")
+    @Mapping(target = "minAnnualEir", source = "minMaxConstraints.minAnnualEir")
+    @Mapping(target = "maxAnnualEir", source = "minMaxConstraints.maxAnnualEir")
+    @Mapping(target = "minPaymentAmount", source = "minMaxConstraints.minPaymentAmount")
+    @Mapping(target = "maxPaymentAmount", source = "minMaxConstraints.maxPaymentAmount")
+    @Mapping(target = "paymentAmountCalculationStrategy", source = "relatedDetail.paymentAmountCalculationStrategy", qualifiedByName = "paymentAmountCalculationStrategyToStringEnumOptionData")
+    @Mapping(target = "annualEir", source = "relatedDetail.annualEir")
+    @Mapping(target = "paymentAmount", source = "relatedDetail.paymentAmount")
     @Mapping(target = "discount", source = "relatedDetail.discount")
     @Mapping(target = "repaymentEvery", source = "relatedDetail.repaymentEvery")
     @Mapping(target = "repaymentFrequencyType", source = "relatedDetail.repaymentFrequencyType", qualifiedByName = "periodFrequencyTypeToStringEnumOptionData")
@@ -72,6 +80,8 @@ public interface WorkingCapitalLoanProductMapper {
     @Mapping(target = "allowAttributeOverrides", source = "configurableAttributes", qualifiedByName = "configurableAttributesToData")
     @Mapping(target = "delinquencyGraceDays", source = "relatedDetail.delinquencyGraceDays")
     @Mapping(target = "delinquencyStartType", source = "relatedDetail.delinquencyStartType", qualifiedByName = "delinquencyStartTypeToStringEnumOptionData")
+    @Mapping(target = "breachGraceDays", source = "relatedDetail.breachGraceDays")
+    @Mapping(target = "breachStartType", source = "relatedDetail.breachStartType", qualifiedByName = "breachStartTypeToStringEnumOptionData")
     @Mapping(target = "accountingRule", source = "accountingRule", qualifiedByName = "accountingRuleToStringEnumOptionData")
     @Mapping(target = "accountingMappings", ignore = true)
     @Mapping(target = "paymentChannelToFundSourceMappings", ignore = true)
@@ -87,6 +97,7 @@ public interface WorkingCapitalLoanProductMapper {
     @Mapping(target = "penaltyOptions", ignore = true)
     @Mapping(target = "currencyOptions", ignore = true)
     @Mapping(target = "amortizationTypeOptions", ignore = true)
+    @Mapping(target = "paymentAmountCalculationStrategyOptions", ignore = true)
     @Mapping(target = "periodFrequencyTypeOptions", ignore = true)
     @Mapping(target = "breachOptions", ignore = true)
     @Mapping(target = "advancedPaymentAllocationTypes", ignore = true)
@@ -94,6 +105,7 @@ public interface WorkingCapitalLoanProductMapper {
     @Mapping(target = "applyTemplate", ignore = true)
     @Mapping(target = "delinquencyBucketOptions", ignore = true)
     @Mapping(target = "delinquencyStartTypeOptions", ignore = true)
+    @Mapping(target = "breachStartTypeOptions", ignore = true)
     @Mapping(target = "delinquencyMinimumPaymentTypeOptions", ignore = true)
     @Mapping(target = "nearBreachOptions", ignore = true)
     @Mapping(target = "chargeOffReasonOptions", ignore = true)
@@ -125,6 +137,12 @@ public interface WorkingCapitalLoanProductMapper {
         return amortizationType != null ? amortizationType.getValueAsStringEnumOptionData() : null;
     }
 
+    @Named("paymentAmountCalculationStrategyToStringEnumOptionData")
+    default StringEnumOptionData paymentAmountCalculationStrategyToStringEnumOptionData(
+            final WorkingCapitalPaymentAmountCalculationStrategy strategy) {
+        return strategy != null ? strategy.getValueAsStringEnumOptionData() : null;
+    }
+
     @Named("periodFrequencyTypeToStringEnumOptionData")
     default StringEnumOptionData periodFrequencyTypeToStringEnumOptionData(
             final WorkingCapitalLoanPeriodFrequencyType periodFrequencyType) {
@@ -137,6 +155,11 @@ public interface WorkingCapitalLoanProductMapper {
         return delinquencyStartType != null ? delinquencyStartType.getValueAsStringEnumOptionData() : null;
     }
 
+    @Named("breachStartTypeToStringEnumOptionData")
+    default StringEnumOptionData breachStartTypeToStringEnumOptionData(final WorkingCapitalLoanBreachStartType breachStartType) {
+        return breachStartType != null ? breachStartType.getValueAsStringEnumOptionData() : null;
+    }
+
     @Named("paymentAllocationRulesToData")
     default List<WorkingCapitalPaymentAllocationData> paymentAllocationRulesToData(
             final List<WorkingCapitalLoanProductPaymentAllocationRule> rules) {
@@ -145,10 +168,10 @@ public interface WorkingCapitalLoanProductMapper {
         }
         return rules.stream().map(rule -> {
             final List<WorkingCapitalPaymentAllocationData.PaymentAllocationOrder> paymentAllocationOrder = new ArrayList<>();
-            final AtomicInteger counter = new AtomicInteger(1);
+            int counter = 1;
             for (final WorkingCapitalPaymentAllocationType allocationType : rule.getAllocationTypes()) {
-                paymentAllocationOrder.add(
-                        new WorkingCapitalPaymentAllocationData.PaymentAllocationOrder(allocationType.name(), counter.getAndIncrement()));
+                paymentAllocationOrder.add(new WorkingCapitalPaymentAllocationData.PaymentAllocationOrder(allocationType.name(), counter));
+                counter++;
             }
             return new WorkingCapitalPaymentAllocationData(rule.getTransactionType() != null ? rule.getTransactionType() : null,
                     paymentAllocationOrder);

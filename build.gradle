@@ -19,9 +19,7 @@
 // TODO: this is work in progress, please follow FINERACT-1171
 buildscript {
     ext {
-        jacocoVersion = '0.8.14'
-        retrofitVersion = '2.9.0'
-        okhttpVersion = '4.9.3'
+        jacocoVersion = '0.8.16'
         fineractCustomProjects = []
         fineractJavaProjects = subprojects.findAll{
             [
@@ -42,15 +40,18 @@ buildscript {
                 'fineract-investor',
                 'fineract-charge',
                 'fineract-rates',
+                'fineract-fund',
                 'fineract-tax',
                 'fineract-loan-origination',
                 'fineract-loan',
                 'fineract-savings',
+                'fineract-shares',
+                'fineract-account-transfer',
                 'fineract-report',
-                'fineract-mix',
                 'integration-tests',
                 'twofactor-tests',
                 'oauth2-tests',
+                'oauth2-twofactor-tests',
                 'fineract-client',
                 'fineract-client-feign',
                 'fineract-avro-schemas',
@@ -58,7 +59,8 @@ buildscript {
                 'fineract-e2e-tests-runner',
                 'fineract-progressive-loan',
                 'fineract-progressive-loan-embeddable-schedule-generator',
-                'fineract-working-capital-loan'
+                'fineract-working-capital-loan',
+                'fineract-querydsl'
             ].contains(it.name)
         }
         fineractPublishProjects = subprojects.findAll{
@@ -78,52 +80,54 @@ buildscript {
                 'fineract-investor',
                 'fineract-charge',
                 'fineract-rates',
+                'fineract-fund',
                 'fineract-tax',
                 'fineract-loan-origination',
                 'fineract-loan',
                 'fineract-savings',
+                'fineract-shares',
+                'fineract-account-transfer',
                 'fineract-report',
-                'fineract-mix',
                 'fineract-branch',
                 'fineract-document',
                 'fineract-progressive-loan',
                 'fineract-progressive-loan-embeddable-schedule-generator',
-                'fineract-working-capital-loan'
+                'fineract-working-capital-loan',
+                'fineract-querydsl'
             ].contains(it.name)
         }
         npmRepository = 'https://npm.pkg.github.com'
     }
     repositories {
-        maven { url 'https://plugins.gradle.org/m2/' }
+        maven { url = 'https://plugins.gradle.org/m2/' }
     }
 
     dependencies {
         classpath 'com.bmuschko:gradle-cargo-plugin:2.9.0'
-        classpath 'org.eclipse.persistence:eclipselink:4.0.9'
-        classpath 'jakarta.ws.rs:jakarta.ws.rs-api:3.1.0'
+        classpath 'org.eclipse.persistence:eclipselink:5.0.2'
+        classpath 'jakarta.ws.rs:jakarta.ws.rs-api:4.0.0'
         classpath 'com.google.cloud.tools:jib-layer-filter-extension-gradle:0.3.0'
-        classpath 'org.apache.commons:commons-lang3:3.20.0'
-        classpath 'io.swagger.core.v3:swagger-jaxrs2-jakarta:2.2.49'
+        classpath 'org.apache.commons:commons-lang3:3.22.0'
+        // Gradle 9 no longer bundles groovy-sql; keep this aligned with Gradle's embedded Groovy version.
+        classpath 'org.apache.groovy:groovy-sql:4.0.33'
+        classpath 'io.swagger.core.v3:swagger-jaxrs2-jakarta:2.2.56'
         classpath 'jakarta.servlet:jakarta.servlet-api:6.1.0'
     }
 }
 
 plugins {
-    id 'me.qoomon.git-versioning' version '6.4.4'
-    id "org.barfuin.gradle.taskinfo" version "2.2.1"
     id 'com.adarshr.test-logger' version '4.0.0'
-    id 'com.diffplug.spotless' version '6.25.0' apply false
-    id 'org.nosphere.apache.rat' version '0.8.1' apply false
-    id 'com.github.hierynomus.license' version '0.16.1' apply false
-    id 'com.github.jk1.dependency-license-report' version '2.9' apply false
+    id 'com.diffplug.spotless' version '8.10.2' apply false
+    id 'org.nosphere.apache.rat' version '0.11.0' apply false
+    id 'com.github.jk1.dependency-license-report' version '3.1.4' apply false
     id 'org.zeroturnaround.gradle.jrebel' version '1.2.2' apply false
-    id 'org.springframework.boot' version '3.5.14' apply false
+    id 'org.springframework.boot' version '4.1.1' apply false
     id 'net.ltgt.errorprone' version '4.4.0' apply false
     id 'io.swagger.core.v3.swagger-gradle-plugin' version '2.2.49' apply false
     id 'com.gorylenko.gradle-git-properties' version '2.5.7' apply false
     id 'org.asciidoctor.jvm.convert' version '4.0.5' apply false
     id 'org.asciidoctor.jvm.pdf' version '4.0.5' apply false
-    id 'com.google.cloud.tools.jib' version '3.5.3' apply false
+    id 'com.google.cloud.tools.jib' version '3.5.4' apply false
     id 'org.sonarqube' version '6.3.1.5724'
     id 'com.github.andygoossens.modernizer' version '1.13.0' apply false
     id 'com.github.spotbugs' version '6.5.4' apply false
@@ -132,11 +136,11 @@ plugins {
     id 'org.openapi.generator' version '7.22.0' apply false
     id 'com.gradleup.shadow' version '9.4.1' apply false
     id 'me.champeau.jmh' version '0.7.3' apply false
-    id 'org.cyclonedx.bom' version '3.2.4' apply false
+    id 'org.cyclonedx.bom' version '3.4.1' apply false
     id 'com.docktape.swagger-brake' version '2.7.0' apply false
+    id 'io.github.usekylis.java-architecture-metrics' version '0.1.1' apply false
+    id 'org.apache.fineract.querydsl.codegen' apply false
 }
-
-apply from: "${rootDir}/buildSrc/src/main/groovy/org.apache.fineract.release.gradle"
 
 description = '''\
 Run as:
@@ -144,28 +148,27 @@ gradle clean bootRun'''
 
 version = '0.0.0-SNAPSHOT'
 
-gitVersioning.apply {
-    refs {
-        considerTagsOnBranches = true
+// Replaces me.qoomon's git-versioning plugin, which spawns git processes at configuration time and so cannot work with
+// the configuration cache. Same rules: release/maintenance branches and x.y.z tags on HEAD get the nearest tag's
+// version, anything else gets the next minor as a SNAPSHOT.
+def gitVersion = providers.of(org.apache.fineract.gradle.GitVersionValueSource) {
+    parameters {
+        projectDirectory = layout.projectDirectory
         describeTagPattern = '.*(\\d+\\.\\d+\\.\\d+).*'
-        describeTagFirstParent = false
-
-        branch("release\\/\\d+\\.\\d+\\.\\d+") {
-            version = '${describe.tag.version.major}.${describe.tag.version.minor}.${describe.tag.version.patch}'
-        }
-        branch("maintenance\\/\\d+\\.\\d+") {
-            version = '${describe.tag.version.major}.${describe.tag.version.minor}.${describe.tag.version.patch}'
-        }
-        tag("(\\d+\\.\\d+\\.\\d+)") {
-            version = '${describe.tag.version.major}.${describe.tag.version.minor}.${describe.tag.version.patch}'
-        }
+        releaseBranchPatterns = [
+            'release\\/\\d+\\.\\d+\\.\\d+',
+            'maintenance\\/\\d+\\.\\d+'
+        ]
+        releaseTagPattern = '(\\d+\\.\\d+\\.\\d+)'
     }
-    rev {
-        version = '${describe.tag.version.major}.${describe.tag.version.minor.next}.0-SNAPSHOT'
+}.orNull
+if (gitVersion != null) {
+    allprojects {
+        version = gitVersion
     }
 }
+logger.lifecycle("project version: ${version}")
 
-ext['groovy.version'] = '4.0.17'
 ext['swaggerFile'] = "$rootDir/fineract-provider/build/resources/main/static/fineract.json".toString()
 
 // Apply static weaving configuration to all subprojects
@@ -173,7 +176,22 @@ subprojects { subproject ->
     apply from: rootProject.file('static-weaving.gradle')
 }
 
+// Configurations every module's license report covers. Test dependencies are included
+// deliberately: the report is expected to account for everything the build pulls in, not only what
+// ends up on a runtime classpath.
+ext.LICENSE_REPORT_CONFIGURATIONS = [
+    'runtimeClasspath',
+    'testRuntimeClasspath',
+]
+
 allprojects  {
+    // The RAT plugin resolves its tool through each project's own buildscript repositories
+    buildscript {
+        repositories {
+            mavenCentral()
+        }
+    }
+
     group = 'org.apache.fineract'
 
     repositories {
@@ -181,27 +199,18 @@ allprojects  {
     }
 
     configurations.configureEach {
-        resolutionStrategy {
-            dependencySubstitution {
-                // Substitution is to resolve CVE-2025-12183
-                substitute module('org.lz4:lz4-java') using module('at.yawk.lz4:lz4-java:1.11.0')
-            }
-        }
-    }
-
-    configurations {
-        implementation {
+        if (name == 'implementation') {
             exclude group: 'commons-logging', module: 'commons-logging'
         }
-
-        api {
-            canBeResolved = true
+        resolutionStrategy {
+            dependencySubstitution {
+                substitute module('org.lz4:lz4-java') using module('at.yawk.lz4:lz4-java:1.14.1')
+            }
         }
     }
 
     apply plugin: 'com.adarshr.test-logger'
     apply plugin: 'com.diffplug.spotless'
-    apply plugin: 'com.github.hierynomus.license'
     apply plugin: 'net.ltgt.errorprone'
 
     tasks.withType(JavaCompile).configureEach {
@@ -212,13 +221,14 @@ allprojects  {
                     "SameNameButDifferent", // Until errorprone recognizes Lombok
                     "MultiVariableDeclaration", // Until errorprone recognizes Lombok
                     "UnnecessaryDefaultInEnumSwitch", // FINERACT-1911
-                    "StringConcatToTextBlock", // Error Prone 2.49.0 crashes on JDK 21, raised issue: https://github.com/google/error-prone/issues/5815
+                    "StringConcatToTextBlock", // Error Prone 2.49.0 crashes on JDK 25, raised issue: https://github.com/google/error-prone/issues/5815
                     "AssertEqualsArgumentOrderChecker",
                     "RemoveUnusedImports"  // For generated code
             )
             error(
                     "DefaultCharset",
                     "StringSplitter",
+                    "StringCaseLocaleUsage",
                     "MutablePublicArray",
                     "EqualsGetClass",
                     "FutureReturnValueIgnored"
@@ -228,6 +238,17 @@ allprojects  {
 
     apply plugin: 'org.nosphere.apache.rat'
     apply plugin: 'com.github.jk1.dependency-license-report'
+    tasks.withType(com.github.jk1.license.task.ReportTask).configureEach { task ->
+        notCompatibleWithConfigurationCache('com.github.jk1.dependency-license-report keeps Project references in its tasks')
+        // jk1 opens the jars of project dependencies without depending on the tasks that build them, so a parallel
+        // build could hand it a half-written jar ("zip END header not found").
+        rootProject.ext.LICENSE_REPORT_CONFIGURATIONS.each { name ->
+            def configuration = project.configurations.findByName(name)
+            if (configuration != null) {
+                task.dependsOn(configuration)
+            }
+        }
+    }
 
     // Configuration for the sonarqube plugin is now in GitHub Actions
 
@@ -237,55 +258,47 @@ allprojects  {
         format 'misc', {
             target '**/*.md', '**/*.properties', '**/.gitignore', '**/.openapi-generator-ignore', '**/*.yml', '**/*.xml', '**/**.json', '**/*.sql'
             targetExclude '**/build/**', '**/bin/**', '**/.settings/**', '**/.idea/**', '**/.gradle/**', '**/gradlew.bat', '**/licenses/**', '**/banner.txt', '.vscode/**', '.profileconfig.json', '**/*.md'
-            indentWithSpaces(4)
+            leadingTabsToSpaces(4)
             endWithNewline()
             trimTrailingWhitespace()
         }
 
         groovyGradle {
             target '*.gradle', '**/*.gradle'
-            targetExclude '**/build/**', '/**/build.gradle' // TODO: temporary disabled on build.gradle until someone fix this issue: https://github.com/diffplug/spotless/issues/1807
-            greclipse()
-            indentWithSpaces(4)
+            targetExclude '**/build/**', '/**/build.gradle','**/static-weaving.gradle' // TODO: temporary disabled on build.gradle until someone fix this issue: https://github.com/diffplug/spotless/issues/1807
+            // Formatter versions pinned to what Spotless 6.25 used by default, so the Spotless upgrade reformats nothing.
+            // Eclipse archived the 4.29 update site off download.eclipse.org to archive.eclipse.org, leaving a redirect
+            // the P2 client doesn't follow, so point it at the archive directly instead of bumping the formatter version.
+            greclipse('4.29').withP2Mirrors([
+                'https://download.eclipse.org/eclipse/updates/4.29/': 'https://archive.eclipse.org/eclipse/updates/4.29/',
+                'https://groovy.jfrog.io/artifactory/plugins-release/org/codehaus/groovy/groovy-eclipse-integration/': 'https://groovy.jfrog.io/artifactory/plugins-release/org/codehaus/groovy/groovy-eclipse-integration/',
+            ])
+            leadingTabsToSpaces(4)
             endWithNewline()
             trimTrailingWhitespace()
         }
 
-        lineEndings 'UNIX'
-    }
-
-    // Configuration for Gradle license plug-in
-    // https://github.com/hierynomus/license-gradle-plugin
-    license {
-        header rootProject.file("$rootDir/APACHE_LICENSETEXT.md")
-        excludes([
-            "**/gradlew*",
-            "**/git.properties",
-            "**/*.html",
-            "**/templates/**",
-            "**/features/**",
-            "**/results/**",
-            "**/package-info.java",
-            "**/keystore.jks",
-            "**/legacy-docs/**",
-            "**/banner.txt",
-            "**/build.gradle.mustache",
-            "**/pom.mustache",
-            "**/avro/**/*.java",
-            "**/org/apache/fineract/client/**/*.java"
-        ])
-        strictCheck true
+        lineEndings = 'UNIX'
     }
 
     licenseReport {
-        outputDir = "$projectDir/licenses"
+        // jk1 defaults 'projects' to this project *plus its subprojects*, and resolves every one of
+        // them from this project's own task action. Gradle 9 refuses to resolve another project's
+        // configuration from a task action while the build is parallel (org.gradle.parallel=true is
+        // set in gradle.properties), so ':generateLicenseReport' and the ':custom*' container
+        // reports fail outright. Each module reports only what it owns -- which is also the only
+        // way to get the versions right, since dependency management is applied per project -- and
+        // ':aggregateLicenseReport' merges them into $rootDir/licenses for the distribution.
+        outputDir = project.layout.buildDirectory.dir('reports/dependency-license').get().asFile.path
+        projects = [project]
+        configurations = rootProject.ext.LICENSE_REPORT_CONFIGURATIONS
     }
 
     // Configuration for Apache Release Audit Tool task
     // https://github.com/eskatos/creadur-rat-gradle
     rat {
         verbose = false
-        reportDir = file("$buildDir/reports/rat")
+        reportDir = project.layout.buildDirectory.dir('reports/rat')
         excludes = [
             '**/src/main/templates/**/*.mustache',
             '**/.dockerignore',
@@ -382,7 +395,7 @@ file("${rootDir}/custom").eachDir { companyDir ->
         file("${rootDir}/custom/${companyDir.name}").eachDir { categoryDir ->
             if('build' != categoryDir.name) {
                 file("${rootDir}/custom/${companyDir.name}/${categoryDir.name}").eachDir { moduleDir ->
-                    if('build' != moduleDir.name) {
+                    if('build' != moduleDir.name && file("${moduleDir}/build.gradle").exists()) {
                         project.fineractJavaProjects.add(project(":custom:${companyDir.name}:${categoryDir.name}:${moduleDir.name}"))
                         project.fineractCustomProjects.add(project(":custom:${companyDir.name}:${categoryDir.name}:${moduleDir.name}"))
                     }
@@ -392,6 +405,28 @@ file("${rootDir}/custom").eachDir { companyDir ->
     }
 }
 
+// License headers are enforced by Spotless (spotlessCheck; spotlessApply adds them). The text comes from
+// APACHE_LICENSETEXT.md, wrapped in each file type's comment style. The delimiter only matches straight after an exact
+// header at the top of a file, or at the very start of a file without one: spotlessApply adds a missing header but
+// never rewrites anything below one, and a malformed header fails spotlessCheck until it is fixed by hand.
+def licenseTextLines = file('APACHE_LICENSETEXT.md').readLines()
+def wrapLicenseText = { String open, String linePrefix, String blankLine, String close, String padding = '' ->
+    open + padding + licenseTextLines.collect { (it ? linePrefix + it : blankLine) + '\n' }.join() + padding + close
+}
+def licenseHeaderDelimiter = { String header ->
+    // Spotless rejects delimiters containing a literal newline, hence the '\n' escapes.
+    def escaped = header.collect { it == '\n' ? '\\n' : ('\\^$.|?*+()[]{}'.contains(it) ? '\\' + it : it) }.join()
+    "(?:(?<=\\A${escaped})|\\A(?!${escaped}))".toString()
+}
+def licenseHeaders = [
+    java      : wrapLicenseText('/**\n', ' * ', ' *', ' */\n'),
+    xml       : wrapLicenseText('<!--\n', '    ', '', '-->\n', '\n'),
+    properties: wrapLicenseText('#\n', '# ', '#', '#\n'),
+    vm        : wrapLicenseText('#*\n', ' * ', ' *', ' *#\n'),
+    jsp       : wrapLicenseText('<%--\n', '    ', '', '--%>\n', '\n'),
+]
+def licenseHeaderExcludes = ['**/build/**', '**/bin/**', '**/out/**', '**/templates/**', '**/features/**', '**/results/**', '**/legacy-docs/**']
+
 configure(project.fineractJavaProjects) {
     // NOTE: order matters!
 
@@ -400,7 +435,7 @@ configure(project.fineractJavaProjects) {
 
     java {
         toolchain {
-            languageVersion = JavaLanguageVersion.of(21)
+            languageVersion = JavaLanguageVersion.of(25)
         }
         withSourcesJar()
         withJavadocJar()
@@ -417,7 +452,16 @@ configure(project.fineractJavaProjects) {
     tasks.withType(JavaCompile).configureEach {
         options.incremental = true
         options.fork = true
+        // Forked compiler daemons get no explicit -Xmx, so each one defaults to 25% of the
+        // container's RAM. With parallel builds that tail is unbounded and can outgrow the
+        // build JVM itself, so give the compiler processes an explicit budget.
+        options.forkOptions.memoryMaximumSize = '2g'
         outputs.cacheIf { true }
+        // Lombok reads lombok.config at compile time; without this input, cached or
+        // incremental builds can reuse classes generated under an older config
+        inputs.file(rootProject.file('lombok.config'))
+                .withPropertyName('lombokConfig')
+                .withPathSensitivity(PathSensitivity.NONE)
         options.compilerArgs << '-parameters'
         options.encoding = 'UTF-8'
         options.compilerArgs << '-Xlint:unchecked'
@@ -439,6 +483,7 @@ configure(project.fineractJavaProjects) {
     apply plugin: 'jacoco'
     apply plugin: 'com.github.spotbugs'
     apply plugin: 'com.github.andygoossens.modernizer'
+    apply plugin: 'io.github.usekylis.java-architecture-metrics'
     apply from: "${rootDir}/buildSrc/src/main/groovy/org.apache.fineract.dependencies.gradle"
 
     group = 'org.apache.fineract'
@@ -446,15 +491,12 @@ configure(project.fineractJavaProjects) {
     configurations.named('spotbugs').configure {
         resolutionStrategy.eachDependency {
             if (it.requested.group == 'org.ow2.asm') {
-                it.useVersion '9.5'
-                it.because "Asm 9.5 is required for JDK 21 support"
+                it.useVersion '9.8'
+                it.because "Asm 9.8 is required for JDK 25 support"
             }
         }
     }
 
-    configurations {
-        api.setCanBeResolved(true)
-    }
     tasks.withType(Copy).configureEach {
         duplicatesStrategy = DuplicatesStrategy.EXCLUDE
     }
@@ -475,7 +517,7 @@ configure(project.fineractJavaProjects) {
                 "-Xlint:overloads",
                 "-Xlint:overrides",
                 "-Xlint:path",
-                "-Xlint:processing",
+//                "-Xlint:processing", -> Unnecessary noise
                 "-Xlint:removal",
                 "-Xlint:requires-automatic",
                 "-Xlint:requires-transitive-automatic",
@@ -497,7 +539,7 @@ configure(project.fineractJavaProjects) {
     }
 
     check {
-        dependsOn(rat, licenseMain, licenseTest)
+        dependsOn(rat)
     }
 
     dependencies {
@@ -511,7 +553,7 @@ configure(project.fineractJavaProjects) {
             targetExclude '**/build/**', '**/bin/**', '**/out/**'
             importOrder() //sort imports alphabetically
             removeUnusedImports()
-            eclipse().configFile "$rootDir/config/fineractdev-formatter.xml"
+            eclipse('4.29').configFile "$rootDir/config/fineractdev-formatter.xml"
             endWithNewline()
             trimTrailingWhitespace()
 
@@ -542,9 +584,24 @@ configure(project.fineractJavaProjects) {
                 }
                 )
             }
+
+            licenseHeader(licenseHeaders.java, licenseHeaderDelimiter(licenseHeaders.java))
         }
 
-        lineEndings 'UNIX'
+        format 'licenseXml', {
+            target 'src/**/*.xml'
+            targetExclude(*licenseHeaderExcludes)
+            licenseHeader(licenseHeaders.xml, licenseHeaderDelimiter(licenseHeaders.xml)).skipLinesMatching('^<\\?xml.*\\?>$')
+        }
+        [properties: 'licenseProperties', vm: 'licenseVelocity', jsp: 'licenseJsp'].each { extension, formatName ->
+            format formatName, {
+                target("src/**/*.${extension}".toString())
+                targetExclude(*licenseHeaderExcludes)
+                licenseHeader(licenseHeaders[extension], licenseHeaderDelimiter(licenseHeaders[extension]))
+            }
+        }
+
+        lineEndings = 'UNIX'
     }
 
     // If we are running Gradle within Eclipse to enhance classes,
@@ -556,7 +613,7 @@ configure(project.fineractJavaProjects) {
     // Configuration for the Checkstyle plugin
     // https://docs.gradle.org/current/userguide/checkstyle_plugin.html
     dependencies {
-        checkstyle 'com.puppycrawl.tools:checkstyle:13.4.2'
+        checkstyle 'com.puppycrawl.tools:checkstyle:14.4.0'
         checkstyle 'com.github.sevntu-checkstyle:sevntu-checks:1.44.1'
     }
 
@@ -571,8 +628,8 @@ configure(project.fineractJavaProjects) {
     // Configuration for JaCoCo code coverage task
     // https://www.eclemma.org/jacoco/
     jacoco {
-        toolVersion = jacocoVersion
-        reportsDirectory = file("$buildDir/reports/jacoco")
+        toolVersion = rootProject.ext.jacocoVersion
+        reportsDirectory = project.layout.buildDirectory.dir('reports/jacoco')
     }
 
     jacocoTestReport {
@@ -586,7 +643,7 @@ configure(project.fineractJavaProjects) {
     // Configuration for the errorprone plugin
     // https://github.com/tbroyer/gradle-errorprone-plugin
     dependencies {
-        errorprone "com.google.errorprone:error_prone_core:2.49.0"
+        errorprone "com.google.errorprone:error_prone_core:2.53.0"
     }
 
     tasks.withType(JavaCompile).configureEach {
@@ -610,7 +667,6 @@ configure(project.fineractJavaProjects) {
                     "InvalidBlockTag",
                     "JavaUtilDate", // TODO FINERACT-1298
                     "ReturnValueIgnored",
-                    "DirectInvocationOnMock",
                     "CanIgnoreReturnValueSuggester",
                     "SameNameButDifferent", // Until errorprone recognizes Lombok
                     "MultiVariableDeclaration", // Until errorprone recognizes Lombok
@@ -695,7 +751,7 @@ configure(project.fineractJavaProjects) {
     }
 
     check {
-        dependsOn(rat, licenseMain, licenseTest)
+        dependsOn(rat)
     }
 
     dependencies {
@@ -704,6 +760,9 @@ configure(project.fineractJavaProjects) {
                 'org.slf4j:slf4j-api',
                 'org.slf4j:log4j-over-slf4j',
                 'org.slf4j:jul-to-slf4j',
+                // Spring Framework 7 removed spring-jcl (which provided org.apache.commons.logging);
+                // commons-logging itself is excluded globally, so bridge JCL to SLF4J everywhere
+                'org.slf4j:jcl-over-slf4j',
                 )
         implementation ("ch.qos.logback:logback-classic") {
             exclude(module: "slf4j-api")
@@ -731,6 +790,29 @@ configure(project.fineractJavaProjects) {
     test {
         useJUnitPlatform()
 
+        // Forked test JVMs get no explicit -Xmx otherwise, so each one would default to 25%
+        // of the container's RAM -- 4g on a 16 GB CI runner, but 16g on a 64 GB workstation.
+        // Pin it so the figure is the same everywhere. ':fineract-provider' holds its own
+        // suite to 2g and adds a metaspace cap.
+        maxHeapSize = '4g'
+
+        // Gradle 9 fails a Test task that has test sources but discovers no tests. Several modules
+        // carry test *support* code only -- Spring @TestConfiguration classes, Cucumber step
+        // definitions that the 'cucumber' task or ':fineract-e2e-tests-runner' consumes, a JMH
+        // benchmark -- so their own test task legitimately has nothing to run.
+        failOnNoDiscoveredTests = false
+
+        // Flaky-test retry, provided by the Develocity plugin applied in settings.gradle.
+        // Scoped to the API-dependent suites: they drive a live Fineract instance over HTTP and
+        // are the only ones exposed to one-off environmental flakiness. Unit tests stay strict.
+        if (project.name in ['integration-tests', 'twofactor-tests', 'oauth2-tests']) {
+            develocity.testRetry {
+                failOnPassedAfterRetry = false // keep the build green if a test passes on retry
+                maxRetries = 2
+                maxFailures = 20 // safety cap: too many failures => real breakage, stop retrying
+            }
+        }
+
         if (project.hasProperty('excludeTests')) {
             filter {
                 excludeTestsMatching project.property('excludeTests')
@@ -739,7 +821,7 @@ configure(project.fineractJavaProjects) {
     }
 
     testlogger {
-        logLevel 'quiet'
+        logLevel = 'quiet'
     }
 
     // Configuration for spotbugs plugin
@@ -751,6 +833,8 @@ configure(project.fineractJavaProjects) {
         // reportLevel = com.github.spotbugs.snom.Confidence.DEFAULT
         showProgress = false
         excludeFilter = file("$rootDir/config/spotbugs/exclude.xml")
+        // Without this the SpotBugs worker inherits the JVM default (25% of container RAM).
+        maxHeapSize = '2g'
     }
     // https://github.com/spotbugs/spotbugs-gradle-plugin/issues/242
     spotbugsMain {
@@ -780,7 +864,7 @@ configure(project.fineractJavaProjects) {
         includeTestClasses = true
         failOnViolations = true
         violationLogLevel="error"
-        javaVersion = project.targetCompatibility
+        javaVersion = project.extensions.getByType(org.gradle.api.plugins.JavaPluginExtension).targetCompatibility
         ignoreGeneratedClasses = true
         // Rules can be found here: https://github.com/gaul/modernizer-maven-plugin/blob/master/modernizer-maven-plugin/src/main/resources/modernizer.xml
         exclusions = [
@@ -829,7 +913,6 @@ configure(project.fineractCustomProjects) {
             exclude group: 'org.skyscreamer'
         }
         testImplementation( 'org.mockito:mockito-core',
-                'org.mockito:mockito-inline',
                 'org.mockito:mockito-junit-jupiter',
                 'org.junit.jupiter:junit-jupiter-api',
                 'org.junit.jupiter:junit-jupiter-engine',
@@ -840,10 +923,10 @@ configure(project.fineractCustomProjects) {
                 'org.awaitility:awaitility',
                 'io.github.classgraph:classgraph',
                 'io.cucumber:cucumber-core',
-                'io.cucumber:cucumber-java:7.34.3',
-                'io.cucumber:cucumber-java8:7.34.3',
-                'io.cucumber:cucumber-junit-platform-engine:7.34.3',
-                'io.cucumber:cucumber-spring:7.34.3',
+                'io.cucumber:cucumber-java',
+                'io.cucumber:cucumber-java8',
+                'io.cucumber:cucumber-junit-platform-engine',
+                'io.cucumber:cucumber-spring',
                 )
 
         testCompileOnly('org.projectlombok:lombok')
@@ -864,9 +947,9 @@ configure(project.fineractPublishProjects) {
     publishing {
         publications {
             mavenJava(MavenPublication) {
-                groupId 'org.apache.fineract'
-                artifactId project.name
-                version "${project.version}-SNAPSHOT"
+                groupId = 'org.apache.fineract'
+                artifactId = project.name
+                version = "${project.version}-SNAPSHOT"
 
                 from components.java
 
@@ -903,11 +986,11 @@ configure(project.fineractPublishProjects) {
             def stagingUrl = 'https://repository.apache.org/content/repositories/snapshots'
 
             maven {
-                name 'apache'
-                url hasProperty('fineract.release.version') ? releaseUrl : stagingUrl
+                name = 'apache'
+                url = hasProperty('fineract.release.version') ? releaseUrl : stagingUrl
                 credentials {
-                    username "${findProperty('fineract.config.username')}"
-                    password "${findProperty('fineract.config.password')}"
+                    username = "${findProperty('fineract.config.username')}"
+                    password = "${findProperty('fineract.config.password')}"
                 }
             }
         }
@@ -920,19 +1003,119 @@ configure(project.fineractPublishProjects) {
     }
 }
 
+// Entry point for the merged report below: the root project has no classpath of its own, so it has
+// no dependency list to render -- what it can offer is a way into the per-module reports.
+def licenseIndexFile = layout.buildDirectory.file('reports/dependency-license-index/index.html')
+def aggregateLicenseIndex = tasks.register('aggregateLicenseIndex') {
+    description = 'Generates the entry page for the merged dependency licence report'
+    def modulePaths = subprojects*.path.sort()
+    def reportVersion = project.version.toString()
+    outputs.file(licenseIndexFile)
+    inputs.property('modules', modulePaths)
+    inputs.property('version', reportVersion)
+
+    doLast {
+        def links = modulePaths.collect { path ->
+            "        <li><a href=\"index/${path.substring(1).replace(':', '-')}.html\">${path}</a></li>"
+        }.join('\n')
+        def target = licenseIndexFile.get().asFile
+        target.parentFile.mkdirs()
+        target.text = """<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Dependency License Report for fineract ${reportVersion}</title>
+</head>
+<body>
+    <h1>Dependency License Report for fineract ${reportVersion}</h1>
+    <p>
+        Licence texts for every dependency are extracted alongside this page, one directory per
+        artifact. The per-module dependency listings, covering both runtime and test classpaths,
+        are linked below.
+    </p>
+    <ul>
+${links}
+    </ul>
+</body>
+</html>
+"""
+    }
+}
+
+// $rootDir/licenses is what the binary distribution packages, so it has to cover the whole build.
+// jk1 can no longer aggregate that itself, and the root project cannot resolve the modules'
+// classpaths on their behalf either -- it does not apply the shared dependency management, so it
+// would report different versions from the ones that actually ship. Merge the per-module reports
+// instead: consuming another project's task *output* is fine, it is cross-project dependency
+// resolution that Gradle 9 forbids.
+def aggregateLicenseReport = tasks.register('aggregateLicenseReport', Sync) {
+    group = 'reporting'
+    description = 'Merges every module license report into $rootDir/licenses for the distribution'
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    into layout.projectDirectory.dir('licenses')
+
+    // The extracted licence texts (<artifact>.jar/META-INF/...) merge cleanly across modules. The
+    // per-module index.html files would collide, so they sit side by side under index/, reachable
+    // from the generated top-level index. (Letting jk1 import every module's XML into one flat
+    // index instead produces a ~7 MB file with each shared dependency repeated once per module.)
+    from(aggregateLicenseIndex)
+    subprojects.each { subproject ->
+        def report = subproject.tasks.named('generateLicenseReport')
+        def indexName = "${subproject.path.substring(1).replace(':', '-')}.html".toString()
+        from(report) {
+            exclude 'index.html'
+        }
+        from(report) {
+            include 'index.html'
+            into 'index'
+            rename { indexName }
+        }
+    }
+}
+
+// So that './gradlew generateLicenseReport' still leaves $rootDir/licenses up to date.
+tasks.named('generateLicenseReport') {
+    finalizedBy aggregateLicenseReport
+}
+
+// OpenAPI generation runs through the worker API with classloader isolation, i.e. in the daemon
+// JVM, so concurrent generate tasks share one heap and exhaust it. ':fineract-client' already
+// chains its four generators with mustRunAfter, but ':fineract-client-feign:buildJavaSdk' sits in
+// another project and runs in parallel with them. This build service serializes every OpenAPI
+// generator across the whole build without giving up parallelism anywhere else.
+def openApiGeneratorLock = gradle.sharedServices.registerIfAbsent(
+        'openApiGeneratorLock', org.apache.fineract.gradle.OpenApiGeneratorLock) {
+    maxParallelUsages = 1
+}
+
+allprojects {
+    tasks.withType(org.openapitools.generator.gradle.plugin.tasks.GenerateTask).configureEach {
+        usesService(openApiGeneratorLock)
+    }
+}
+
 // Configuration for CycloneDX SBOM generator
 // https://github.com/CycloneDX/cyclonedx-gradle-plugin
 apply plugin: 'org.cyclonedx.bom'
 
 cyclonedxBom {
-    projectType = "application"
+    projectType = org.cyclonedx.model.Component.Type.APPLICATION
     includeBomSerialNumber = true
     includeLicenseText = true
 }
 
-tasks.withType(org.cyclonedx.gradle.CyclonedxDirectTask).configureEach {
-    includeMetadataResolution.set(false)
-    skipConfigs.set(['.*eclipse.*', '.*swt.*'])
+// A per-project BOM defaults to every resolvable configuration, which pulls build-only tooling in
+// as production components: 'annotationProcessor' brings Error Prone (and its google-java-format),
+// the Spotless formatter configurations bring Eclipse JDT/SWT, and the test classpaths bring
+// test-only libraries. Worse, which of those are materialised depends on what else ran in the same
+// invocation, so the SBOM was not reproducible. Restrict it to what is actually shipped.
+// NOTE: these patterns are regexes over *configuration* names, not module coordinates, and the
+// block has to be in allprojects -- the plugin registers a cyclonedxDirectBom task per project.
+allprojects {
+    tasks.withType(org.cyclonedx.gradle.CyclonedxDirectTask).configureEach {
+        includeMetadataResolution = false
+        includeConfigs = ['runtimeClasspath']
+    }
 }
 
 tasks.register('printSourceSetInformation') {
@@ -948,4 +1131,245 @@ tasks.register('printSourceSetInformation') {
             println ""
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Feature-level architecture metrics (Robert C. Martin: Ce, Ca, I, A, D)
+//
+// The analyzer resolves a dependency's target component only among the classes
+// it actually scanned, so a per-module run silently drops every cross-module
+// edge. The aggregate task below scans all Java modules at once and collapses
+// packages into features, so the report carries the true cross-feature matrix
+// (afferentCoupling, efferentCoupling, incoming/outgoingComponents).
+//
+//   ./gradlew architectureMetricsReport
+//   -> build/reports/architecture/fineract-feature-metrics.{json,csv}
+// ---------------------------------------------------------------------------
+
+ext.fineractComponentOf = { String packageName ->
+    if (packageName == null || packageName.isEmpty()) return 'external'
+    if (!packageName.startsWith('org.apache.fineract.')) return 'external'
+
+    // org(0) . apache(1) . fineract(2) . <area>(3) . <sub>(4)
+    def parts = packageName.split('\\.')
+    def area = parts.length > 3 ? parts[3] : null
+    def sub = parts.length > 4 ? parts[4] : null
+
+    // areas that are a documented feature in their own right
+    def areaFeature = [
+        accounting        : 'accounting',
+        useradministration: 'useradministration',
+        batch             : 'batch',
+        mix               : 'mix',
+        template          : 'template',
+        notification      : 'notifications',
+    ]
+    if (areaFeature.containsKey(area)) return areaFeature.get(area)
+
+    // only infrastructure.report is a feature; the rest is shared substrate
+    if (area == 'infrastructure') return sub == 'report' ? 'report' : 'platform'
+
+    if (area == 'organisation') {
+        if (sub == 'teller') return 'teller'
+        if (sub in ['office', 'staff', 'monetary', 'holiday', 'workingdays', 'provisioning']) return 'organisation'
+        return 'platform'
+    }
+
+    if (area == 'portfolio') {
+        def portfolioFeature = [
+            // loan and everything that only exists to serve a loan
+            loanaccount                : 'loan',
+            loanproduct                : 'loan',
+            loanorigination            : 'loan',
+            delinquency                : 'loan',
+            collateral                 : 'loan',
+            collateralmanagement       : 'loan',
+            interestpauses             : 'loan',
+            repaymentwithpostdatedchecks: 'loan',
+            floatingrates              : 'loan',
+            // fixed and recurring deposits have no package of their own;
+            // they are types inside portfolio.savings, so they roll up here
+            savings                    : 'savings',
+            interestratechart          : 'savings',
+            client                     : 'client',
+            address                    : 'client',
+            accountdetails             : 'client',
+            group                      : 'group',
+            meeting                    : 'group',
+            collectionsheet            : 'group',
+            shareaccounts              : 'shareaccounts',
+            shareproducts              : 'shareaccounts',
+            // transfers between accounts
+            account                    : 'account-transfers',
+            accounts                   : 'account-transfers',
+            transfer                   : 'account-transfers',
+            charge                     : 'charge',
+            calendar                   : 'calendar',
+            rate                       : 'rate',
+        ]
+        return portfolioFeature.containsKey(sub) ? portfolioFeature.get(sub) : 'platform'
+    }
+
+    return 'platform'
+}
+
+// No componentOf() here on purpose: the plugin's own task keeps its default of one
+// component per Java package, so the package report makes no assumption about naming
+// depth or convention. Grouping into features is done by a separate task below.
+configure(project.fineractJavaProjects) {
+    plugins.withId('io.github.usekylis.java-architecture-metrics') {
+        architectureMetrics {
+            sourceSet('main')
+            reportFormats('json', 'csv')
+        }
+    }
+}
+
+// Aggregate run, hosted on :fineract-provider because it already depends on
+// every feature module. Its classesDirectories are widened to all Java modules
+// so a single scan sees the whole platform.
+//
+// The generated API SDK modules are excluded: they are emitted by the OpenAPI
+// generator rather than written by hand, so they are not features, and pulling
+// their `classes` task into this graph runs the code generator unnecessarily.
+ext.archMetricsExcludedModules = ['fineract-client', 'fineract-client-feign'] as Set
+
+ext.archMetricsScannedProjects = {
+    rootProject.fineractJavaProjects.findAll {
+        !rootProject.ext.archMetricsExcludedModules.contains(it.name)
+    }
+}
+
+// Two reports are produced from the same aggregate scan.
+//
+// The PACKAGE report makes no assumptions about how packages are named or how deeply
+// they are nested: every Java package is its own component. It is the unfiltered view
+// of where the platform actually stands.
+//
+// The FEATURE report groups those packages into the features the documentation is
+// written around. It is a reading aid layered on top of the package data, not a
+// replacement for it -- where the grouping heuristic does not recognise a package, the
+// package still appears, under its own name.
+project(':fineract-provider') {
+    plugins.withId('io.github.usekylis.java-architecture-metrics') {
+
+        // The plugin's own task is left at its defaults: one component per package.
+        architectureMetrics {
+            reportBaseName('fineract-package-metrics')
+            outputDirectory(rootProject.layout.buildDirectory.dir('reports/architecture/packages'))
+            classesDirectories(rootProject.ext.archMetricsScannedProjects().collect { p ->
+                p.layout.buildDirectory.dir('classes/java/main')
+            })
+        }
+
+        // A second task of the same type, differing only in how classes are grouped.
+        tasks.register('architectureMetricsFeatures', io.github.usekylis.archmetrics.ArchitectureMetricsTask) {
+            group = 'verification'
+            description = 'Architecture metrics with packages grouped into documented features.'
+            sourceSetName.set('main')
+            reportBaseName.set('fineract-feature-metrics')
+            outputDirectory.set(rootProject.layout.buildDirectory.dir('reports/architecture/features'))
+            formats.set([
+                io.github.usekylis.archmetrics.ReportFormat.JSON,
+                io.github.usekylis.archmetrics.ReportFormat.CSV,
+            ])
+            classesDirectories.from(rootProject.ext.archMetricsScannedProjects().collect { p ->
+                p.layout.buildDirectory.dir('classes/java/main')
+            })
+            componentIdentifier.set({ classInfo ->
+                rootProject.ext.fineractComponentOf(classInfo.packageName)
+            } as io.github.usekylis.archmetrics.ComponentIdentifier)
+        }
+    }
+
+    tasks.matching { it.name in ['architectureMetrics', 'architectureMetricsFeatures'] }.configureEach { t ->
+        t.dependsOn rootProject.ext.archMetricsScannedProjects().collect { "${it.path}:classes" }
+    }
+}
+
+// Regenerate the Vega-Lite specifications from the report, so the diagrams in the
+// documentation can never drift from the metrics they are drawn from.
+//
+// The transform script lives in the surrounding analysis workspace rather than in this
+// repository, so it is looked up in both places and the task skips cleanly when neither
+// is present -- a checkout without it still builds.
+ext.archMetricsTransform = [
+    file("${rootDir}/tools/archmetrics_to_vega.py"),
+    file("${rootDir}/../tools/archmetrics_to_vega.py"),
+].find { it.isFile() }
+
+ext.archMetricsDiagramDir = file("${rootDir}/fineract-doc/src/docs/en/diagrams")
+
+// Skeleton sections for every measured package, so that a place to write already exists
+// for packages nobody has analysed yet. Generated from the package report, which makes no
+// assumption about package naming or nesting depth.
+ext.archMetricsSkeletonFile =
+    file("${rootDir}/fineract-doc/src/docs/en/chapters/architecture/generated-package-overview.adoc")
+
+tasks.register('architectureMetricsSkeleton', Exec) {
+    group = 'verification'
+    description = 'Regenerate the per-package skeleton sections from the package-level metrics report.'
+    dependsOn ':fineract-provider:architectureMetrics'
+
+    def script = rootProject.ext.archMetricsTransform
+    def skeleton = rootProject.ext.archMetricsSkeletonFile
+    def packageJson = rootProject.layout.buildDirectory
+        .file('reports/architecture/packages/fineract-package-metrics.json').get().asFile
+
+    onlyIf {
+        if (script == null) {
+            logger.warn('architectureMetricsSkeleton: archmetrics_to_vega.py not found, skipping skeleton regeneration.')
+            return false
+        }
+        return true
+    }
+
+    inputs.file(packageJson).withPropertyName('packageReport')
+    outputs.file(skeleton).withPropertyName('skeleton')
+
+    commandLine 'python3',
+        script != null ? script.absolutePath : 'archmetrics_to_vega.py',
+        packageJson.absolutePath,
+        '--no-diagrams',
+        '--exclude', 'external',
+        '--skeleton', skeleton.absolutePath,
+        '--min-cfv', '1'
+}
+
+tasks.register('architectureMetricsDiagrams', Exec) {
+    group = 'verification'
+    description = 'Regenerate the Vega-Lite diagram specifications from the architecture metrics report.'
+    dependsOn ':fineract-provider:architectureMetricsFeatures'
+
+    def script = rootProject.ext.archMetricsTransform
+    def diagramDir = rootProject.ext.archMetricsDiagramDir
+    def reportJson = rootProject.layout.buildDirectory
+        .file('reports/architecture/features/fineract-feature-metrics.json').get().asFile
+
+    onlyIf {
+        if (script == null) {
+            logger.warn('architectureMetricsDiagrams: archmetrics_to_vega.py not found, skipping diagram regeneration.')
+            return false
+        }
+        return true
+    }
+
+    inputs.file(reportJson).withPropertyName('report')
+    outputs.files(
+        new File(diagramDir, 'main-sequence.vl.json'),
+        new File(diagramDir, 'distance-ranking.vl.json'),
+        new File(diagramDir, 'cross-feature-matrix.vl.json'),
+    ).withPropertyName('specs')
+
+    commandLine 'python3',
+        script != null ? script.absolutePath : 'archmetrics_to_vega.py',
+        reportJson.absolutePath,
+        '--outdir', diagramDir.absolutePath,
+        '--exclude', 'external,platform'
+}
+
+tasks.register('architectureMetricsReport') {
+    group = 'verification'
+    description = 'Robert C. Martin architecture metrics for the whole platform, at package and feature level.'
+    dependsOn 'architectureMetricsDiagrams', 'architectureMetricsSkeleton'
 }

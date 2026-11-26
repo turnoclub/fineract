@@ -21,13 +21,14 @@ package org.apache.fineract.portfolio.loanaccount.data;
 import java.io.Serial;
 import java.io.Serializable;
 import lombok.Getter;
+import org.apache.fineract.accounting.journalentry.data.LoanTransactionTypeDTO;
 import org.apache.fineract.portfolio.loanaccount.domain.LoanTransactionType;
 
 /**
  * Immutable data object represent loan status enumerations.
  */
 @Getter
-public class LoanTransactionEnumData implements Serializable {
+public class LoanTransactionEnumData implements Serializable, LoanTransactionTypeDTO {
 
     @Serial
     private static final long serialVersionUID = 1L;
@@ -66,12 +67,14 @@ public class LoanTransactionEnumData implements Serializable {
     private final boolean reAmortize;
     private final boolean accrualActivity;
     private final boolean interestRefund;
+    private final boolean feeRefund;
     private final boolean accrualAdjustment;
     private final boolean capitalizedIncome;
     private final boolean capitalizedIncomeAmortization;
     private final boolean capitalizedIncomeAdjustment;
     private final boolean capitalizedIncomeAmortizationAdjustment;
     private final boolean contractTermination;
+    private final boolean loanWithdrawal;
     private final boolean buyDownFee;
     private final boolean buyDownFeeAdjustment;
     private final boolean buyDownFeeAmortization;
@@ -81,36 +84,37 @@ public class LoanTransactionEnumData implements Serializable {
         this.id = id;
         this.code = code;
         this.value = value;
-        this.disbursement = Long.valueOf(1).equals(this.id);
-        this.repaymentAtDisbursement = Long.valueOf(5).equals(this.id);
-        this.repayment = Long.valueOf(2).equals(this.id);
-        this.merchantIssuedRefund = Long.valueOf(21).equals(this.id);
-        this.payoutRefund = Long.valueOf(22).equals(this.id);
-        this.goodwillCredit = Long.valueOf(23).equals(this.id);
-        this.chargeRefund = Long.valueOf(24).equals(this.id);
-        this.contra = Long.valueOf(3).equals(this.id);
-        this.waiveInterest = Long.valueOf(4).equals(this.id);
-        this.waiveCharges = Long.valueOf(9).equals(this.id);
-        this.accrual = Long.valueOf(10).equals(this.id);
-        this.writeOff = Long.valueOf(6).equals(this.id);
-        this.recoveryRepayment = Long.valueOf(8).equals(this.id);
-        this.initiateTransfer = Long.valueOf(12).equals(this.id);
-        this.approveTransfer = Long.valueOf(13).equals(this.id);
-        this.withdrawTransfer = Long.valueOf(14).equals(this.id);
-        this.rejectTransfer = Long.valueOf(15).equals(this.id);
-        this.refund = Long.valueOf(16).equals(this.id);
-        this.chargePayment = Long.valueOf(17).equals(this.id);
-        this.refundForActiveLoans = Long.valueOf(18).equals(this.id);
-        this.creditBalanceRefund = Long.valueOf(20).equals(this.id);
-        this.chargeback = Long.valueOf(25).equals(this.id);
-        this.chargeAdjustment = Long.valueOf(26).equals(this.id);
-        this.chargeoff = Long.valueOf(27).equals(this.id);
-        this.downPayment = Long.valueOf(28).equals(this.id);
-        this.interestPaymentWaiver = Long.valueOf(31).equals(this.id);
-        this.accrualActivity = Long.valueOf(32).equals(this.id);
+        this.disbursement = Long.valueOf(LoanTransactionType.DISBURSEMENT.getValue()).equals(this.id);
+        this.repaymentAtDisbursement = Long.valueOf(LoanTransactionType.REPAYMENT_AT_DISBURSEMENT.getValue()).equals(this.id);
+        this.repayment = Long.valueOf(LoanTransactionType.REPAYMENT.getValue()).equals(this.id);
+        this.merchantIssuedRefund = Long.valueOf(LoanTransactionType.MERCHANT_ISSUED_REFUND.getValue()).equals(this.id);
+        this.payoutRefund = Long.valueOf(LoanTransactionType.PAYOUT_REFUND.getValue()).equals(this.id);
+        this.goodwillCredit = Long.valueOf(LoanTransactionType.GOODWILL_CREDIT.getValue()).equals(this.id);
+        this.chargeRefund = Long.valueOf(LoanTransactionType.CHARGE_REFUND.getValue()).equals(this.id);
+        this.contra = Long.valueOf(LoanTransactionType.CONTRA.getValue()).equals(this.id);
+        this.waiveInterest = Long.valueOf(LoanTransactionType.WAIVE_INTEREST.getValue()).equals(this.id);
+        this.waiveCharges = Long.valueOf(LoanTransactionType.WAIVE_CHARGES.getValue()).equals(this.id);
+        this.accrual = Long.valueOf(LoanTransactionType.ACCRUAL.getValue()).equals(this.id);
+        this.writeOff = Long.valueOf(LoanTransactionType.WRITEOFF.getValue()).equals(this.id);
+        this.recoveryRepayment = Long.valueOf(LoanTransactionType.RECOVERY_REPAYMENT.getValue()).equals(this.id);
+        this.initiateTransfer = Long.valueOf(LoanTransactionType.INITIATE_TRANSFER.getValue()).equals(this.id);
+        this.approveTransfer = Long.valueOf(LoanTransactionType.APPROVE_TRANSFER.getValue()).equals(this.id);
+        this.withdrawTransfer = Long.valueOf(LoanTransactionType.WITHDRAW_TRANSFER.getValue()).equals(this.id);
+        this.rejectTransfer = Long.valueOf(LoanTransactionType.REJECT_TRANSFER.getValue()).equals(this.id);
+        this.refund = Long.valueOf(LoanTransactionType.REFUND.getValue()).equals(this.id);
+        this.chargePayment = Long.valueOf(LoanTransactionType.CHARGE_PAYMENT.getValue()).equals(this.id);
+        this.refundForActiveLoans = Long.valueOf(LoanTransactionType.REFUND_FOR_ACTIVE_LOAN.getValue()).equals(this.id);
+        this.creditBalanceRefund = Long.valueOf(LoanTransactionType.CREDIT_BALANCE_REFUND.getValue()).equals(this.id);
+        this.chargeback = Long.valueOf(LoanTransactionType.CHARGEBACK.getValue()).equals(this.id);
+        this.chargeAdjustment = Long.valueOf(LoanTransactionType.CHARGE_ADJUSTMENT.getValue()).equals(this.id);
+        this.chargeoff = Long.valueOf(LoanTransactionType.CHARGE_OFF.getValue()).equals(this.id);
+        this.downPayment = Long.valueOf(LoanTransactionType.DOWN_PAYMENT.getValue()).equals(this.id);
+        this.interestPaymentWaiver = Long.valueOf(LoanTransactionType.INTEREST_PAYMENT_WAIVER.getValue()).equals(this.id);
+        this.accrualActivity = Long.valueOf(LoanTransactionType.ACCRUAL_ACTIVITY.getValue()).equals(this.id);
         this.reAge = Long.valueOf(LoanTransactionType.REAGE.getValue()).equals(this.id);
         this.reAmortize = Long.valueOf(LoanTransactionType.REAMORTIZE.getValue()).equals(this.id);
         this.interestRefund = Long.valueOf(LoanTransactionType.INTEREST_REFUND.getValue()).equals(this.id);
+        this.feeRefund = Long.valueOf(LoanTransactionType.FEE_REFUND.getValue()).equals(this.id);
         this.accrualAdjustment = Long.valueOf(LoanTransactionType.ACCRUAL_ADJUSTMENT.getValue()).equals(this.id);
         this.capitalizedIncome = Long.valueOf(LoanTransactionType.CAPITALIZED_INCOME.getValue()).equals(this.id);
         this.capitalizedIncomeAmortization = Long.valueOf(LoanTransactionType.CAPITALIZED_INCOME_AMORTIZATION.getValue()).equals(this.id);
@@ -118,6 +122,7 @@ public class LoanTransactionEnumData implements Serializable {
         this.capitalizedIncomeAmortizationAdjustment = Long
                 .valueOf(LoanTransactionType.CAPITALIZED_INCOME_AMORTIZATION_ADJUSTMENT.getValue()).equals(this.id);
         this.contractTermination = Long.valueOf(LoanTransactionType.CONTRACT_TERMINATION.getValue()).equals(this.id);
+        this.loanWithdrawal = Long.valueOf(LoanTransactionType.LOAN_WITHDRAWAL.getValue()).equals(this.id);
         this.buyDownFee = Long.valueOf(LoanTransactionType.BUY_DOWN_FEE.getValue()).equals(this.id);
         this.buyDownFeeAdjustment = Long.valueOf(LoanTransactionType.BUY_DOWN_FEE_ADJUSTMENT.getValue()).equals(this.id);
         this.buyDownFeeAmortization = Long.valueOf(LoanTransactionType.BUY_DOWN_FEE_AMORTIZATION.getValue()).equals(this.id);
@@ -125,11 +130,9 @@ public class LoanTransactionEnumData implements Serializable {
                 .equals(this.id);
     }
 
+    @Override
     public boolean isRepaymentType() {
-        if (isRepayment() || isMerchantIssuedRefund() || isPayoutRefund() || isGoodwillCredit() || isChargeRefund() || isChargeAdjustment()
-                || isDownPayment()) {
-            return true;
-        }
-        return false;
+        return isRepayment() || isMerchantIssuedRefund() || isPayoutRefund() || isGoodwillCredit() || isChargeRefund()
+                || isChargeAdjustment() || isDownPayment();
     }
 }

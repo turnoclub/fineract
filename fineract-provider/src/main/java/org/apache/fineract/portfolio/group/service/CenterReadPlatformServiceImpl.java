@@ -45,8 +45,9 @@ import org.apache.fineract.infrastructure.core.service.Page;
 import org.apache.fineract.infrastructure.core.service.PaginationHelper;
 import org.apache.fineract.infrastructure.core.service.SearchParameters;
 import org.apache.fineract.infrastructure.core.service.database.DatabaseSpecificSQLGenerator;
+import org.apache.fineract.infrastructure.security.exception.InputValidationException;
+import org.apache.fineract.infrastructure.security.service.InputValidator;
 import org.apache.fineract.infrastructure.security.service.PlatformSecurityContext;
-import org.apache.fineract.infrastructure.security.utils.ColumnValidator;
 import org.apache.fineract.infrastructure.security.utils.SQLBuilder;
 import org.apache.fineract.organisation.office.data.OfficeData;
 import org.apache.fineract.organisation.office.service.OfficeReadPlatformService;
@@ -82,7 +83,7 @@ public class CenterReadPlatformServiceImpl implements CenterReadPlatformService 
     private final StaffReadService staffReadPlatformService;
     private final CodeValueReadPlatformService codeValueReadPlatformService;
     private final ConfigurationDomainService configurationDomainService;
-    private final ColumnValidator columnValidator;
+    private final InputValidator inputValidator;
 
     // data mappers
     private final CenterDataMapper centerMapper = new CenterDataMapper();
@@ -133,7 +134,7 @@ public class CenterReadPlatformServiceImpl implements CenterReadPlatformService 
             this.schemaSql = SQL_QUERY;
         }
 
-        public String schema() {
+        private String schema() {
             return this.schemaSql;
         }
 
@@ -202,7 +203,7 @@ public class CenterReadPlatformServiceImpl implements CenterReadPlatformService 
                     + " where g.office_id=?";
         }
 
-        public String schema() {
+        private String schema() {
             return this.schemaSql;
         }
 
@@ -257,7 +258,7 @@ public class CenterReadPlatformServiceImpl implements CenterReadPlatformService 
             this.schemaSql = SQL_QUERY;
         }
 
-        public String schema() {
+        private String schema() {
             return this.schemaSql;
         }
 
@@ -318,10 +319,17 @@ public class CenterReadPlatformServiceImpl implements CenterReadPlatformService 
         extraCriteria.addNonNullCriteria("o.hierarchy like ", hierarchySearchString);
         sqlBuilder.append(' ').append(extraCriteria.getSQLTemplate());
         if (searchParameters.hasOrderBy()) {
-            sqlBuilder.append(" order by ").append(searchParameters.getOrderBy()).append(' ').append(searchParameters.getSortOrder());
-            this.columnValidator.validateSqlInjection(sqlBuilder.toString(), searchParameters.getOrderBy(),
-                    searchParameters.getSortOrder());
+            String orderBy = searchParameters.getOrderBy();
+            this.inputValidator.validate("order-by", orderBy);
+            sqlBuilder.append(" order by ").append(orderBy);
 
+            if (searchParameters.hasSortOrder()) {
+                String sortOrder = searchParameters.getSortOrder();
+                if (!"ASC".equalsIgnoreCase(sortOrder) && !"DESC".equalsIgnoreCase(sortOrder)) {
+                    throw new InputValidationException(String.format("invalid sortOrder value '%s'", sortOrder));
+                }
+                sqlBuilder.append(' ').append(sortOrder);
+            }
         }
 
         if (searchParameters.hasLimit()) {
@@ -353,9 +361,17 @@ public class CenterReadPlatformServiceImpl implements CenterReadPlatformService 
         sqlBuilder.append(' ').append(extraCriteria.getSQLTemplate());
         if (searchParameters != null) {
             if (searchParameters.hasOrderBy()) {
-                sqlBuilder.append(" order by ").append(searchParameters.getOrderBy()).append(' ').append(searchParameters.getSortOrder());
-                this.columnValidator.validateSqlInjection(sqlBuilder.toString(), searchParameters.getOrderBy(),
-                        searchParameters.getSortOrder());
+                String orderBy = searchParameters.getOrderBy();
+                this.inputValidator.validate("order-by", orderBy);
+                sqlBuilder.append(" order by ").append(orderBy);
+
+                if (searchParameters.hasSortOrder()) {
+                    String sortOrder = searchParameters.getSortOrder();
+                    if (!"ASC".equalsIgnoreCase(sortOrder) && !"DESC".equalsIgnoreCase(sortOrder)) {
+                        throw new InputValidationException(String.format("invalid sortOrder value '%s'", sortOrder));
+                    }
+                    sqlBuilder.append(' ').append(sortOrder);
+                }
             }
 
             if (searchParameters.hasLimit()) {
@@ -493,14 +509,16 @@ public class CenterReadPlatformServiceImpl implements CenterReadPlatformService 
         validateForGenerateCollectionSheet(staffId);
         final CenterCalendarDataMapper centerCalendarMapper = new CenterCalendarDataMapper();
         String sql = centerCalendarMapper.schema();
+        final String groupBy = " group by ce.id, ce.display_name, g.office_id, g.staff_id, s.display_name, c.id, ci.id, g.account_no, g.external_id, g.status_enum, g.activation_date, g.hierarchy";
         Collection<CenterData> centerDataArray;
         if (staffId != null) {
             sql += " and g.staff_id = ? ";
             sql += " and lrs.duedate <= ? "; // and l.loan_type_enum = 3 ";
-            sql += " group by c.id, ci.id, g.account_no, g.external_id, g.status_enum, g.activation_date, g.hierarchy";
+            sql += groupBy;
             centerDataArray = this.jdbcTemplate.query(sql, centerCalendarMapper, // NOSONAR
                     meetingDate, meetingDate, meetingDate, meetingDate, meetingDate, meetingDate, officeId, staffId, meetingDate);
         } else {
+            sql += groupBy;
             centerDataArray = this.jdbcTemplate.query(sql, centerCalendarMapper, // NOSONAR
                     meetingDate, meetingDate, meetingDate, meetingDate, meetingDate, meetingDate, officeId);
         }

@@ -44,10 +44,11 @@ import org.springframework.stereotype.Component;
 public class JobSchedulerServiceImpl implements ApplicationListener<ContextRefreshedEvent> {
 
     private final FineractProperties fineractProperties;
-    private final SchedularWritePlatformService schedularWritePlatformService;
+    private final SchedulerWritePlatformService schedulerWritePlatformService;
     private final TenantDetailsService tenantDetailsService;
     private final JobRegisterService jobRegisterService;
     private final BusinessDateReadPlatformService businessDateReadPlatformService;
+    private final ScheduledJobReadService scheduledJobReadService;
 
     @Override
     @SuppressFBWarnings("SLF4J_SIGN_ONLY_FORMAT")
@@ -63,8 +64,12 @@ public class JobSchedulerServiceImpl implements ApplicationListener<ContextRefre
             HashMap<BusinessDateType, LocalDate> businessDates = businessDateReadPlatformService.getBusinessDates();
             ThreadLocalContextUtil.setActionContext(ActionContext.DEFAULT);
             ThreadLocalContextUtil.setBusinessDates(businessDates);
-            final List<ScheduledJobDetail> scheduledJobDetails = schedularWritePlatformService
-                    .retrieveAllJobs(fineractProperties.getNodeId());
+            final SchedulerDetail schedulerDetail = scheduledJobReadService.retrieveSchedulerDetail();
+            if (fineractProperties.getJob().isResetSchedulerOnBootupEnabled() && schedulerDetail.isResetSchedulerOnBootup()) {
+                schedulerDetail.setSuspended(false);
+                schedulerWritePlatformService.updateSchedulerDetail(schedulerDetail);
+            }
+            final List<ScheduledJobDetail> scheduledJobDetails = scheduledJobReadService.retrieveAllJobs(fineractProperties.getNodeId());
             for (final ScheduledJobDetail jobDetails : scheduledJobDetails) {
                 try {
                     jobRegisterService.scheduleJob(jobDetails);
@@ -72,12 +77,7 @@ public class JobSchedulerServiceImpl implements ApplicationListener<ContextRefre
                     log.warn("{}", e.getMessage());
                 }
                 jobDetails.setTriggerMisfired(false);
-                schedularWritePlatformService.saveOrUpdate(jobDetails);
-            }
-            final SchedulerDetail schedulerDetail = schedularWritePlatformService.retriveSchedulerDetail();
-            if (schedulerDetail.isResetSchedulerOnBootup()) {
-                schedulerDetail.setSuspended(false);
-                schedularWritePlatformService.updateSchedulerDetail(schedulerDetail);
+                schedulerWritePlatformService.saveOrUpdate(jobDetails);
             }
             ThreadLocalContextUtil.reset();
         }

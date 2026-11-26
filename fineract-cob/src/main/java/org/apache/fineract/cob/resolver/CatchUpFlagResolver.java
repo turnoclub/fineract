@@ -19,14 +19,19 @@
 package org.apache.fineract.cob.resolver;
 
 import org.apache.fineract.cob.COBConstant;
-import org.springframework.batch.core.StepExecution;
+import org.springframework.batch.core.job.JobExecution;
+import org.springframework.batch.core.step.StepExecution;
 
 public final class CatchUpFlagResolver {
 
     private CatchUpFlagResolver() {}
 
     public static boolean resolve(StepExecution stepExecution) {
-        Object isCatchUp = stepExecution.getJobExecution().getExecutionContext().get(COBConstant.IS_CATCH_UP_PARAMETER_NAME);
+        return resolve(stepExecution.getJobExecution());
+    }
+
+    public static boolean resolve(JobExecution jobExecution) {
+        Object isCatchUp = jobExecution.getExecutionContext().get(COBConstant.IS_CATCH_UP_PARAMETER_NAME);
         return switch (isCatchUp) {
             case null -> false;
             case String isCatchUpStr -> Boolean.parseBoolean(isCatchUpStr);

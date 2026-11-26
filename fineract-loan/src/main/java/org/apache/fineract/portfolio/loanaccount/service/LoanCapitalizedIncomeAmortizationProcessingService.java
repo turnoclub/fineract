@@ -21,11 +21,21 @@ package org.apache.fineract.portfolio.loanaccount.service;
 import java.time.LocalDate;
 import org.apache.fineract.portfolio.loanaccount.domain.Loan;
 import org.apache.fineract.portfolio.loanaccount.domain.LoanTransaction;
-import org.springframework.lang.NonNull;
+import org.jspecify.annotations.NonNull;
 
 public interface LoanCapitalizedIncomeAmortizationProcessingService {
 
     void processCapitalizedIncomeAmortizationOnLoanClosure(@NonNull Loan loan, boolean addJournal);
+
+    void processCapitalizedIncomeAmortizationOnLoanSale(@NonNull Loan loan, @NonNull LocalDate transactionDate, boolean addJournal);
+
+    /**
+     * Immediately recognizes the unrecognized balance of the capitalized income (or capitalized income adjustment) that
+     * triggered the call. Only that related balance is touched so already-deferred balances on the same loan keep
+     * amortizing daily. Reuses the same recognition path as sale/closure, scoped to the related balance.
+     */
+    void processCapitalizedIncomeAmortizationImmediately(@NonNull Loan loan, @NonNull LoanTransaction capitalizedIncomeRelatedTransaction,
+            @NonNull LocalDate transactionDate, boolean addJournal);
 
     void processCapitalizedIncomeAmortizationOnLoanChargeOff(@NonNull Loan loan, @NonNull LoanTransaction chargeOffTransaction);
 

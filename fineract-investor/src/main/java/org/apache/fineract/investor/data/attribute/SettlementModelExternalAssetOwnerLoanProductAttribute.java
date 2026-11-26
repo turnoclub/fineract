@@ -18,17 +18,18 @@
  */
 package org.apache.fineract.investor.data.attribute;
 
+import java.util.Arrays;
+import java.util.List;
+
 public enum SettlementModelExternalAssetOwnerLoanProductAttribute implements ExternalAssetOwnerLoanProductAttribute {
 
-    DEFAULT_SETTLEMENT("DEFAULT_SETTLEMENT"), //
-    DELAYED_SETTLEMENT("DELAYED_SETTLEMENT"); //
+    DEFAULT_SETTLEMENT, //
+    DELAYED_SETTLEMENT; //
 
     private final String attributeKey;
-    private final String attributeValue;
 
-    SettlementModelExternalAssetOwnerLoanProductAttribute(String attributeValue) {
+    SettlementModelExternalAssetOwnerLoanProductAttribute() {
         this.attributeKey = "SETTLEMENT_MODEL";
-        this.attributeValue = attributeValue;
     }
 
     @Override
@@ -38,6 +39,21 @@ public enum SettlementModelExternalAssetOwnerLoanProductAttribute implements Ext
 
     @Override
     public String getAttributeValue() {
-        return attributeValue;
+        return name();
+    }
+
+    @Override
+    public List<String> getAttributeValues() {
+        return Arrays.stream(values()).map(Enum::name).toList();
+    }
+
+    @Override
+    public boolean validate(String attributeValue) {
+        return this.getAttributeValue().equals(attributeValue);
+    }
+
+    @Override
+    public boolean isMultiValue() {
+        return false;
     }
 }

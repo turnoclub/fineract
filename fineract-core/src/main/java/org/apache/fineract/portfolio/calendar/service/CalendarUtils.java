@@ -22,10 +22,8 @@ import com.google.gson.JsonElement;
 import java.text.ParseException;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.time.YearMonth;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
-import java.time.temporal.ChronoField;
 import java.time.temporal.Temporal;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -52,6 +50,8 @@ import org.apache.fineract.organisation.workingdays.service.WorkingDaysUtil;
 import org.apache.fineract.portfolio.calendar.domain.Calendar;
 import org.apache.fineract.portfolio.calendar.domain.CalendarFrequencyType;
 import org.apache.fineract.portfolio.calendar.domain.CalendarWeekDaysType;
+import org.apache.fineract.portfolio.common.domain.MonthEndDueDateStrategy;
+import org.apache.fineract.portfolio.common.domain.MonthlyDueDateResolver;
 import org.apache.fineract.portfolio.common.domain.NthDayType;
 import org.apache.fineract.portfolio.common.domain.PeriodFrequencyType;
 
@@ -90,13 +90,9 @@ public final class CalendarUtils {
     }
 
     public static Temporal adjustDate(final Temporal date, final Temporal seedDate, final PeriodFrequencyType frequencyType) {
-        if (frequencyType.isMonthly() && seedDate.get(ChronoField.DAY_OF_MONTH) > 28 && date.get(ChronoField.DAY_OF_MONTH) >= 28) {
-            int noOfDaysInCurrentMonth = YearMonth.from(date).lengthOfMonth();
-            int seedDay = seedDate.get(ChronoField.DAY_OF_MONTH);
-            int adjustedDay = Math.min(noOfDaysInCurrentMonth, seedDay);
-            return date.with(ChronoField.DAY_OF_MONTH, adjustedDay);
-        }
-        return date;
+        // Deliberately not the loan's strategy: these are recurrence dates (meeting calendars, campaign and report
+        // schedules), and a loan following a meeting calendar is due on the meeting dates, which always clamp.
+        return MonthlyDueDateResolver.adjustDate(date, seedDate, frequencyType, MonthEndDueDateStrategy.LAST_DAY_OF_MONTH);
     }
 
     private static LocalDateTime getNextRecurringDate(final Recur recur, final LocalDateTime seedDate, final LocalDateTime startDate) {
@@ -740,11 +736,16 @@ public final class CalendarUtils {
 
     public static void validateNthDayOfMonthFrequency(DataValidatorBuilder baseDataValidator, final String repeatsOnNthDayOfMonthParamName,
             final String repeatsOnDayParamName, final JsonElement element, final FromJsonHelper fromApiJsonHelper) {
-        final Integer repeatsOnNthDayOfMonth = fromApiJsonHelper.extractIntegerSansLocaleNamed(repeatsOnNthDayOfMonthParamName, element);
+        validateNthDayOfMonthFrequency(baseDataValidator, repeatsOnNthDayOfMonthParamName, repeatsOnDayParamName,
+                fromApiJsonHelper.extractIntegerSansLocaleNamed(repeatsOnNthDayOfMonthParamName, element),
+                fromApiJsonHelper.extractIntegerSansLocaleNamed(repeatsOnDayParamName, element));
+    }
+
+    public static void validateNthDayOfMonthFrequency(DataValidatorBuilder baseDataValidator, final String repeatsOnNthDayOfMonthParamName,
+            final String repeatsOnDayParamName, final Integer repeatsOnNthDayOfMonth, final Integer repeatsOnDay) {
         baseDataValidator.reset().parameter(repeatsOnNthDayOfMonthParamName).value(repeatsOnNthDayOfMonth).ignoreIfNull()
                 .isOneOfTheseValues(NthDayType.ONE.getValue(), NthDayType.TWO.getValue(), NthDayType.THREE.getValue(),
                         NthDayType.FOUR.getValue(), NthDayType.LAST.getValue(), NthDayType.ONDAY.getValue());
-        final Integer repeatsOnDay = fromApiJsonHelper.extractIntegerSansLocaleNamed(repeatsOnDayParamName, element);
         baseDataValidator.reset().parameter(repeatsOnDayParamName).value(repeatsOnDay).ignoreIfNull()
                 .inMinMaxRange(CalendarWeekDaysType.getMinValue(), CalendarWeekDaysType.getMaxValue());
         NthDayType nthDayType = null;

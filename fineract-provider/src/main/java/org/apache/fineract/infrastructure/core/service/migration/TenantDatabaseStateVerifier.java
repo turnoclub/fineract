@@ -18,13 +18,14 @@
  */
 package org.apache.fineract.infrastructure.core.service.migration;
 
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import javax.sql.DataSource;
 import lombok.RequiredArgsConstructor;
 import org.apache.fineract.infrastructure.core.service.database.DatabaseIndependentQueryService;
 import org.apache.fineract.infrastructure.core.service.database.DatabaseTypeResolver;
-import org.springframework.boot.autoconfigure.liquibase.LiquibaseProperties;
+import org.springframework.boot.liquibase.autoconfigure.LiquibaseProperties;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Component;
 
@@ -45,7 +46,8 @@ public class TenantDatabaseStateVerifier {
 
     public boolean isFirstLiquibaseMigration(DataSource dataSource) {
         String tableName = "DATABASECHANGELOG";
-        return !dbQueryService.isTablePresent(dataSource, databaseTypeResolver.isPostgreSQL() ? tableName.toLowerCase() : tableName);
+        return !dbQueryService.isTablePresent(dataSource,
+                databaseTypeResolver.isPostgreSQL() ? tableName.toLowerCase(Locale.ROOT) : tableName);
     }
 
     public boolean isFlywayPresent(DataSource dataSource) {

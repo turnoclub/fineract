@@ -31,6 +31,7 @@ import lombok.Getter;
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
+import org.apache.fineract.infrastructure.security.domain.OidcFederationType;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 @Getter
@@ -41,6 +42,8 @@ public class FineractProperties {
     private String nodeId;
 
     private String idempotencyKeyHeaderName;
+
+    private boolean idempotencyKeyValidationEnabled;
 
     private Boolean insecureHttpClient;
     private long clientConnectTimeout;
@@ -86,10 +89,14 @@ public class FineractProperties {
     private FineractModulesProperties module;
 
     private FineractSqlValidationProperties sqlValidation;
+    private FineractInputValidationProperties inputValidation;
+    private FineractPhoneProperties phone;
 
     private FineractCache cache;
 
     private RetryProperties retry;
+
+    private FineractDefaultValues defaults;
 
     @Getter
     @Setter
@@ -185,11 +192,20 @@ public class FineractProperties {
         private String jobName;
         private Integer chunkSize;
         private Integer partitionSize;
-        private Integer threadPoolCorePoolSize;
-        private Integer threadPoolMaxPoolSize;
-        private Integer threadPoolQueueCapacity;
-        private Integer retryLimit;
+        // No thread-pool settings here on purpose. COB item processing is sequential by construction - the worker
+        // steps register no task executor at all - because concurrent item processing takes COB business step writes
+        // out of the chunk transaction (see FINERACT-2621). Exposing a pool size would offer an override for a
+        // correctness invariant, so the knob does not exist. Scale via partition-size and worker instances.
+        // No retry limit either: Spring Batch 6 retries an item inside the chunk transaction it failed in, which a COB
+        // failure has already marked rollback-only, so a retry cannot succeed and one that seems to loses the chunk.
+        // See StepRetryPolicyFactory#noRetryPolicy.
         private Integer pollInterval;
+        /**
+         * Maximum number of skipped items tolerated per step execution (per partition). Independent of chunk size on
+         * purpose - deriving it from chunk-size made fault tolerance a side effect of a sizing knob. Falls back to
+         * {@code chunkSize + 1} when unset, which is the historical behaviour.
+         */
+        private Integer skipLimit;
 
     }
 
@@ -422,8 +438,12 @@ public class FineractProperties {
     public static class FineractJobProperties {
 
         private int stuckRetryThreshold;
+        private Duration stuckPartitionTimeout;
         private boolean loanCobEnabled;
         private FineractJournalEntryAggregationProperties journalEntryAggregation;
+        private int retainedEarningChunkSize;
+        private boolean executeMissedRuns;
+        private boolean resetSchedulerOnBootupEnabled = true;
     }
 
     @Getter
@@ -448,6 +468,8 @@ public class FineractProperties {
     public static class FineractJpaProperties {
 
         private boolean statementLoggingEnabled;
+        private int expressionQueryCacheMaxSize;
+        private int updateCallCacheMaxSize;
     }
 
     @Getter
@@ -525,6 +547,7 @@ public class FineractProperties {
         private FineractSecurityTwoFactorAuth twoFactor;
         private FineractSecurityHsts hsts;
         private FineractSecurityOAuth2Properties oauth2;
+        private FineractSecurityOidcFederationProperties oidcFederation;
         private CorsProperties cors;
 
         public void set2fa(FineractSecurityTwoFactorAuth twoFactor) {
@@ -558,6 +581,56 @@ public class FineractProperties {
                     private List<String> redirectUris = new ArrayList<>();
                     private boolean requireAuthorizationConsent = true;
                 }
+            }
+        }
+
+        @Getter
+        @Setter
+        public static class FineractSecurityOidcFederationProperties {
+
+            private boolean enabled;
+            // JWT claim name used to resolve the Fineract tenant ID.
+            // Falls back to HTTP header / query param if absent.
+            private String tenantClaimName = "fineract_tenant";
+            // Claim used as the Fineract username. Common values: preferred_username, email, sub.
+            private String usernameClaim = "preferred_username";
+            // When true, creates a Fineract AppUser on first successful OIDC login.
+            private boolean autoCreateUser = false;
+            // Comma-separated role names assigned to auto-created users.
+            private String defaultRoles = "";
+            // Audience a token must name in its aud claim. Empty: the audience is not checked.
+            private String audience = "";
+            // Controls the RP-Initiated Logout URL format.
+            // Values: keycloak | azure_ad | okta | auth0 | generic (default)
+            private OidcFederationType provider = OidcFederationType.GENERIC;
+            // Redirect URI sent to the IdP after successful logout.
+            private String postLogoutRedirectUri;
+            // Static per-issuer tenant mapping (YAML fallback).
+            // Used when the master DB has no m_tenant_oidc_config record for an incoming issuer.
+            // Priority: DB config > issuers[] > tenantClaimName claim.
+            private List<OidcIssuerProperties> issuers = new ArrayList<>();
+
+            @Getter
+            @Setter
+            public static class OidcIssuerProperties {
+
+                // Exact value expected in the JWT 'iss' claim.
+                private String issuerUri;
+                // Fineract tenant identifier this issuer maps to.
+                private String tenantId;
+                // Optional: if absent, derived from issuerUri via OIDC discovery.
+                private String jwksUri;
+                // Optional: per-issuer override for the username claim.
+                private String usernameClaim;
+                // Optional: per-issuer override for the audience.
+                private String audience;
+                // Optional: claim holding the names of the user's Fineract roles: a list, or a comma-separated
+                // string; a dotted name reaches into nested claims (realm_access.roles). When set, a token of this
+                // issuer that carries the claim decides the user's roles whenever it is resolved to a user: at every
+                // browser login, and on every request with a Bearer token. Absent: roles are managed in Fineract.
+                private String rolesClaim;
+                // Optional: the only roles a token of this issuer may grant or remove. Empty: every role.
+                private List<String> managedRoles = new ArrayList<>();
             }
         }
 
@@ -656,6 +729,47 @@ public class FineractProperties {
 
     @Getter
     @Setter
+    public static class FineractInputValidationProperties {
+
+        private List<FineractInputValidationPatternProperties> patterns;
+        private List<FineractInputValidationProfileProperties> profiles;
+    }
+
+    @Getter
+    @Setter
+    public static class FineractInputValidationProfileProperties {
+
+        private String name;
+        private String description;
+        private List<FineractInputValidationPatternReferenceProperties> patternRefs;
+        private Boolean enabled = true;
+    }
+
+    @Getter
+    @Setter
+    public static class FineractInputValidationPatternReferenceProperties {
+
+        private String name;
+        private Integer order;
+    }
+
+    @Getter
+    @Setter
+    public static class FineractInputValidationPatternProperties {
+
+        private String name;
+        private String pattern;
+    }
+
+    @Getter
+    @Setter
+    public static class FineractPhoneProperties {
+
+        private String regex = "^\\+?[0-9]{7,15}$";
+    }
+
+    @Getter
+    @Setter
     public static class FineractCache {
 
         private FineractCacheDetails defaultTemplate;
@@ -682,15 +796,29 @@ public class FineractProperties {
 
             private ExecuteCommandProperties executeCommand;
 
+            /**
+             * Pacing of the inline COB retry. It has no {@code retryExceptions}: an inline COB failure is recorded on
+             * the account lock, which makes that lock overrulable, so the next attempt can take the accounts over and
+             * re-run the job whatever went wrong - there is no failure there that is worth singling out as final.
+             */
+            private RetryInstanceProperties inlineCob;
+
             @Getter
             @Setter
-            public static class ExecuteCommandProperties {
+            public static class RetryInstanceProperties {
 
-                private Class<? extends Throwable>[] retryExceptions;
                 private Integer maxAttempts;
                 private Boolean enableExponentialBackoff;
                 private Double exponentialBackoffMultiplier;
                 private Duration waitDuration;
+
+            }
+
+            @Getter
+            @Setter
+            public static class ExecuteCommandProperties extends RetryInstanceProperties {
+
+                private Class<? extends Throwable>[] retryExceptions;
 
             }
         }
@@ -706,5 +834,12 @@ public class FineractProperties {
         private List<String> allowedHeaders;
         private List<String> exposedHeaders;
         private boolean allowCredentials;
+    }
+
+    @Getter
+    @Setter
+    public static class FineractDefaultValues {
+
+        private Long officeId;
     }
 }

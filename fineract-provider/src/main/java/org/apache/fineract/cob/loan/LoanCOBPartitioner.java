@@ -18,32 +18,41 @@
  */
 package org.apache.fineract.cob.loan;
 
+import java.time.LocalDate;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.fineract.cob.COBBusinessStepService;
 import org.apache.fineract.cob.common.CommonPartitioner;
 import org.apache.fineract.cob.data.BusinessStepNameAndOrder;
+import org.apache.fineract.cob.data.COBPartition;
 import org.apache.fineract.cob.service.RetrieveIdService;
 import org.apache.fineract.infrastructure.springbatch.PropertyService;
-import org.springframework.batch.core.StepExecution;
+import org.jspecify.annotations.NonNull;
 import org.springframework.batch.core.launch.JobOperator;
-import org.springframework.batch.core.partition.support.Partitioner;
-import org.springframework.batch.item.ExecutionContext;
-import org.springframework.lang.NonNull;
+import org.springframework.batch.core.partition.Partitioner;
+import org.springframework.batch.core.step.StepExecution;
+import org.springframework.batch.infrastructure.item.ExecutionContext;
 
 @Slf4j
 public class LoanCOBPartitioner extends CommonPartitioner implements Partitioner {
 
     private final PropertyService propertyService;
     private final COBBusinessStepService cobBusinessStepService;
+    private final RetrieveIdService retrieveIdService;
 
     public LoanCOBPartitioner(PropertyService propertyService, COBBusinessStepService cobBusinessStepService,
             RetrieveIdService retrieveIdService, JobOperator jobOperator, StepExecution stepExecution, Long numberOfDaysBehind) {
-        super(jobOperator, stepExecution, numberOfDaysBehind, retrieveIdService);
+        super(jobOperator, stepExecution, numberOfDaysBehind);
         this.propertyService = propertyService;
         this.cobBusinessStepService = cobBusinessStepService;
+        this.retrieveIdService = retrieveIdService;
+    }
 
+    @Override
+    protected List<COBPartition> retrievePartitions(Long numberOfDays, LocalDate businessDate, boolean isCatchUp, int partitionSize) {
+        return retrieveIdService.retrieveLoanCOBPartitions(numberOfDays, businessDate, isCatchUp, partitionSize);
     }
 
     @NonNull

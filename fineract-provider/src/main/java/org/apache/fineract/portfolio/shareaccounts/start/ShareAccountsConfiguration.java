@@ -28,9 +28,10 @@ import org.apache.fineract.infrastructure.security.utils.ColumnValidator;
 import org.apache.fineract.portfolio.account.service.AccountNumberGenerator;
 import org.apache.fineract.portfolio.accounts.constants.AccountsApiConstants;
 import org.apache.fineract.portfolio.accounts.service.AccountsCommandsService;
-import org.apache.fineract.portfolio.charge.service.ChargeReadPlatformService;
+import org.apache.fineract.portfolio.charge.service.ChargeReadService;
 import org.apache.fineract.portfolio.client.service.ClientReadPlatformService;
 import org.apache.fineract.portfolio.note.domain.NoteRepository;
+import org.apache.fineract.portfolio.paymentdetail.service.PaymentDetailWritePlatformService;
 import org.apache.fineract.portfolio.savings.domain.SavingsAccountAssembler;
 import org.apache.fineract.portfolio.savings.service.SavingsAccountDomainService;
 import org.apache.fineract.portfolio.savings.service.SavingsAccountReadPlatformService;
@@ -91,15 +92,14 @@ public class ShareAccountsConfiguration {
     @Bean(value = "share" + AccountsApiConstants.READPLATFORM_NAME)
     @ConditionalOnMissingBean(ShareAccountReadPlatformService.class)
     public ShareAccountReadPlatformService shareAccountReadPlatformService(ApplicationContext applicationContext,
-            ChargeReadPlatformService chargeReadPlatformService,
-            ShareProductDropdownReadPlatformService shareProductDropdownReadPlatformService,
+            ChargeReadService chargeReadService, ShareProductDropdownReadPlatformService shareProductDropdownReadPlatformService,
             SavingsAccountReadPlatformService savingsAccountReadPlatformService, ClientReadPlatformService clientReadPlatformService,
             ShareAccountChargeReadPlatformService shareAccountChargeReadPlatformService,
             PurchasedSharesReadPlatformService purchasedSharesReadPlatformService, JdbcTemplate jdbcTemplate,
             PaginationHelper paginationHelper, DatabaseSpecificSQLGenerator sqlGenerator) {
-        return new ShareAccountReadPlatformServiceImpl(applicationContext, chargeReadPlatformService,
-                shareProductDropdownReadPlatformService, savingsAccountReadPlatformService, clientReadPlatformService,
-                shareAccountChargeReadPlatformService, purchasedSharesReadPlatformService, jdbcTemplate, paginationHelper, sqlGenerator);
+        return new ShareAccountReadPlatformServiceImpl(applicationContext, chargeReadService, shareProductDropdownReadPlatformService,
+                savingsAccountReadPlatformService, clientReadPlatformService, shareAccountChargeReadPlatformService,
+                purchasedSharesReadPlatformService, jdbcTemplate, paginationHelper, sqlGenerator);
     }
 
     @Bean
@@ -115,9 +115,10 @@ public class ShareAccountsConfiguration {
             ShareAccountRepositoryWrapper shareAccountRepository, ShareProductRepositoryWrapper shareProductRepository,
             AccountNumberGenerator accountNumberGenerator, AccountNumberFormatRepositoryWrapper accountNumberFormatRepository,
             JournalEntryWritePlatformService journalEntryWritePlatformService, NoteRepository noteRepository,
-            BusinessEventNotifierService businessEventNotifierService) {
+            BusinessEventNotifierService businessEventNotifierService,
+            PaymentDetailWritePlatformService paymentDetailWritePlatformService) {
         return new ShareAccountWritePlatformServiceJpaRepositoryImpl(accountDataSerializer, shareAccountRepository, shareProductRepository,
                 accountNumberGenerator, accountNumberFormatRepository, journalEntryWritePlatformService, noteRepository,
-                businessEventNotifierService);
+                businessEventNotifierService, paymentDetailWritePlatformService);
     }
 }

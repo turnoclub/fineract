@@ -46,6 +46,7 @@ import org.apache.commons.lang3.StringUtils;
 import org.apache.fineract.accounting.journalentry.command.JournalEntryCommand;
 import org.apache.fineract.accounting.journalentry.data.JournalEntryAssociationParametersData;
 import org.apache.fineract.accounting.journalentry.data.JournalEntryData;
+import org.apache.fineract.accounting.journalentry.data.JournalEntrySource;
 import org.apache.fineract.accounting.journalentry.data.OfficeOpeningBalancesData;
 import org.apache.fineract.accounting.journalentry.service.JournalEntryReadPlatformService;
 import org.apache.fineract.commands.domain.CommandWrapper;
@@ -54,6 +55,7 @@ import org.apache.fineract.commands.service.PortfolioCommandSourceWritePlatformS
 import org.apache.fineract.infrastructure.bulkimport.data.GlobalEntityType;
 import org.apache.fineract.infrastructure.bulkimport.service.BulkImportWorkbookPopulatorService;
 import org.apache.fineract.infrastructure.bulkimport.service.BulkImportWorkbookService;
+import org.apache.fineract.infrastructure.core.annotation.AlternativeOperationId;
 import org.apache.fineract.infrastructure.core.api.ApiRequestParameterHelper;
 import org.apache.fineract.infrastructure.core.api.DateParam;
 import org.apache.fineract.infrastructure.core.data.CommandProcessingResult;
@@ -67,6 +69,7 @@ import org.apache.fineract.infrastructure.core.service.SearchParameters;
 import org.apache.fineract.infrastructure.security.service.PlatformSecurityContext;
 import org.apache.fineract.infrastructure.security.service.SqlValidator;
 import org.apache.fineract.portfolio.PortfolioProductType;
+import org.apache.fineract.useradministration.domain.AppUser;
 import org.glassfish.jersey.media.multipart.FormDataContentDisposition;
 import org.glassfish.jersey.media.multipart.FormDataParam;
 import org.springframework.stereotype.Component;
@@ -106,11 +109,14 @@ public class JournalEntriesApiResource {
                     + "journalentries?offset=10&limit=50\n" + "\n" + "journalentries?orderBy=transactionId&sortOrder=DESC\n" + "\n"
                     + "journalentries?runningBalance=true\n" + "\n" + "journalentries?transactionDetails=true\n" + "\n"
                     + "journalentries?loanId=12\n" + "\n" + "journalentries?savingsId=24")
+    @AlternativeOperationId("retrieveAll_1")
     @ApiResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = JournalEntriesApiResourceSwagger.GetJournalEntriesTransactionIdResponse.class)))
     public String retrieveAll(@Context final UriInfo uriInfo,
             @QueryParam("officeId") @Parameter(description = "officeId") final Long officeId,
             @QueryParam("glAccountId") @Parameter(description = "glAccountId") final Long glAccountId,
             @QueryParam("manualEntriesOnly") @Parameter(description = "manualEntriesOnly") final Boolean onlyManualEntries,
+            @QueryParam("entrySource") @Parameter(description = "MANUAL returns manual entries, their reversals and opening balances; SYSTEM returns the entries posted by the system. Any other value is rejected. Combined with manualEntriesOnly=true, SYSTEM returns no entries.", schema = @Schema(allowableValues = {
+                    "MANUAL", "SYSTEM" })) final String entrySource,
             @QueryParam("fromDate") @Parameter(description = "fromDate") final DateParam fromDateParam,
             @QueryParam("toDate") @Parameter(description = "toDate") final DateParam toDateParam,
             @QueryParam("submittedOnDateFrom") @Parameter(description = "submittedOnDateFrom") final DateParam submittedOnDateFromParam,
@@ -128,7 +134,8 @@ public class JournalEntriesApiResource {
             @QueryParam("runningBalance") @Parameter(description = "runningBalance") final boolean runningBalance,
             @QueryParam("transactionDetails") @Parameter(description = "transactionDetails") final boolean transactionDetails) {
 
-        this.context.authenticatedUser().validateHasReadPermission(RESOURCE_NAME_FOR_PERMISSION);
+        final AppUser currentUser = this.context.authenticatedUser();
+        currentUser.validateHasReadPermission(RESOURCE_NAME_FOR_PERMISSION);
 
         final DateFormat dateFormat = StringUtils.isBlank(rawDateFormat) ? null : new DateFormat(rawDateFormat);
 
@@ -153,12 +160,13 @@ public class JournalEntriesApiResource {
         sqlValidator.validate(orderBy);
         sqlValidator.validate(sortOrder);
         final SearchParameters searchParameters = SearchParameters.builder().limit(limit).officeId(officeId).offset(offset).orderBy(orderBy)
-                .sortOrder(sortOrder).loanId(loanId).savingsId(savingsId).build();
+                .sortOrder(sortOrder).loanId(loanId).savingsId(savingsId).hierarchy(currentUser.getOffice().getHierarchy()).build();
         JournalEntryAssociationParametersData associationParametersData = new JournalEntryAssociationParametersData(transactionDetails,
                 runningBalance);
 
+        final JournalEntrySource source = parseEntrySource(entrySource);
         final Page<JournalEntryData> glJournalEntries = this.journalEntryReadPlatformService.retrieveAll(searchParameters, glAccountId,
-                onlyManualEntries, fromDate, toDate, submittedOnDateFrom, submittedOnDateTo, transactionId, entityType,
+                onlyManualEntries, source, fromDate, toDate, submittedOnDateFrom, submittedOnDateTo, transactionId, entityType,
                 associationParametersData);
         final ApiRequestJsonSerializationSettings settings = this.apiRequestParameterHelper.process(uriInfo.getQueryParameters());
         return this.apiJsonSerializerService.serialize(settings, glJournalEntries, RESPONSE_DATA_PARAMETERS);
@@ -177,11 +185,12 @@ public class JournalEntriesApiResource {
             @QueryParam("runningBalance") @Parameter(description = "runningBalance") final boolean runningBalance,
             @QueryParam("transactionDetails") @Parameter(description = "transactionDetails") final boolean transactionDetails) {
 
-        this.context.authenticatedUser().validateHasReadPermission(RESOURCE_NAME_FOR_PERMISSION);
+        final AppUser currentUser = this.context.authenticatedUser();
+        currentUser.validateHasReadPermission(RESOURCE_NAME_FOR_PERMISSION);
         JournalEntryAssociationParametersData associationParametersData = new JournalEntryAssociationParametersData(transactionDetails,
                 runningBalance);
         final JournalEntryData glJournalEntryData = this.journalEntryReadPlatformService.retrieveGLJournalEntryById(journalEntryId,
-                associationParametersData);
+                associationParametersData, currentUser.getOffice().getHierarchy());
 
         final ApiRequestJsonSerializationSettings settings = this.apiRequestParameterHelper.process(uriInfo.getQueryParameters());
         return this.apiJsonSerializerService.serialize(settings, glJournalEntryData, RESPONSE_DATA_PARAMETERS);
@@ -192,7 +201,9 @@ public class JournalEntriesApiResource {
     @Produces({ MediaType.APPLICATION_JSON })
     @Operation(summary = "Create \"Balanced\" Journal Entries", tags = {
             "Journal Entries" }, description = "Note: A Balanced (simple) Journal entry would have atleast one \"Debit\" and one \"Credit\" entry whose amounts are equal \n"
-                    + "Compound Journal entries may have \"n\" debits and \"m\" credits where both \"m\" and \"n\" are greater than 0 and the net sum or all debits and credits are equal \n\n"
+                    + "Compound Journal entries may have \"n\" debits and \"m\" credits where both \"m\" and \"n\" are greater than 0 and the net sum or all debits and credits are equal \n"
+                    + "A GL account may not appear on both the debit and the credit side of the same entry, even when the lines on that account do not cancel out; "
+                    + "this also applies to entries created from an accounting rule whose debit and credit sides share an account. \n\n"
                     + "\n" + "Mandatory Fields\n" + "officeId, transactionDate\n\n" + "\ncredits- glAccountId, amount, comments\n\n "
                     + "\ndebits-  glAccountId, amount, comments\n\n " + "\n" + "Optional Fields\n"
                     + "paymentTypeId, accountNumber, checkNumber, routingCode, receiptNumber, bankNumber")
@@ -251,7 +262,7 @@ public class JournalEntriesApiResource {
         this.context.authenticatedUser();
         String transactionId = "P" + entryId;
         SearchParameters params = SearchParameters.builder().limit(limit).offset(offset).build();
-        Page<JournalEntryData> entries = this.journalEntryReadPlatformService.retrieveAll(params, null, null, null, null, null, null,
+        Page<JournalEntryData> entries = this.journalEntryReadPlatformService.retrieveAll(params, null, null, null, null, null, null, null,
                 transactionId, PortfolioProductType.PROVISIONING.getValue(), null);
         final ApiRequestJsonSerializationSettings settings = this.apiRequestParameterHelper.process(uriInfo.getQueryParameters());
         return this.apiJsonSerializerService.serialize(settings, entries, RESPONSE_DATA_PARAMETERS);
@@ -299,5 +310,13 @@ public class JournalEntriesApiResource {
         final Long importDocumentId = this.bulkImportWorkbookService.importWorkbook(GlobalEntityType.GL_JOURNAL_ENTRIES.toString(),
                 uploadedInputStream, fileDetail, locale, dateFormat);
         return this.apiJsonSerializerService.serialize(importDocumentId);
+    }
+
+    private static JournalEntrySource parseEntrySource(final String entrySource) {
+        if (StringUtils.isBlank(entrySource)) {
+            return null;
+        }
+        return Arrays.stream(JournalEntrySource.values()).filter(source -> source.name().equalsIgnoreCase(entrySource)).findFirst()
+                .orElseThrow(() -> new UnrecognizedQueryParamException("entrySource", entrySource, (Object[]) JournalEntrySource.values()));
     }
 }

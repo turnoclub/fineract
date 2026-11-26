@@ -26,12 +26,15 @@ import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.fineract.avro.BulkMessageItemV1;
 import org.apache.fineract.avro.BulkMessagePayloadV1;
 import org.apache.fineract.avro.MessageV1;
+import org.apache.fineract.test.messaging.BulkEventMessage;
 import org.apache.fineract.test.messaging.EventMessage;
 import org.apache.fineract.test.messaging.event.Event;
 import org.springframework.stereotype.Component;
@@ -43,6 +46,9 @@ public class EventStore {
 
     public static final String BULK_BUSINESS_EVENT_TYPE = "BulkBusinessEvent";
     private final List<EventMessage<?>> receivedEvents = new CopyOnWriteArrayList<>();
+    // Events removed by a verification, kept so a later step can still inspect their payload
+    private final List<EventMessage<?>> verifiedEvents = new CopyOnWriteArrayList<>();
+    private final List<BulkEventMessage> receivedBulkEvents = new CopyOnWriteArrayList<>();
 
     public <R, T extends Event<R>> boolean existsEventById(T type, Long id) {
         return findEventById(type, id).isPresent();
@@ -50,13 +56,35 @@ public class EventStore {
 
     public <R, T extends Event<R>> Optional<EventMessage<R>> removeEventById(T type, Long id) {
         Optional<EventMessage<R>> event = findEventById(type, id);
-        event.ifPresent(receivedEvents::remove);
+        event.ifPresent(e -> {
+            receivedEvents.remove(e);
+            verifiedEvents.add(e);
+        });
         return event;
+    }
+
+    public <R, T extends Event<R>> Optional<EventMessage<R>> findVerifiedEventById(T type, Long id) {
+        return verifiedEvents.stream().filter(em -> em.getType().equals(type.getEventName())).map(em -> (EventMessage<R>) em)
+                .filter(em -> id.equals(type.getIdExtractor().apply(em.getData()))).reduce((first, second) -> second);
     }
 
     public <R, T extends Event<R>> Optional<EventMessage<R>> findEventById(T type, Long id) {
         List<EventMessage<R>> events = findByType(type);
         return events.stream().filter(em -> type.getIdExtractor().apply(em.getData()).equals(id)).reduce((first, second) -> second);
+    }
+
+    public <R, T extends Event<R>> long countReceivedEventsById(T type, Long id) {
+        return findReceivedAndVerifiedByType(type).stream().filter(em -> id.equals(type.getIdExtractor().apply(em.getData()))).count();
+    }
+
+    public <R, T extends Event<R>> List<EventMessage<R>> findAllEventsById(T type, Long id) {
+        return findByType(type).stream().filter(em -> id.equals(type.getIdExtractor().apply(em.getData()))).collect(Collectors.toList());
+    }
+
+    // Received and already verified events of the type, for a step that needs the payload of an earlier event
+    public <R, T extends Event<R>> List<EventMessage<R>> findReceivedAndVerifiedByType(T type) {
+        return Stream.concat(receivedEvents.stream(), verifiedEvents.stream()).filter(em -> em.getType().equals(type.getEventName()))
+                .map(em -> (EventMessage<R>) em).collect(Collectors.toList());
     }
 
     public <R, T extends Event<R>> List<EventMessage<R>> findByType(T type) {
@@ -66,6 +94,10 @@ public class EventStore {
 
     public List<EventMessage<?>> getReceivedEvents() {
         return receivedEvents;
+    }
+
+    public List<BulkEventMessage> findBulkEvents(final Predicate<BulkEventMessage> filter) {
+        return receivedBulkEvents.stream().filter(filter).toList();
     }
 
     public void receive(byte[] message) throws Exception {
@@ -84,6 +116,7 @@ public class EventStore {
                 });
             }
             receivedEvents.addAll(bulkEvents);
+            receivedBulkEvents.add(new BulkEventMessage(businessDate, List.copyOf(bulkEvents)));
         } else {
             EventMessage<Object> msg = new EventMessage<>(type, businessDate, dataObject, idempotencyKey);
             if (log.isDebugEnabled()) {
@@ -121,5 +154,7 @@ public class EventStore {
 
     public void reset() {
         receivedEvents.clear();
+        verifiedEvents.clear();
+        receivedBulkEvents.clear();
     }
 }

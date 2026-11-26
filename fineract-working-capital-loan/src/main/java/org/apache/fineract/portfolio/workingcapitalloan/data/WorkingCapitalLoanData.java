@@ -27,6 +27,7 @@ import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
+import org.apache.fineract.infrastructure.codes.data.CodeValueData;
 import org.apache.fineract.infrastructure.core.data.StringEnumOptionData;
 import org.apache.fineract.infrastructure.core.domain.ExternalId;
 import org.apache.fineract.organisation.monetary.data.CurrencyData;
@@ -34,6 +35,7 @@ import org.apache.fineract.portfolio.client.data.ClientData;
 import org.apache.fineract.portfolio.delinquency.data.DelinquencyBucketData;
 import org.apache.fineract.portfolio.loanaccount.data.LoanApplicationTimelineData;
 import org.apache.fineract.portfolio.loanaccount.data.LoanStatusEnumData;
+import org.apache.fineract.portfolio.loanorigination.data.LoanOriginatorData;
 import org.apache.fineract.portfolio.workingcapitalloanbreach.data.WorkingCapitalBreachData;
 import org.apache.fineract.portfolio.workingcapitalloannearbreach.data.WorkingCapitalNearBreachData;
 import org.apache.fineract.portfolio.workingcapitalloanproduct.data.WorkingCapitalLoanProductData;
@@ -53,29 +55,44 @@ public class WorkingCapitalLoanData implements Serializable {
     private String accountNo;
     private ExternalId externalId;
     private ClientData client;
-    private Long officeId;
-    private String officeName;
+    private Long clientId;
+    private String clientAccountNo;
+    private String clientName;
+    private ExternalId clientExternalId;
+    private Long clientOfficeId;
+    private String clientOfficeName;
     private Long fundId;
     private String fundName;
     private WorkingCapitalLoanProductData product;
+    private Long loanProductId;
+    private String loanProductName;
+    private String loanProductDescription;
     private LoanStatusEnumData status;
-    private LocalDate submittedOnDate;
-    private LocalDate approvedOnDate;
-    private LocalDate rejectedOnDate;
     private BigDecimal proposedPrincipal;
     private BigDecimal approvedPrincipal;
+    private BigDecimal principal;
+    private BigDecimal netDisbursalAmount;
+    private StringEnumOptionData amortizationType;
+    private Integer npvDayCount;
+    private Integer loanProductCounter;
+    private List<WorkingCapitalLoanChargeData> charges;
 
     private CurrencyData currency;
-    private BigDecimal periodPaymentRate;
+    private BigDecimal paymentRate;
+    /**
+     * Currently effective period payment rate for TPV-strategy loans (rate in force on the business date). Null when
+     * the loan does not use TPV.
+     */
+    private BigDecimal effectivePaymentRate;
     private Integer repaymentEvery;
     private StringEnumOptionData repaymentFrequencyType;
-    private BigDecimal discount;
-    private BigDecimal discountProposed;
-    private BigDecimal discountApproved;
-    private Integer totalNoPayments;
+    private BigDecimal discountFee;
+    private BigDecimal proposedDiscountFee;
+    private BigDecimal approvedDiscountFee;
+    private Integer numberOfRepayments;
     private BigDecimal periodPaymentAmount;
-    private BigDecimal dailyEir;
     private BigDecimal calculatedAnnualEir;
+    private List<WorkingCapitalLoanPeriodPaymentRateChangeData> periodPaymentRateHistory;
     private DelinquencyBucketData delinquencyBucket;
     private WorkingCapitalBreachData breach;
     private WorkingCapitalNearBreachData nearBreach;
@@ -86,8 +103,29 @@ public class WorkingCapitalLoanData implements Serializable {
     private WorkingCapitalLoanBalanceData balance;
     private Integer delinquencyGraceDays;
     private StringEnumOptionData delinquencyStartType;
+    private Integer breachGraceDays;
+    private StringEnumOptionData breachStartType;
     private BigDecimal totalPaymentVolume;
-
-    private WorkingCapitalLoanCollectionData collectionData;
+    private BigDecimal annualEir;
+    private BigDecimal paymentAmount;
+    private StringEnumOptionData paymentAmountCalculationStrategy;
+    private LocalDate delinquencyStartDate;
+    // Only set for the first delinquency period, which is the only one the delinquency grace days shift.
+    private LocalDate delinquencyEffectiveStartDate;
+    private LocalDate breachStartDate;
+    // Only set for the first breach period, which is the only one the breach grace days shift.
+    private LocalDate breachEffectiveStartDate;
+    private WorkingCapitalLoanCollectionData delinquent;
+    private Boolean enableInstallmentLevelDelinquency;
     private WorkingCapitalLoanSummaryData summary;
+    private List<LoanOriginatorData> originators;
+    private Boolean fraud;
+    private Boolean chargedOff;
+    private LocalDate chargedOffOnDate;
+    private CodeValueData chargeOffReason;
+    // Write-off has no boolean flag: unlike charge-off (which keeps the loan ACTIVE), the write-off state is already
+    // carried by status == CLOSED_WRITTEN_OFF.
+    private LocalDate writtenOffOnDate;
+    private CodeValueData writeOffReason;
+    private LocalDate overpaidOnDate;
 }

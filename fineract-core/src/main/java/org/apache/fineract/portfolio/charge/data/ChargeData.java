@@ -18,6 +18,7 @@
  */
 package org.apache.fineract.portfolio.charge.data;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.io.Serializable;
 import java.math.BigDecimal;
 import java.time.MonthDay;
@@ -29,6 +30,7 @@ import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import org.apache.fineract.accounting.glaccount.data.GLAccountData;
 import org.apache.fineract.infrastructure.core.data.EnumOptionData;
+import org.apache.fineract.infrastructure.core.data.StringEnumOptionData;
 import org.apache.fineract.organisation.monetary.data.CurrencyData;
 import org.apache.fineract.portfolio.charge.domain.ChargeTimeType;
 import org.apache.fineract.portfolio.paymenttype.data.PaymentTypeData;
@@ -64,6 +66,7 @@ public final class ChargeData implements Comparable<ChargeData>, Serializable {
     private final EnumOptionData chargeAppliesTo;
     private final EnumOptionData chargeCalculationType;
     private final EnumOptionData chargePaymentMode;
+    @Schema(type = "string", example = "--03-04", description = "The recurring day the fee falls due, as an ISO-8601 month-day")
     private final MonthDay feeOnMonthDay;
     private final Integer feeInterval;
     private final BigDecimal minCap;
@@ -71,6 +74,10 @@ public final class ChargeData implements Comparable<ChargeData>, Serializable {
     private final EnumOptionData feeFrequency;
     private final GLAccountData incomeOrLiabilityAccount;
     private final TaxGroupData taxGroup;
+    private final StringEnumOptionData amortizationPeriodType;
+    private final Integer amortizationDays;
+    private final StringEnumOptionData amortizationCalculationType;
+    private final StringEnumOptionData amortizationIncomeType;
 
     // template attributes
     private final Collection<CurrencyData> currencyOptions;
@@ -97,6 +104,10 @@ public final class ChargeData implements Comparable<ChargeData>, Serializable {
     private final List<GLAccountData> expenseAccountOptions;
     private final List<GLAccountData> assetAccountOptions;
 
+    private final List<StringEnumOptionData> amortizationPeriodTypeOptions;
+    private final List<StringEnumOptionData> amortizationCalculationTypeOptions;
+    private final List<StringEnumOptionData> amortizationIncomeTypeOptions;
+
     public static ChargeData withTemplate(final ChargeData charge, final ChargeData template) {
         return charge.toBuilder().currencyOptions(template.getCurrencyOptions())
                 .chargeCalculationTypeOptions(template.getChargeCalculationTypeOptions())
@@ -114,7 +125,10 @@ public final class ChargeData implements Comparable<ChargeData>, Serializable {
                 .shareChargeCalculationTypeOptions(template.getShareChargeCalculationTypeOptions())
                 .shareChargeTimeTypeOptions(template.getShareChargeTimeTypeOptions())
                 .accountMappingForChargeConfig(template.getAccountMappingForChargeConfig())
-                .expenseAccountOptions(template.getExpenseAccountOptions()).assetAccountOptions(template.getAssetAccountOptions()).build();
+                .expenseAccountOptions(template.getExpenseAccountOptions()).assetAccountOptions(template.getAssetAccountOptions())
+                .amortizationPeriodTypeOptions(template.getAmortizationPeriodTypeOptions())
+                .amortizationCalculationTypeOptions(template.getAmortizationCalculationTypeOptions())
+                .amortizationIncomeTypeOptions(template.getAmortizationIncomeTypeOptions()).build();
     }
 
     @Override

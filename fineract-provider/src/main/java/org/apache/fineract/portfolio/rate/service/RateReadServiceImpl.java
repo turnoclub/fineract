@@ -32,11 +32,13 @@ import org.apache.fineract.portfolio.rate.exception.RateNotFoundException;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Bowpi GT Created by Jose on 19/07/2017.
  */
 @RequiredArgsConstructor
+@Transactional(readOnly = true)
 public class RateReadServiceImpl implements RateReadService {
 
     private final JdbcTemplate jdbcTemplate;
@@ -102,16 +104,16 @@ public class RateReadServiceImpl implements RateReadService {
 
     private static final class RateMapper implements RowMapper<RateData> {
 
-        public String rateSchema() {
+        private String rateSchema() {
             return " r.id as id, r.name as name, r.percentage as percentage, "
                     + "r.product_apply as productApply, r.active as active from m_rate r ";
         }
 
-        public String loanRateSchema() {
+        private String loanRateSchema() {
             return rateSchema() + " join m_loan_rate lr on lr.rate_id = r.id";
         }
 
-        public String productLoanRateSchema() {
+        private String productLoanRateSchema() {
             return rateSchema() + " join m_product_loan_rate lr on lr.rate_id = r.id";
         }
 

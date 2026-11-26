@@ -18,6 +18,11 @@
  */
 package org.apache.fineract.useradministration.exception;
 
-public class PasswordMustBeDifferentException extends RuntimeException {
-    // basic runtime exception
+import org.apache.fineract.infrastructure.core.exception.PlatformApiDataValidationException;
+
+public class PasswordMustBeDifferentException extends PlatformApiDataValidationException {
+
+    public PasswordMustBeDifferentException() {
+        super("error.msg.password.must.be.different", "The new password must be different from the current password", null);
+    }
 }

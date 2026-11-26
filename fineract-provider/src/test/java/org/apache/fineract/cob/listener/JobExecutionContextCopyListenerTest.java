@@ -29,9 +29,11 @@ import org.apache.commons.lang3.RandomStringUtils;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.batch.core.JobExecution;
-import org.springframework.batch.core.StepExecution;
-import org.springframework.batch.item.ExecutionContext;
+import org.springframework.batch.core.job.JobExecution;
+import org.springframework.batch.core.job.JobInstance;
+import org.springframework.batch.core.job.parameters.JobParameters;
+import org.springframework.batch.core.step.StepExecution;
+import org.springframework.batch.infrastructure.item.ExecutionContext;
 
 @ExtendWith(MockitoExtension.class)
 public class JobExecutionContextCopyListenerTest {
@@ -46,9 +48,9 @@ public class JobExecutionContextCopyListenerTest {
         Map<String, Object> jobExecutionContextMap = createRandomHashmap();
         jobExecutionContextMap.put("BusinessDate", "value");
         jobExecutionContextMap.put("IS_CATCH_UP", "value");
-        final JobExecution jobExecution = new JobExecution(1L);
+        final JobExecution jobExecution = new JobExecution(1L, new JobInstance(1L, "test"), new JobParameters());
         jobExecution.setExecutionContext(new ExecutionContext(jobExecutionContextMap));
-        final StepExecution stepExecution = new StepExecution("someStep", jobExecution);
+        final StepExecution stepExecution = new StepExecution(1L, "someStep", jobExecution);
 
         jobExecutionContextCopyListener.beforeStep(stepExecution);
 
@@ -68,9 +70,9 @@ public class JobExecutionContextCopyListenerTest {
         expectedStepExecutionContextMap.put("BusinessDate", "BusinessDate anotherValue");
         expectedStepExecutionContextMap.put("IS_CATCH_UP", "IS_CATCH_UP anotherValue");
 
-        final JobExecution jobExecution = new JobExecution(1L);
+        final JobExecution jobExecution = new JobExecution(1L, new JobInstance(1L, "test"), new JobParameters());
         jobExecution.setExecutionContext(new ExecutionContext(jobExecutionContextMap));
-        final StepExecution actualStepExecution = new StepExecution("someStep", jobExecution);
+        final StepExecution actualStepExecution = new StepExecution(1L, "someStep", jobExecution);
         actualStepExecution.setExecutionContext(new ExecutionContext(expectedStepExecutionContextMap));
 
         jobExecutionContextCopyListener.beforeStep(actualStepExecution);
@@ -91,7 +93,7 @@ public class JobExecutionContextCopyListenerTest {
         final Random random = new Random();
         final Map<String, Object> map = new HashMap<>();
         for (int i = 0; i < random.nextInt(50); i++) {
-            map.put(RandomStringUtils.randomAlphanumeric(5), RandomStringUtils.randomAlphanumeric(5));
+            map.put(RandomStringUtils.secure().nextAlphanumeric(5), RandomStringUtils.secure().nextAlphanumeric(5));
         }
 
         return map;

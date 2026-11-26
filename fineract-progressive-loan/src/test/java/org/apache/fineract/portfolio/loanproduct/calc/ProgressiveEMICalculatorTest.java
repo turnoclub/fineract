@@ -35,13 +35,16 @@ import org.apache.fineract.organisation.monetary.domain.MoneyHelper;
 import org.apache.fineract.portfolio.common.domain.DaysInMonthType;
 import org.apache.fineract.portfolio.common.domain.DaysInYearCustomStrategyType;
 import org.apache.fineract.portfolio.common.domain.DaysInYearType;
+import org.apache.fineract.portfolio.common.domain.MonthEndDueDateStrategy;
 import org.apache.fineract.portfolio.common.domain.PeriodFrequencyType;
 import org.apache.fineract.portfolio.loanaccount.domain.LoanRepaymentScheduleInstallment;
 import org.apache.fineract.portfolio.loanaccount.domain.reaging.LoanReAgeInterestHandlingType;
+import org.apache.fineract.portfolio.loanaccount.exception.LoanTransactionProcessingException;
 import org.apache.fineract.portfolio.loanaccount.loanschedule.domain.DefaultScheduledDateGenerator;
 import org.apache.fineract.portfolio.loanaccount.loanschedule.domain.LoanApplicationTerms;
 import org.apache.fineract.portfolio.loanaccount.loanschedule.domain.LoanScheduleModelRepaymentPeriod;
 import org.apache.fineract.portfolio.loanaccount.service.ProgressiveLoanInterestScheduleModelParserServiceGsonImpl;
+import org.apache.fineract.portfolio.loanproduct.calc.data.EmiAdjustment;
 import org.apache.fineract.portfolio.loanproduct.calc.data.EqualAmortizationValues;
 import org.apache.fineract.portfolio.loanproduct.calc.data.InterestPeriod;
 import org.apache.fineract.portfolio.loanproduct.calc.data.LoanReAgeParameterData;
@@ -49,9 +52,12 @@ import org.apache.fineract.portfolio.loanproduct.calc.data.OutstandingDetails;
 import org.apache.fineract.portfolio.loanproduct.calc.data.PeriodDueDetails;
 import org.apache.fineract.portfolio.loanproduct.calc.data.ProgressiveLoanInterestScheduleModel;
 import org.apache.fineract.portfolio.loanproduct.calc.data.RepaymentPeriod;
+import org.apache.fineract.portfolio.loanproduct.calc.data.RepaymentScheduleInstallmentData;
 import org.apache.fineract.portfolio.loanproduct.domain.ILoanConfigurationDetails;
 import org.apache.fineract.portfolio.loanproduct.domain.InterestCalculationPeriodMethod;
 import org.apache.fineract.portfolio.loanproduct.domain.InterestMethod;
+import org.apache.fineract.portfolio.loanproduct.domain.RecalculationFrequencyType;
+import org.jspecify.annotations.NonNull;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeAll;
@@ -63,7 +69,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.MockedStatic;
 import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.lang.NonNull;
 
 @Slf4j
 @ExtendWith(MockitoExtension.class)
@@ -71,8 +76,8 @@ class ProgressiveEMICalculatorTest {
 
     private static ProgressiveEMICalculator emiCalculator = new ProgressiveEMICalculator(new DefaultScheduledDateGenerator());
 
-    private static MockedStatic<ThreadLocalContextUtil> threadLocalContextUtil = Mockito.mockStatic(ThreadLocalContextUtil.class);
-    private static MockedStatic<MoneyHelper> moneyHelper = Mockito.mockStatic(MoneyHelper.class);
+    private static MockedStatic<ThreadLocalContextUtil> threadLocalContextUtil;
+    private static MockedStatic<MoneyHelper> moneyHelper;
     private static MathContext mc = new MathContext(12, RoundingMode.HALF_EVEN);
     private static ILoanConfigurationDetails loanProductRelatedDetail = Mockito.mock(ILoanConfigurationDetails.class);
 
@@ -94,6 +99,8 @@ class ProgressiveEMICalculatorTest {
         periods.add(createPeriod(6, startDate.plusMonths(5), startDate.plusMonths(6)));
 
         // When
+        threadLocalContextUtil = Mockito.mockStatic(ThreadLocalContextUtil.class);
+        moneyHelper = Mockito.mockStatic(MoneyHelper.class);
         moneyHelper.when(MoneyHelper::getRoundingMode).thenReturn(RoundingMode.HALF_EVEN);
         moneyHelper.when(MoneyHelper::getMathContext).thenReturn(new MathContext(12, RoundingMode.HALF_EVEN));
     }
@@ -114,6 +121,7 @@ class ProgressiveEMICalculatorTest {
         Mockito.when(loanProductRelatedDetail.isAllowPartialPeriodInterestCalculation()).thenReturn(true);
         Mockito.when(loanProductRelatedDetail.getGraceOnPrincipalPayment()).thenReturn(0);
         Mockito.when(loanProductRelatedDetail.getGraceOnInterestPayment()).thenReturn(0);
+        Mockito.when(loanProductRelatedDetail.isAllowFullTermForTranche()).thenReturn(false);
     }
 
     private BigDecimal getRateFactorsByMonth(final DaysInYearType daysInYearType, final DaysInMonthType daysInMonthType,
@@ -1107,6 +1115,129 @@ class ProgressiveEMICalculatorTest {
         checkPeriod(interestSchedule, 1, 0, 250.0, 0.0, 0.0, 250.0, 500.0);
         checkPeriod(interestSchedule, 2, 0, 250.0, 0.0, 0.0, 250.0, 250.0);
         checkPeriod(interestSchedule, 3, 0, 250.0, 0.0, 0.0, 250.0, 0.0);
+    }
+
+    /**
+     * With 30-day months every semi-monthly period counts as 15 days whatever its actual length (16 days in January, 13
+     * in February), so 24% a year gives the same 1% rate factor for each period and a regular annuity.
+     */
+    @Test
+    public void test_disbursedAmt1000_dayInYears360_daysInMonth30_repayEverySemiMonthly() {
+
+        final List<LoanScheduleModelRepaymentPeriod> expectedRepaymentPeriods = List.of(
+                periodData(LocalDate.of(2023, 1, 15), LocalDate.of(2023, 1, 31)),
+                periodData(LocalDate.of(2023, 1, 31), LocalDate.of(2023, 2, 15)),
+                periodData(LocalDate.of(2023, 2, 15), LocalDate.of(2023, 2, 28)),
+                periodData(LocalDate.of(2023, 2, 28), LocalDate.of(2023, 3, 15)));
+
+        final BigDecimal interestRate = BigDecimal.valueOf(24);
+        final Integer installmentAmountInMultiplesOf = null;
+
+        Mockito.when(loanProductRelatedDetail.getAnnualNominalInterestRate()).thenReturn(interestRate);
+        Mockito.when(loanProductRelatedDetail.getDaysInYearType()).thenReturn(DaysInYearType.DAYS_360.getValue());
+        Mockito.when(loanProductRelatedDetail.getDaysInMonthType()).thenReturn(DaysInMonthType.DAYS_30.getValue());
+        Mockito.when(loanProductRelatedDetail.getRepaymentPeriodFrequencyType()).thenReturn(PeriodFrequencyType.SEMI_MONTHLY);
+        Mockito.when(loanProductRelatedDetail.getFirstRepaymentDayOfMonth()).thenReturn(15);
+        Mockito.when(loanProductRelatedDetail.getSecondRepaymentDayOfMonth()).thenReturn(31);
+        Mockito.when(loanProductRelatedDetail.semiMonthlyDueDays()).thenCallRealMethod();
+        Mockito.when(loanProductRelatedDetail.getRepayEvery()).thenReturn(1);
+        Mockito.when(loanProductRelatedDetail.getCurrencyData()).thenReturn(currency);
+
+        final ProgressiveLoanInterestScheduleModel interestSchedule = emiCalculator.generatePeriodInterestScheduleModel(
+                expectedRepaymentPeriods, loanProductRelatedDetail, installmentAmountInMultiplesOf, mc);
+
+        final Money disbursedAmount = toMoney(1000.0);
+        emiCalculator.addDisbursement(interestSchedule, LocalDate.of(2023, 1, 15), disbursedAmount);
+
+        checkPeriod(interestSchedule, 0, 256.28, 10.0, 246.28, 753.72, false);
+        checkPeriod(interestSchedule, 1, 256.28, 7.54, 248.74, 504.98, false);
+        checkPeriod(interestSchedule, 2, 256.28, 5.05, 251.23, 253.75, false);
+        checkPeriod(interestSchedule, 3, 256.29, 2.54, 253.75, 0.0, false);
+    }
+
+    /**
+     * With interest calculated "same as repayment period" every semi-monthly period is charged 1/24 of the annual rate,
+     * and the EMI is derived from that same rate, as monthly (1/12) and weekly (1/52) do. Without it the EMI would take
+     * a 15/365 factor (0.986% instead of 1%) and rely on the EMI evening-out to make up the difference.
+     */
+    @Test
+    public void test_disbursedAmt1000_dayInYears365_daysInMonth30_sameAsRepaymentPeriod_repayEverySemiMonthly() {
+
+        final List<LoanScheduleModelRepaymentPeriod> expectedRepaymentPeriods = List.of(
+                periodData(LocalDate.of(2023, 1, 15), LocalDate.of(2023, 1, 31)),
+                periodData(LocalDate.of(2023, 1, 31), LocalDate.of(2023, 2, 15)),
+                periodData(LocalDate.of(2023, 2, 15), LocalDate.of(2023, 2, 28)),
+                periodData(LocalDate.of(2023, 2, 28), LocalDate.of(2023, 3, 15)));
+
+        final BigDecimal interestRate = BigDecimal.valueOf(24);
+        final Integer installmentAmountInMultiplesOf = null;
+
+        Mockito.when(loanProductRelatedDetail.getAnnualNominalInterestRate()).thenReturn(interestRate);
+        Mockito.when(loanProductRelatedDetail.getInterestCalculationPeriodMethod())
+                .thenReturn(InterestCalculationPeriodMethod.SAME_AS_REPAYMENT_PERIOD);
+        Mockito.when(loanProductRelatedDetail.getDaysInYearType()).thenReturn(DaysInYearType.DAYS_365.getValue());
+        Mockito.when(loanProductRelatedDetail.getDaysInMonthType()).thenReturn(DaysInMonthType.DAYS_30.getValue());
+        Mockito.when(loanProductRelatedDetail.getRepaymentPeriodFrequencyType()).thenReturn(PeriodFrequencyType.SEMI_MONTHLY);
+        Mockito.when(loanProductRelatedDetail.getFirstRepaymentDayOfMonth()).thenReturn(15);
+        Mockito.when(loanProductRelatedDetail.getSecondRepaymentDayOfMonth()).thenReturn(31);
+        Mockito.doCallRealMethod().when(loanProductRelatedDetail).semiMonthlyDueDays();
+        Mockito.when(loanProductRelatedDetail.getRepayEvery()).thenReturn(1);
+        Mockito.when(loanProductRelatedDetail.getCurrencyData()).thenReturn(currency);
+
+        final ProgressiveLoanInterestScheduleModel interestSchedule = emiCalculator.generatePeriodInterestScheduleModel(
+                expectedRepaymentPeriods, loanProductRelatedDetail, installmentAmountInMultiplesOf, mc);
+
+        final Money disbursedAmount = toMoney(1000.0);
+        emiCalculator.addDisbursement(interestSchedule, LocalDate.of(2023, 1, 15), disbursedAmount);
+
+        // The EMI rate factor of every period is the same 1% the interest is charged with. The first repayment period
+        // opens with the zero-length interest period of the disbursement day.
+        checkPeriod(interestSchedule, 0, 1, 256.28, 0.01, 10.0, 10.0, 246.28, 753.72);
+        checkPeriod(interestSchedule, 1, 0, 256.28, 0.01, 7.5372, 7.54, 248.74, 504.98);
+        checkPeriod(interestSchedule, 2, 0, 256.28, 0.01, 5.0498, 5.05, 251.23, 253.75);
+        checkPeriod(interestSchedule, 3, 0, 256.29, 0.01, 2.5375, 2.54, 253.75, 0.0);
+    }
+
+    /**
+     * With partial periods allowed, an interval is charged the share of the regular semi-monthly periods it covers.
+     * Disbursed on 15 January with due days 1 and 16, the first period is one day out of the fifteen between the 1st
+     * and the 16th, so it is charged 1/15 of 1/24 of the annual rate (0.67 on 1000 at 24%) instead of a full 10.00, and
+     * the EMI is derived from the same prorated factor. The regular periods keep the 1/24 rate.
+     */
+    @Test
+    public void test_disbursedAmt1000_sameAsRepaymentPeriod_partialPeriods_repayEverySemiMonthly_oneDayFirstPeriod() {
+
+        final List<LoanScheduleModelRepaymentPeriod> expectedRepaymentPeriods = List.of(
+                periodData(LocalDate.of(2023, 1, 15), LocalDate.of(2023, 1, 16)),
+                periodData(LocalDate.of(2023, 1, 16), LocalDate.of(2023, 2, 1)),
+                periodData(LocalDate.of(2023, 2, 1), LocalDate.of(2023, 2, 16)),
+                periodData(LocalDate.of(2023, 2, 16), LocalDate.of(2023, 3, 1)));
+
+        final BigDecimal interestRate = BigDecimal.valueOf(24);
+        final Integer installmentAmountInMultiplesOf = null;
+
+        Mockito.when(loanProductRelatedDetail.getAnnualNominalInterestRate()).thenReturn(interestRate);
+        Mockito.when(loanProductRelatedDetail.getInterestCalculationPeriodMethod())
+                .thenReturn(InterestCalculationPeriodMethod.SAME_AS_REPAYMENT_PERIOD);
+        Mockito.when(loanProductRelatedDetail.isAllowPartialPeriodInterestCalculation()).thenReturn(true);
+        Mockito.when(loanProductRelatedDetail.getDaysInYearType()).thenReturn(DaysInYearType.DAYS_365.getValue());
+        Mockito.when(loanProductRelatedDetail.getDaysInMonthType()).thenReturn(DaysInMonthType.DAYS_30.getValue());
+        Mockito.when(loanProductRelatedDetail.getRepaymentPeriodFrequencyType()).thenReturn(PeriodFrequencyType.SEMI_MONTHLY);
+        Mockito.when(loanProductRelatedDetail.getFirstRepaymentDayOfMonth()).thenReturn(1);
+        Mockito.when(loanProductRelatedDetail.getSecondRepaymentDayOfMonth()).thenReturn(16);
+        Mockito.doCallRealMethod().when(loanProductRelatedDetail).semiMonthlyDueDays();
+        Mockito.when(loanProductRelatedDetail.getRepayEvery()).thenReturn(1);
+        Mockito.when(loanProductRelatedDetail.getCurrencyData()).thenReturn(currency);
+
+        final ProgressiveLoanInterestScheduleModel interestSchedule = emiCalculator.generatePeriodInterestScheduleModel(
+                expectedRepaymentPeriods, loanProductRelatedDetail, installmentAmountInMultiplesOf, mc);
+
+        emiCalculator.addDisbursement(interestSchedule, LocalDate.of(2023, 1, 15), toMoney(1000.0));
+
+        checkPeriod(interestSchedule, 0, 253.91, 0.67, 253.24, 746.76, false);
+        checkPeriod(interestSchedule, 1, 253.91, 7.47, 246.44, 500.32, false);
+        checkPeriod(interestSchedule, 2, 253.91, 5.0, 248.91, 251.41, false);
+        checkPeriod(interestSchedule, 3, 253.92, 2.51, 251.41, 0.0, false);
     }
 
     @Test
@@ -4378,6 +4509,349 @@ class ProgressiveEMICalculatorTest {
     }
 
     @Nested
+    public class ReAgeWithInterestRecalculation {
+
+        private static final BigDecimal INTEREST_RATE = BigDecimal.valueOf(24);
+
+        /**
+         * 1000 disbursed on the first date, 4 monthly installments, 24% a year, 30/360, interest recalculation with
+         * daily rest and no repayment at all.
+         */
+        private ProgressiveLoanInterestScheduleModel generateSchedule(final LocalDate disbursementDate) {
+            final List<LoanScheduleModelRepaymentPeriod> expectedRepaymentPeriods = new ArrayList<>();
+            for (int i = 0; i < 4; i++) {
+                expectedRepaymentPeriods.add(periodData(disbursementDate.plusMonths(i), disbursementDate.plusMonths(i + 1)));
+            }
+
+            Mockito.when(loanProductRelatedDetail.getAnnualNominalInterestRate()).thenReturn(INTEREST_RATE);
+            Mockito.when(loanProductRelatedDetail.getDaysInYearType()).thenReturn(DaysInYearType.DAYS_360.getValue());
+            Mockito.when(loanProductRelatedDetail.getDaysInMonthType()).thenReturn(DaysInMonthType.DAYS_30.getValue());
+            Mockito.when(loanProductRelatedDetail.getRepaymentPeriodFrequencyType()).thenReturn(PeriodFrequencyType.MONTHS);
+            Mockito.when(loanProductRelatedDetail.getRepayEvery()).thenReturn(1);
+            Mockito.when(loanProductRelatedDetail.isInterestRecalculationEnabled()).thenReturn(true);
+            Mockito.when(loanProductRelatedDetail.getRestFrequencyType()).thenReturn(RecalculationFrequencyType.DAILY);
+
+            final ProgressiveLoanInterestScheduleModel interestSchedule = emiCalculator
+                    .generatePeriodInterestScheduleModel(expectedRepaymentPeriods, loanProductRelatedDetail, null, mc);
+            emiCalculator.addDisbursement(interestSchedule, disbursementDate, toMoney(1000.0));
+
+            checkPeriod(interestSchedule, 0, 262.62, 20.00, 242.62, 757.38, false);
+            checkPeriod(interestSchedule, 1, 262.62, 15.15, 247.47, 509.91, false);
+            checkPeriod(interestSchedule, 2, 262.62, 10.20, 252.42, 257.49, false);
+            checkPeriod(interestSchedule, 3, 262.64, 5.15, 257.49, 0.0, false);
+            return interestSchedule;
+        }
+
+        /**
+         * Same terms the transaction processor builds for a re-age with the default interest handling.
+         */
+        private LoanApplicationTerms reAgeTerms(final ProgressiveLoanInterestScheduleModel interestSchedule, final LocalDate firstDueDate,
+                final int numberOfInstallments) {
+            return reAgeTerms(interestSchedule, firstDueDate, numberOfInstallments, Money.zero(currency));
+        }
+
+        /**
+         * Same as above, for a re-age that also takes over principal the model does not hold.
+         */
+        private LoanApplicationTerms reAgeTerms(final ProgressiveLoanInterestScheduleModel interestSchedule, final LocalDate firstDueDate,
+                final int numberOfInstallments, final Money principalNotInModel) {
+            return new LoanApplicationTerms.Builder().currency(currency).repaymentsStartingFromDate(firstDueDate)
+                    .principal(interestSchedule.getTotalOutstandingPrincipal().plus(principalNotInModel))
+                    .loanTermFrequency(numberOfInstallments).loanTermPeriodFrequencyType(PeriodFrequencyType.MONTHS)
+                    .numberOfRepayments(numberOfInstallments).repaymentEvery(1).repaymentPeriodFrequencyType(PeriodFrequencyType.MONTHS)
+                    .interestRatePerPeriod(INTEREST_RATE).interestRatePeriodFrequencyType(PeriodFrequencyType.MONTHS)
+                    .annualNominalInterestRate(INTEREST_RATE).daysInMonthType(DaysInMonthType.DAYS_30)
+                    .daysInYearType(DaysInYearType.DAYS_360).inArrearsTolerance(Money.zero(currency, mc)).isDownPaymentEnabled(false)
+                    .downPaymentPercentage(BigDecimal.ZERO).seedDate(firstDueDate).interestRecognitionOnDisbursementDate(false)
+                    .daysInYearCustomStrategy(null).interestMethod(InterestMethod.DECLINING_BALANCE)
+                    .allowPartialPeriodInterestCalculation(true).monthEndDueDateStrategy(MonthEndDueDateStrategy.LAST_DAY_OF_MONTH).mc(mc)
+                    .build();
+        }
+
+        private void checkZeroedPeriod(final ProgressiveLoanInterestScheduleModel interestSchedule, final int repaymentIdx,
+                final LocalDate fromDate, final LocalDate dueDate) {
+            final RepaymentPeriod repaymentPeriod = interestSchedule.repaymentPeriods().get(repaymentIdx);
+            checkPeriodDates(repaymentPeriod, fromDate, dueDate);
+            Assertions.assertEquals(0.0, toDouble(repaymentPeriod.getEmi()));
+            Assertions.assertEquals(0.0, toDouble(repaymentPeriod.getDueInterest()));
+            Assertions.assertEquals(0.0, toDouble(repaymentPeriod.getDuePrincipal()));
+            Assertions.assertEquals(1000.0, toDouble(repaymentPeriod.getOutstandingLoanBalance()));
+        }
+
+        private void checkReAgedPeriod(final ProgressiveLoanInterestScheduleModel interestSchedule, final int repaymentIdx,
+                final LocalDate fromDate, final LocalDate dueDate, final double emi, final double interest, final double principal,
+                final double balance) {
+            final RepaymentPeriod repaymentPeriod = interestSchedule.repaymentPeriods().get(repaymentIdx);
+            checkPeriodDates(repaymentPeriod, fromDate, dueDate);
+            Assertions.assertEquals(emi, toDouble(repaymentPeriod.getEmi()));
+            Assertions.assertEquals(interest, toDouble(repaymentPeriod.getDueInterest()));
+            Assertions.assertEquals(principal, toDouble(repaymentPeriod.getDuePrincipal()));
+            Assertions.assertEquals(balance, toDouble(repaymentPeriod.getOutstandingLoanBalance()));
+        }
+
+        @Test
+        public void test_reAge_beforeMaturity_reAgedPeriodsStartFromFullOutstandingBalance() {
+            // Given: matures on 15 May 2023, re-aged on 20 March 2023 into 3 monthly installments from 15 April 2023
+            final ProgressiveLoanInterestScheduleModel interestSchedule = generateSchedule(LocalDate.of(2023, 1, 15));
+            final LocalDate transactionDate = LocalDate.of(2023, 3, 20);
+            final LocalDate firstDueDate = LocalDate.of(2023, 4, 15);
+            emiCalculator.recalculateModelOverdueAmountsTillDate(interestSchedule, transactionDate, false);
+
+            // When
+            emiCalculator.updateModelRepaymentPeriodsDuringReAge(interestSchedule, LocalDate.of(2023, 3, 15), firstDueDate, transactionDate,
+                    reAgeTerms(interestSchedule, firstDueDate, 3), notInModel(0.0, 0.0), mc);
+
+            // Then: the overdue interest (2 x 20.00) and the interest of the holder (15-20 March) move to the first
+            // re-aged period, the balance entering the re-aged periods is the full 1000
+            Assertions.assertEquals(6, interestSchedule.repaymentPeriods().size());
+            checkZeroedPeriod(interestSchedule, 0, LocalDate.of(2023, 1, 15), LocalDate.of(2023, 2, 15));
+            checkZeroedPeriod(interestSchedule, 1, LocalDate.of(2023, 2, 15), LocalDate.of(2023, 3, 15));
+            checkZeroedPeriod(interestSchedule, 2, LocalDate.of(2023, 3, 15), transactionDate);
+            Assertions.assertTrue(interestSchedule.repaymentPeriods().get(2).isReAgedEarlyRepaymentHolder());
+            checkReAgedPeriod(interestSchedule, 3, transactionDate, firstDueDate, 360.35, 60.00, 300.35, 699.65);
+            checkReAgedPeriod(interestSchedule, 4, firstDueDate, LocalDate.of(2023, 5, 15), 360.35, 13.99, 346.36, 353.29);
+            checkReAgedPeriod(interestSchedule, 5, LocalDate.of(2023, 5, 15), LocalDate.of(2023, 6, 15), 360.36, 7.07, 353.29, 0.0);
+        }
+
+        @Test
+        public void test_reAge_afterMaturity_reAgedPeriodsStartFromFullOutstandingBalance() {
+            // Given: matured on 15 January 2023, re-aged on 20 March 2023 into 3 monthly installments from 15 April
+            // 2023
+            final ProgressiveLoanInterestScheduleModel interestSchedule = generateSchedule(LocalDate.of(2022, 9, 15));
+            final LocalDate maturityDate = LocalDate.of(2023, 1, 15);
+            final LocalDate transactionDate = LocalDate.of(2023, 3, 20);
+            final LocalDate firstDueDate = LocalDate.of(2023, 4, 15);
+            emiCalculator.recalculateModelOverdueAmountsTillDate(interestSchedule, transactionDate, false);
+            // the overdue recalculation is clamped to the maturity date, the aggregated correction sits there
+            Assertions.assertEquals(maturityDate, interestSchedule.lastOverdueBalanceChange());
+
+            // When
+            emiCalculator.updateModelRepaymentPeriodsDuringReAge(interestSchedule, LocalDate.of(2023, 3, 15), firstDueDate, transactionDate,
+                    reAgeTerms(interestSchedule, firstDueDate, 3), notInModel(0.0, 0.0), mc);
+
+            // Then: no holder period exists after maturity, the first re-aged period runs from the maturity date and
+            // carries the overdue interest (4 x 20.00) plus its own (3 months on 1000), the rest amortise the full
+            // 1000 with an equal EMI
+            Assertions.assertEquals(7, interestSchedule.repaymentPeriods().size());
+            checkZeroedPeriod(interestSchedule, 0, LocalDate.of(2022, 9, 15), LocalDate.of(2022, 10, 15));
+            checkZeroedPeriod(interestSchedule, 1, LocalDate.of(2022, 10, 15), LocalDate.of(2022, 11, 15));
+            checkZeroedPeriod(interestSchedule, 2, LocalDate.of(2022, 11, 15), LocalDate.of(2022, 12, 15));
+            checkZeroedPeriod(interestSchedule, 3, LocalDate.of(2022, 12, 15), maturityDate);
+            Assertions.assertTrue(interestSchedule.repaymentPeriods().stream().noneMatch(RepaymentPeriod::isReAgedEarlyRepaymentHolder));
+            checkReAgedPeriod(interestSchedule, 4, maturityDate, firstDueDate, 387.55, 140.00, 247.55, 752.45);
+            checkReAgedPeriod(interestSchedule, 5, firstDueDate, LocalDate.of(2023, 5, 15), 387.55, 15.05, 372.50, 379.95);
+            checkReAgedPeriod(interestSchedule, 6, LocalDate.of(2023, 5, 15), LocalDate.of(2023, 6, 15), 387.55, 7.60, 379.95, 0.0);
+            Assertions.assertEquals(0.0, toDouble(interestSchedule.getLastRepaymentPeriod().getOutstandingLoanBalance()));
+        }
+
+        @Test
+        public void test_reAge_afterMaturity_principalNotInModelIsAmortizedByReAgedPeriods() {
+            // Given: the after maturity case above, with 100 principal outstanding on an additional installment only
+            // (a chargeback posted after maturity), which the model does not hold
+            final ProgressiveLoanInterestScheduleModel interestSchedule = generateSchedule(LocalDate.of(2022, 9, 15));
+            final LocalDate maturityDate = LocalDate.of(2023, 1, 15);
+            final LocalDate transactionDate = LocalDate.of(2023, 3, 20);
+            final LocalDate firstDueDate = LocalDate.of(2023, 4, 15);
+            emiCalculator.recalculateModelOverdueAmountsTillDate(interestSchedule, transactionDate, false);
+
+            // When
+            emiCalculator.updateModelRepaymentPeriodsDuringReAge(interestSchedule, LocalDate.of(2023, 3, 15), firstDueDate, transactionDate,
+                    reAgeTerms(interestSchedule, firstDueDate, 3), notInModel(100.0, 0.0), mc);
+
+            // Then: the closed periods are not touched, the re-aged periods amortize 1100 with an equal EMI and the
+            // first one carries the interest of the 100 from the re-age date on (2% a month for 26 days: 1.73) on top
+            // of the 140.00 of the case without it
+            Assertions.assertEquals(7, interestSchedule.repaymentPeriods().size());
+            checkZeroedPeriod(interestSchedule, 0, LocalDate.of(2022, 9, 15), LocalDate.of(2022, 10, 15));
+            checkZeroedPeriod(interestSchedule, 1, LocalDate.of(2022, 10, 15), LocalDate.of(2022, 11, 15));
+            checkZeroedPeriod(interestSchedule, 2, LocalDate.of(2022, 11, 15), LocalDate.of(2022, 12, 15));
+            checkZeroedPeriod(interestSchedule, 3, LocalDate.of(2022, 12, 15), maturityDate);
+            checkReAgedPeriod(interestSchedule, 4, maturityDate, firstDueDate, 422.13, 141.73, 280.40, 819.60);
+            checkReAgedPeriod(interestSchedule, 5, firstDueDate, LocalDate.of(2023, 5, 15), 422.13, 16.39, 405.74, 413.86);
+            checkReAgedPeriod(interestSchedule, 6, LocalDate.of(2023, 5, 15), LocalDate.of(2023, 6, 15), 422.14, 8.28, 413.86, 0.0);
+            Assertions.assertEquals(1100.0, toDouble(interestSchedule.repaymentPeriods().stream().skip(4)
+                    .map(RepaymentPeriod::getDuePrincipal).reduce(Money.zero(currency), Money::plus)));
+        }
+
+        /**
+         * Mirrors the integration case: 600 over 6 months at 9.99% (30/360, no partial period interest), 200 repaid
+         * early into the last installments, re-aged after maturity. The overdue principal stops bearing interest after
+         * maturity, so the first re-aged period carries the interest moved down from the closed periods.
+         */
+        private ProgressiveLoanInterestScheduleModel reAgeAfterMaturityWithLastInstallmentsRepaidEarly(final double principalNotInModel) {
+            return reAgeAfterMaturityWithLastInstallmentsRepaidEarly(principalNotInModel, 0.0);
+        }
+
+        private ProgressiveLoanInterestScheduleModel reAgeAfterMaturityWithLastInstallmentsRepaidEarly(final double principalNotInModel,
+                final double interestNotInModel) {
+            final LocalDate disbursementDate = LocalDate.of(2026, 4, 14);
+            final List<LoanScheduleModelRepaymentPeriod> expectedRepaymentPeriods = new ArrayList<>();
+            for (int i = 0; i < 6; i++) {
+                expectedRepaymentPeriods.add(periodData(disbursementDate.plusMonths(i), disbursementDate.plusMonths(i + 1)));
+            }
+            final BigDecimal interestRate = BigDecimal.valueOf(9.99);
+            Mockito.when(loanProductRelatedDetail.getAnnualNominalInterestRate()).thenReturn(interestRate);
+            Mockito.when(loanProductRelatedDetail.getDaysInYearType()).thenReturn(DaysInYearType.DAYS_360.getValue());
+            Mockito.when(loanProductRelatedDetail.getDaysInMonthType()).thenReturn(DaysInMonthType.DAYS_30.getValue());
+            Mockito.when(loanProductRelatedDetail.getRepaymentPeriodFrequencyType()).thenReturn(PeriodFrequencyType.MONTHS);
+            Mockito.when(loanProductRelatedDetail.getRepayEvery()).thenReturn(1);
+            Mockito.when(loanProductRelatedDetail.isInterestRecalculationEnabled()).thenReturn(true);
+            Mockito.when(loanProductRelatedDetail.getRestFrequencyType()).thenReturn(RecalculationFrequencyType.DAILY);
+            final ProgressiveLoanInterestScheduleModel interestSchedule = emiCalculator
+                    .generatePeriodInterestScheduleModel(expectedRepaymentPeriods, loanProductRelatedDetail, null, mc);
+            emiCalculator.addDisbursement(interestSchedule, disbursementDate, toMoney(600.0));
+
+            final LocalDate repaymentDate = LocalDate.of(2026, 4, 20);
+            final RepaymentPeriod lastPeriod = interestSchedule.repaymentPeriods().get(5);
+            final Money lastPeriodPrincipal = lastPeriod.getDuePrincipal();
+            emiCalculator.payPrincipal(interestSchedule, lastPeriod.getFromDate(), lastPeriod.getDueDate(), repaymentDate,
+                    lastPeriodPrincipal);
+            final RepaymentPeriod fifthPeriod = interestSchedule.repaymentPeriods().get(4);
+            emiCalculator.payPrincipal(interestSchedule, fifthPeriod.getFromDate(), fifthPeriod.getDueDate(), repaymentDate,
+                    toMoney(200.0).minus(lastPeriodPrincipal));
+
+            final LocalDate transactionDate = LocalDate.of(2026, 10, 22);
+            final LocalDate firstDueDate = LocalDate.of(2026, 11, 22);
+            emiCalculator.recalculateModelOverdueAmountsTillDate(interestSchedule, transactionDate, false);
+            final LoanApplicationTerms terms = new LoanApplicationTerms.Builder().currency(currency)
+                    .repaymentsStartingFromDate(firstDueDate).principal(interestSchedule.getTotalOutstandingPrincipal())
+                    .loanTermFrequency(3).loanTermPeriodFrequencyType(PeriodFrequencyType.MONTHS).numberOfRepayments(3).repaymentEvery(1)
+                    .repaymentPeriodFrequencyType(PeriodFrequencyType.MONTHS).interestRatePerPeriod(interestRate)
+                    .interestRatePeriodFrequencyType(PeriodFrequencyType.MONTHS).annualNominalInterestRate(interestRate)
+                    .daysInMonthType(DaysInMonthType.DAYS_30).daysInYearType(DaysInYearType.DAYS_360)
+                    .inArrearsTolerance(Money.zero(currency, mc)).isDownPaymentEnabled(false).downPaymentPercentage(BigDecimal.ZERO)
+                    .seedDate(firstDueDate).interestRecognitionOnDisbursementDate(false).daysInYearCustomStrategy(null)
+                    .interestMethod(InterestMethod.DECLINING_BALANCE).allowPartialPeriodInterestCalculation(false)
+                    .monthEndDueDateStrategy(MonthEndDueDateStrategy.LAST_DAY_OF_MONTH).mc(mc).build();
+            emiCalculator.updateModelRepaymentPeriodsDuringReAge(interestSchedule, transactionDate, firstDueDate, transactionDate, terms,
+                    notInModel(principalNotInModel, interestNotInModel), mc);
+            return interestSchedule;
+        }
+
+        @Test
+        public void test_reAge_afterMaturity_lastInstallmentsRepaidEarly_principalNotInModelIsAmortizedByReAgedPeriods() {
+            // Given / When: re-aged without and with 50 principal (a chargeback posted after maturity) that only an
+            // additional installment holds
+            final ProgressiveLoanInterestScheduleModel withoutIt = reAgeAfterMaturityWithLastInstallmentsRepaidEarly(0.0);
+            final ProgressiveLoanInterestScheduleModel interestSchedule = reAgeAfterMaturityWithLastInstallmentsRepaidEarly(50.0);
+
+            // Then: without it the re-aged periods amortize 400 and the first carries the moved down interest
+            checkReAgedPeriod(withoutIt, 6, LocalDate.of(2026, 10, 14), LocalDate.of(2026, 11, 22), 140.20, 20.60, 119.60, 0.0);
+            checkReAgedPeriod(withoutIt, 7, LocalDate.of(2026, 11, 22), LocalDate.of(2026, 12, 22), 140.20, 0.0, 140.20, 0.0);
+            checkReAgedPeriod(withoutIt, 8, LocalDate.of(2026, 12, 22), LocalDate.of(2027, 1, 22), 140.20, 0.0, 140.20, 0.0);
+            // with it they amortize 450 with an equal EMI, and the first one also carries the interest of the 50 from
+            // the re-age date on (31 of its 39 days: 0.42), the moved down interest is not lost
+            checkReAgedPeriod(interestSchedule, 6, LocalDate.of(2026, 10, 14), LocalDate.of(2026, 11, 22), 157.01, 21.02, 135.99, 0.0);
+            checkReAgedPeriod(interestSchedule, 7, LocalDate.of(2026, 11, 22), LocalDate.of(2026, 12, 22), 157.01, 0.0, 157.01, 0.0);
+            checkReAgedPeriod(interestSchedule, 8, LocalDate.of(2026, 12, 22), LocalDate.of(2027, 1, 22), 157.00, 0.0, 157.00, 0.0);
+            for (int i = 0; i < 6; i++) {
+                Assertions.assertEquals(toDouble(withoutIt.repaymentPeriods().get(i).getDuePrincipal()),
+                        toDouble(interestSchedule.repaymentPeriods().get(i).getDuePrincipal()));
+                Assertions.assertEquals(toDouble(withoutIt.repaymentPeriods().get(i).getDueInterest()),
+                        toDouble(interestSchedule.repaymentPeriods().get(i).getDueInterest()));
+            }
+        }
+
+        @Test
+        public void test_reAge_afterMaturity_interestNotInModelIsAmortizedByReAgedPeriods() {
+            // Given: the after maturity case above, with 5 interest outstanding on an additional installment only (the
+            // interest part of a chargeback posted after maturity), which the model does not hold
+            final ProgressiveLoanInterestScheduleModel interestSchedule = generateSchedule(LocalDate.of(2022, 9, 15));
+            final LocalDate maturityDate = LocalDate.of(2023, 1, 15);
+            final LocalDate transactionDate = LocalDate.of(2023, 3, 20);
+            final LocalDate firstDueDate = LocalDate.of(2023, 4, 15);
+            emiCalculator.recalculateModelOverdueAmountsTillDate(interestSchedule, transactionDate, false);
+
+            // When
+            emiCalculator.updateModelRepaymentPeriodsDuringReAge(interestSchedule, LocalDate.of(2023, 3, 15), firstDueDate, transactionDate,
+                    reAgeTerms(interestSchedule, firstDueDate, 3), notInModel(0.0, 5.0), mc);
+
+            // Then: the first re-aged period carries the 5 on top of the 140.00 of the case without it and the EMI is
+            // adjusted, so the re-aged periods still amortize the 1000
+            Assertions.assertEquals(7, interestSchedule.repaymentPeriods().size());
+            checkZeroedPeriod(interestSchedule, 3, LocalDate.of(2022, 12, 15), maturityDate);
+            checkReAgedPeriod(interestSchedule, 4, maturityDate, firstDueDate, 389.25, 145.00, 244.25, 755.75);
+            checkReAgedPeriod(interestSchedule, 5, firstDueDate, LocalDate.of(2023, 5, 15), 389.25, 15.12, 374.13, 381.62);
+            checkReAgedPeriod(interestSchedule, 6, LocalDate.of(2023, 5, 15), LocalDate.of(2023, 6, 15), 389.25, 7.63, 381.62, 0.0);
+            Assertions.assertEquals(1000.0, toDouble(interestSchedule.repaymentPeriods().stream().skip(4)
+                    .map(RepaymentPeriod::getDuePrincipal).reduce(Money.zero(currency), Money::plus)));
+        }
+
+        @Test
+        public void test_reAge_afterMaturity_lastInstallmentsRepaidEarly_principalAndInterestNotInModelAreAmortizedByReAgedPeriods() {
+            // Given / When: re-aged with 45 principal and 5 interest (a chargeback posted after maturity) that only an
+            // additional installment holds
+            final ProgressiveLoanInterestScheduleModel interestSchedule = reAgeAfterMaturityWithLastInstallmentsRepaidEarly(45.0, 5.0);
+
+            // Then: the re-aged periods amortize 445 with an equal EMI, the first one carries the 5 on top of the moved
+            // down interest (20.60) and the interest of the 45 from the re-age date on (0.38)
+            checkReAgedPeriod(interestSchedule, 6, LocalDate.of(2026, 10, 14), LocalDate.of(2026, 11, 22), 156.99, 25.98, 131.01, 0.0);
+            checkReAgedPeriod(interestSchedule, 7, LocalDate.of(2026, 11, 22), LocalDate.of(2026, 12, 22), 156.99, 0.0, 156.99, 0.0);
+            checkReAgedPeriod(interestSchedule, 8, LocalDate.of(2026, 12, 22), LocalDate.of(2027, 1, 22), 157.00, 0.0, 157.00, 0.0);
+            Assertions.assertEquals(445.0, toDouble(interestSchedule.repaymentPeriods().stream().skip(6)
+                    .map(RepaymentPeriod::getDuePrincipal).reduce(Money.zero(currency), Money::plus)));
+        }
+
+        /**
+         * Matured on 15 January 2023 and paid off on 10 March 2023, so the model holds no principal at all.
+         */
+        private ProgressiveLoanInterestScheduleModel generatePaidOffAfterMaturitySchedule() {
+            final ProgressiveLoanInterestScheduleModel interestSchedule = generateSchedule(LocalDate.of(2022, 9, 15));
+            final LocalDate payOffDate = LocalDate.of(2023, 3, 10);
+            emiCalculator.recalculateModelOverdueAmountsTillDate(interestSchedule, payOffDate, false);
+            for (final RepaymentPeriod rp : interestSchedule.repaymentPeriods()) {
+                final PeriodDueDetails due = emiCalculator.getDueAmounts(interestSchedule, rp.getFromDate(), rp.getDueDate(), payOffDate);
+                emiCalculator.payInterest(interestSchedule, rp.getFromDate(), rp.getDueDate(), payOffDate,
+                        due.getDueInterest().minus(rp.getPaidInterest()));
+                emiCalculator.payPrincipal(interestSchedule, rp.getFromDate(), rp.getDueDate(), payOffDate,
+                        due.getDuePrincipal().minus(rp.getPaidPrincipal()));
+            }
+            Assertions.assertEquals(0.0, toDouble(interestSchedule.getTotalOutstandingPrincipal()));
+            return interestSchedule;
+        }
+
+        @Test
+        public void test_reAge_afterMaturity_paidOffModel_interestNotInModelFallsDueOnFirstReAgedPeriod() {
+            // Given: paid off after maturity, then 5 interest outstanding on an additional installment only (the
+            // interest part of a chargeback posted after maturity), so the model holds nothing at all
+            final ProgressiveLoanInterestScheduleModel interestSchedule = generatePaidOffAfterMaturitySchedule();
+            final LocalDate maturityDate = LocalDate.of(2023, 1, 15);
+            final LocalDate transactionDate = LocalDate.of(2023, 3, 20);
+            final LocalDate firstDueDate = LocalDate.of(2023, 4, 15);
+            emiCalculator.recalculateModelOverdueAmountsTillDate(interestSchedule, transactionDate, false);
+
+            // When: with no principal at all the re-aged EMIs are zero and cannot amortize the interest
+            emiCalculator.updateModelRepaymentPeriodsDuringReAge(interestSchedule, LocalDate.of(2023, 3, 15), firstDueDate, transactionDate,
+                    reAgeTerms(interestSchedule, firstDueDate, 3), notInModel(0.0, 5.0), mc);
+
+            // Then: the 5 falls due on the first re-aged period
+            checkReAgedPeriod(interestSchedule, 4, maturityDate, firstDueDate, 0.0, 5.0, 0.0, 0.0);
+            checkReAgedPeriod(interestSchedule, 5, firstDueDate, LocalDate.of(2023, 5, 15), 0.0, 0.0, 0.0, 0.0);
+            checkReAgedPeriod(interestSchedule, 6, LocalDate.of(2023, 5, 15), LocalDate.of(2023, 6, 15), 0.0, 0.0, 0.0, 0.0);
+        }
+
+        @Test
+        public void test_reAge_afterMaturity_paidOffModel_principalNotInModelIsAmortizedByReAgedPeriods() {
+            // Given: paid off after maturity, then 10 principal outstanding on an additional installment only (part of
+            // a credit balance refund that the overpayment no longer covers), so the model holds no principal at all
+            final ProgressiveLoanInterestScheduleModel interestSchedule = generatePaidOffAfterMaturitySchedule();
+            final LocalDate maturityDate = LocalDate.of(2023, 1, 15);
+            final LocalDate transactionDate = LocalDate.of(2023, 3, 20);
+            final LocalDate firstDueDate = LocalDate.of(2023, 4, 15);
+            emiCalculator.recalculateModelOverdueAmountsTillDate(interestSchedule, transactionDate, false);
+
+            // When: with no principal in the model the re-aged periods are sized for the principal not in it
+            emiCalculator.updateModelRepaymentPeriodsDuringReAge(interestSchedule, LocalDate.of(2023, 3, 15), firstDueDate, transactionDate,
+                    reAgeTerms(interestSchedule, firstDueDate, 3, toMoney(10.0)), notInModel(10.0, 0.0), mc);
+
+            // Then: the re-aged periods amortize the 10 with interest from the re-age date on (2% a month for 26 days)
+            checkReAgedPeriod(interestSchedule, 4, maturityDate, firstDueDate, 3.46, 0.17, 3.29, 6.71);
+            checkReAgedPeriod(interestSchedule, 5, firstDueDate, LocalDate.of(2023, 5, 15), 3.46, 0.13, 3.33, 3.38);
+            checkReAgedPeriod(interestSchedule, 6, LocalDate.of(2023, 5, 15), LocalDate.of(2023, 6, 15), 3.45, 0.07, 3.38, 0.0);
+        }
+    }
+
+    @Nested
     public class ReAgeEqualAmortization {
 
         private ProgressiveLoanInterestScheduleModel generateSchedule() {
@@ -4439,7 +4913,7 @@ class ProgressiveEMICalculatorTest {
 
             // Update the existing model with re-aged periods
             emiCalculator.reAgeEqualAmortization(interestSchedule, transactionDate, reageParameter, Money.zero(currency),
-                    new EqualAmortizationValues(Money.zero(currency), 6, Money.zero(currency), Money.zero(currency)));
+                    new EqualAmortizationValues(Money.zero(currency), 6, Money.zero(currency), Money.zero(currency)), notInModel(0.0, 0.0));
 
             OutstandingDetails outstandingAmountsTillDateAfterReage = emiCalculator.getOutstandingAmountsTillDate(interestSchedule,
                     interestSchedule.getMaturityDate());
@@ -4474,7 +4948,7 @@ class ProgressiveEMICalculatorTest {
 
             // Update the existing model with re-aged periods
             emiCalculator.reAgeEqualAmortization(interestSchedule, transactionDate, reageParameter, Money.zero(currency),
-                    new EqualAmortizationValues(Money.zero(currency), 6, Money.zero(currency), Money.zero(currency)));
+                    new EqualAmortizationValues(Money.zero(currency), 6, Money.zero(currency), Money.zero(currency)), notInModel(0.0, 0.0));
 
             OutstandingDetails outstandingAmountsTillDateAfterReage = emiCalculator.getOutstandingAmountsTillDate(interestSchedule,
                     interestSchedule.getMaturityDate());
@@ -4509,7 +4983,7 @@ class ProgressiveEMICalculatorTest {
 
             // Update the existing model with re-aged periods
             emiCalculator.reAgeEqualAmortization(interestSchedule, transactionDate, reageParameter, Money.zero(currency),
-                    new EqualAmortizationValues(Money.zero(currency), 6, Money.zero(currency), Money.zero(currency)));
+                    new EqualAmortizationValues(Money.zero(currency), 6, Money.zero(currency), Money.zero(currency)), notInModel(0.0, 0.0));
 
             OutstandingDetails outstandingAmountsTillDateAfterReage = emiCalculator.getOutstandingAmountsTillDate(interestSchedule,
                     interestSchedule.getMaturityDate());
@@ -4568,7 +5042,7 @@ class ProgressiveEMICalculatorTest {
 
             // Update the existing model with re-aged periods
             emiCalculator.reAgeEqualAmortization(interestSchedule, transactionDate, reageParameter, Money.zero(currency),
-                    new EqualAmortizationValues(Money.zero(currency), 6, Money.zero(currency), Money.zero(currency)));
+                    new EqualAmortizationValues(Money.zero(currency), 6, Money.zero(currency), Money.zero(currency)), notInModel(0.0, 0.0));
 
             OutstandingDetails outstandingAmountsTillDateAfterReage = emiCalculator.getOutstandingAmountsTillDate(interestSchedule,
                     interestSchedule.getMaturityDate());
@@ -4652,7 +5126,7 @@ class ProgressiveEMICalculatorTest {
 
             // Update the existing model with re-aged periods
             emiCalculator.reAgeEqualAmortization(interestSchedule, transactionDate, reageParameter, Money.zero(currency),
-                    new EqualAmortizationValues(Money.zero(currency), 6, Money.zero(currency), Money.zero(currency)));
+                    new EqualAmortizationValues(Money.zero(currency), 6, Money.zero(currency), Money.zero(currency)), notInModel(0.0, 0.0));
 
             OutstandingDetails outstandingAmountsTillDateAfterReage = emiCalculator.getOutstandingAmountsTillDate(interestSchedule,
                     interestSchedule.getMaturityDate());
@@ -4711,7 +5185,7 @@ class ProgressiveEMICalculatorTest {
 
             // Update the existing model with re-aged periods
             emiCalculator.reAgeEqualAmortization(interestSchedule, transactionDate, reageParameter, Money.zero(currency),
-                    new EqualAmortizationValues(Money.zero(currency), 6, Money.zero(currency), Money.zero(currency)));
+                    new EqualAmortizationValues(Money.zero(currency), 6, Money.zero(currency), Money.zero(currency)), notInModel(0.0, 0.0));
 
             OutstandingDetails outstandingAmountsTillDateAfterReage = emiCalculator.getOutstandingAmountsTillDate(interestSchedule,
                     interestSchedule.getMaturityDate());
@@ -4771,7 +5245,7 @@ class ProgressiveEMICalculatorTest {
 
             // Update the existing model with re-aged periods
             emiCalculator.reAgeEqualAmortization(interestSchedule, transactionDate, reageParameter, Money.zero(currency),
-                    new EqualAmortizationValues(Money.zero(currency), 6, Money.zero(currency), Money.zero(currency)));
+                    new EqualAmortizationValues(Money.zero(currency), 6, Money.zero(currency), Money.zero(currency)), notInModel(0.0, 0.0));
 
             OutstandingDetails outstandingAmountsTillDateAfterReage = emiCalculator.getOutstandingAmountsTillDate(interestSchedule,
                     interestSchedule.getMaturityDate());
@@ -4854,7 +5328,7 @@ class ProgressiveEMICalculatorTest {
 
             // Update the existing model with re-aged periods
             emiCalculator.reAgeEqualAmortization(interestSchedule, transactionDate, reageParameter, Money.zero(currency),
-                    new EqualAmortizationValues(Money.zero(currency), 6, Money.zero(currency), Money.zero(currency)));
+                    new EqualAmortizationValues(Money.zero(currency), 6, Money.zero(currency), Money.zero(currency)), notInModel(0.0, 0.0));
 
             OutstandingDetails outstandingAmountsTillDateAfterReage = emiCalculator.getOutstandingAmountsTillDate(interestSchedule,
                     interestSchedule.getMaturityDate());
@@ -4937,7 +5411,7 @@ class ProgressiveEMICalculatorTest {
 
             // Update the existing model with re-aged periods
             emiCalculator.reAgeEqualAmortization(interestSchedule, transactionDate, reageParameter, Money.zero(currency),
-                    new EqualAmortizationValues(Money.zero(currency), 6, Money.zero(currency), Money.zero(currency)));
+                    new EqualAmortizationValues(Money.zero(currency), 6, Money.zero(currency), Money.zero(currency)), notInModel(0.0, 0.0));
 
             OutstandingDetails outstandingAmountsTillDateAfterReage = emiCalculator.getOutstandingAmountsTillDate(interestSchedule,
                     interestSchedule.getMaturityDate());
@@ -5010,7 +5484,7 @@ class ProgressiveEMICalculatorTest {
 
             // Update the existing model with re-aged periods
             emiCalculator.reAgeEqualAmortization(interestSchedule, transactionDate, reageParameter, Money.zero(currency),
-                    new EqualAmortizationValues(Money.zero(currency), 6, Money.zero(currency), Money.zero(currency)));
+                    new EqualAmortizationValues(Money.zero(currency), 6, Money.zero(currency), Money.zero(currency)), notInModel(0.0, 0.0));
 
             OutstandingDetails outstandingAmountsTillDateAfterReage = emiCalculator.getOutstandingAmountsTillDate(interestSchedule,
                     interestSchedule.getMaturityDate());
@@ -5024,6 +5498,106 @@ class ProgressiveEMICalculatorTest {
 
         @Test
         public void test_transactionAfterMaturityDate_EQUAL_EQUAL_AMORTIZATION_PAYABLE_INTEREST() {
+            final ProgressiveLoanInterestScheduleModel interestSchedule = generateScheduleWithLastInstallmentsRepaidEarly();
+
+            LocalDate transactionDate = LocalDate.of(2024, 7, 10);
+            LocalDate reAgingStartDate = LocalDate.of(2024, 7, 15);
+
+            OutstandingDetails outstandingAmountsTillDate = emiCalculator.getOutstandingAmountsTillDate(interestSchedule, transactionDate);
+
+            LoanReAgeParameterData reageParameter = LoanReAgeParameterData.of(PeriodFrequencyType.MONTHS, 1, reAgingStartDate, 6,
+                    LoanReAgeInterestHandlingType.EQUAL_AMORTIZATION_PAYABLE_INTEREST);
+
+            // Update the existing model with re-aged periods
+            emiCalculator.reAgeEqualAmortization(interestSchedule, transactionDate, reageParameter, Money.zero(currency),
+                    new EqualAmortizationValues(Money.zero(currency), 6, Money.zero(currency), Money.zero(currency)), notInModel(0.0, 0.0));
+
+            OutstandingDetails outstandingAmountsTillDateAfterReage = emiCalculator.getOutstandingAmountsTillDate(interestSchedule,
+                    interestSchedule.getMaturityDate());
+
+            Assertions.assertEquals(outstandingAmountsTillDate.getOutstandingInterest().getAmount(),
+                    outstandingAmountsTillDateAfterReage.getOutstandingInterest().getAmount());
+            Assertions.assertEquals(outstandingAmountsTillDate.getOutstandingPrincipal().getAmount(),
+                    outstandingAmountsTillDateAfterReage.getOutstandingPrincipal().getAmount());
+
+        }
+
+        @Test
+        public void test_transactionAfterMaturityDate_principalNotInModel_EQUAL_AMORTIZATION_PAYABLE_INTEREST() {
+            // Given: 10 principal outstanding on an additional installment only (a chargeback posted after maturity),
+            // which the model does not hold
+            final Money principalNotInModel = toMoney(10.0);
+
+            // When
+            final ProgressiveLoanInterestScheduleModel withoutIt = reAgeAfterMaturity(notInModel(0.0, 0.0));
+            final ProgressiveLoanInterestScheduleModel interestSchedule = reAgeAfterMaturity(
+                    new OutstandingDetails(principalNotInModel, Money.zero(currency)));
+
+            // Then: the closed periods and the interest are the same as without it, the 6 re-aged periods amortize
+            // the 10 on top of the principal of the model in equal parts
+            Assertions.assertEquals(withoutIt.repaymentPeriods().size(), interestSchedule.repaymentPeriods().size());
+            for (int i = 0; i < interestSchedule.repaymentPeriods().size(); i++) {
+                final RepaymentPeriod expected = withoutIt.repaymentPeriods().get(i);
+                final RepaymentPeriod actual = interestSchedule.repaymentPeriods().get(i);
+                Assertions.assertEquals(toDouble(expected.getDueInterest()), toDouble(actual.getDueInterest()));
+                if (actual.isReAged()) {
+                    Assertions.assertEquals(toDouble(expected.getDuePrincipal()) + 10.0 / 6, toDouble(actual.getDuePrincipal()), 0.02);
+                } else {
+                    Assertions.assertEquals(toDouble(expected.getDuePrincipal()), toDouble(actual.getDuePrincipal()));
+                }
+            }
+            Assertions.assertEquals(6, interestSchedule.repaymentPeriods().stream().filter(RepaymentPeriod::isReAged).count());
+            Assertions.assertEquals(toDouble(sumOfReAgedDuePrincipal(withoutIt)) + 10.0,
+                    toDouble(sumOfReAgedDuePrincipal(interestSchedule)), 0.001);
+            Assertions.assertEquals(0.0, toDouble(interestSchedule.getLastRepaymentPeriod().getOutstandingLoanBalance()));
+        }
+
+        private Money sumOfReAgedDuePrincipal(final ProgressiveLoanInterestScheduleModel interestSchedule) {
+            return interestSchedule.repaymentPeriods().stream().filter(RepaymentPeriod::isReAged).map(RepaymentPeriod::getDuePrincipal)
+                    .reduce(Money.zero(currency), Money::plus);
+        }
+
+        @Test
+        public void test_transactionAfterMaturityDate_interestNotInModel_EQUAL_AMORTIZATION_PAYABLE_INTEREST() {
+            // Given: 10 principal and 3 interest outstanding on an additional installment only (a chargeback posted
+            // after maturity), which the model does not hold
+
+            // When
+            final ProgressiveLoanInterestScheduleModel withoutIt = reAgeAfterMaturity(notInModel(10.0, 0.0));
+            final ProgressiveLoanInterestScheduleModel interestSchedule = reAgeAfterMaturity(notInModel(10.0, 3.0));
+
+            // Then: the principal is the same as without the interest, the 6 re-aged periods charge the 3 on top of
+            // the interest of the model in equal parts, as credited interest
+            Assertions.assertEquals(withoutIt.repaymentPeriods().size(), interestSchedule.repaymentPeriods().size());
+            for (int i = 0; i < interestSchedule.repaymentPeriods().size(); i++) {
+                final RepaymentPeriod expected = withoutIt.repaymentPeriods().get(i);
+                final RepaymentPeriod actual = interestSchedule.repaymentPeriods().get(i);
+                Assertions.assertEquals(toDouble(expected.getDuePrincipal()), toDouble(actual.getDuePrincipal()));
+                if (actual.isReAged()) {
+                    Assertions.assertEquals(toDouble(expected.getDueInterest()) + 0.5, toDouble(actual.getDueInterest()), 0.001);
+                    // credited, so it is not accrued again
+                    Assertions.assertEquals(0.5, toDouble(actual.getCreditedInterest()), 0.001);
+                } else {
+                    Assertions.assertEquals(toDouble(expected.getDueInterest()), toDouble(actual.getDueInterest()));
+                }
+            }
+            Assertions.assertEquals(0.0, toDouble(interestSchedule.getLastRepaymentPeriod().getOutstandingLoanBalance()));
+        }
+
+        private ProgressiveLoanInterestScheduleModel reAgeAfterMaturity(final OutstandingDetails amountsNotInModel) {
+            final ProgressiveLoanInterestScheduleModel interestSchedule = generateScheduleWithLastInstallmentsRepaidEarly();
+            final LoanReAgeParameterData reageParameter = LoanReAgeParameterData.of(PeriodFrequencyType.MONTHS, 1,
+                    LocalDate.of(2024, 7, 15), 6, LoanReAgeInterestHandlingType.EQUAL_AMORTIZATION_PAYABLE_INTEREST);
+            emiCalculator.reAgeEqualAmortization(interestSchedule, LocalDate.of(2024, 7, 10), reageParameter, Money.zero(currency),
+                    new EqualAmortizationValues(Money.zero(currency), 6, Money.zero(currency), Money.zero(currency)), amountsNotInModel);
+            return interestSchedule;
+        }
+
+        /**
+         * 100 disbursed over 6 months, the first EMI paid on its due date and 37.43 paid on the same day, allocated to
+         * the second installment and then to the last ones.
+         */
+        private ProgressiveLoanInterestScheduleModel generateScheduleWithLastInstallmentsRepaidEarly() {
             final List<LoanScheduleModelRepaymentPeriod> expectedRepaymentPeriods = new ArrayList<>();
 
             expectedRepaymentPeriods.add(periodData(LocalDate.of(2024, 1, 1), LocalDate.of(2024, 2, 1)));
@@ -5073,26 +5647,7 @@ class ProgressiveEMICalculatorTest {
             emiCalculator.payPrincipal(interestSchedule, LocalDate.of(2024, 5, 1), LocalDate.of(2024, 6, 1), LocalDate.of(2024, 2, 1),
                     Money.of(currency, BigDecimal.valueOf(2.57)));
 
-            LocalDate transactionDate = LocalDate.of(2024, 7, 10);
-            LocalDate reAgingStartDate = LocalDate.of(2024, 7, 15);
-
-            OutstandingDetails outstandingAmountsTillDate = emiCalculator.getOutstandingAmountsTillDate(interestSchedule, transactionDate);
-
-            LoanReAgeParameterData reageParameter = LoanReAgeParameterData.of(PeriodFrequencyType.MONTHS, 1, reAgingStartDate, 6,
-                    LoanReAgeInterestHandlingType.EQUAL_AMORTIZATION_PAYABLE_INTEREST);
-
-            // Update the existing model with re-aged periods
-            emiCalculator.reAgeEqualAmortization(interestSchedule, transactionDate, reageParameter, Money.zero(currency),
-                    new EqualAmortizationValues(Money.zero(currency), 6, Money.zero(currency), Money.zero(currency)));
-
-            OutstandingDetails outstandingAmountsTillDateAfterReage = emiCalculator.getOutstandingAmountsTillDate(interestSchedule,
-                    interestSchedule.getMaturityDate());
-
-            Assertions.assertEquals(outstandingAmountsTillDate.getOutstandingInterest().getAmount(),
-                    outstandingAmountsTillDateAfterReage.getOutstandingInterest().getAmount());
-            Assertions.assertEquals(outstandingAmountsTillDate.getOutstandingPrincipal().getAmount(),
-                    outstandingAmountsTillDateAfterReage.getOutstandingPrincipal().getAmount());
-
+            return interestSchedule;
         }
     }
 
@@ -5139,7 +5694,75 @@ class ProgressiveEMICalculatorTest {
         }
     }
 
+    /**
+     * The interest schedule model is generated without down payment and additional installments, so an installment of
+     * either kind can never be resolved to a repayment period. Reaching getDueAmounts with such an installment is a
+     * programming error and has to surface as a domain error naming the offending period, not as a bare
+     * NoSuchElementException escaping to the API as an internal server error.
+     */
+    @Test
+    public void test_getDueAmounts_periodStraddlingModelPeriodBoundary_throwsDomainException() {
+        final List<LoanScheduleModelRepaymentPeriod> expectedRepaymentPeriods = new ArrayList<>();
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2024, 1, 1), LocalDate.of(2024, 2, 1)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2024, 2, 1), LocalDate.of(2024, 3, 1)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2024, 3, 1), LocalDate.of(2024, 4, 1)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2024, 4, 1), LocalDate.of(2024, 5, 1)));
+
+        Mockito.when(loanProductRelatedDetail.getAnnualNominalInterestRate()).thenReturn(BigDecimal.valueOf(7.0));
+        Mockito.when(loanProductRelatedDetail.getDaysInYearType()).thenReturn(DaysInYearType.DAYS_360.getValue());
+        Mockito.when(loanProductRelatedDetail.getDaysInMonthType()).thenReturn(DaysInMonthType.DAYS_30.getValue());
+        Mockito.when(loanProductRelatedDetail.getRepaymentPeriodFrequencyType()).thenReturn(PeriodFrequencyType.MONTHS);
+        Mockito.when(loanProductRelatedDetail.getRepayEvery()).thenReturn(1);
+        Mockito.when(loanProductRelatedDetail.getCurrencyData()).thenReturn(currency);
+        Mockito.when(loanProductRelatedDetail.isAllowFullTermForTranche()).thenReturn(false);
+
+        threadLocalContextUtil.when(ThreadLocalContextUtil::getBusinessDate).thenReturn(LocalDate.of(2024, 4, 15));
+
+        final ProgressiveLoanInterestScheduleModel interestSchedule = emiCalculator
+                .generatePeriodInterestScheduleModel(expectedRepaymentPeriods, loanProductRelatedDetail, null, mc);
+        emiCalculator.addDisbursement(interestSchedule, LocalDate.of(2024, 1, 1), toMoney(100.0));
+
+        // An additional installment left over from an earlier maturity date spans 2024-02-15 to 2024-04-15. No model
+        // period starts on or before 2024-02-15 while also ending on or after 2024-04-15, so neither the exact match
+        // nor the encompassing-period fallback of findRepaymentPeriodByFromAndDueDate can resolve it.
+        final LocalDate periodFromDate = LocalDate.of(2024, 2, 15);
+        final LocalDate periodDueDate = LocalDate.of(2024, 4, 15);
+
+        final LoanTransactionProcessingException exception = Assertions.assertThrows(LoanTransactionProcessingException.class,
+                () -> emiCalculator.getDueAmounts(interestSchedule, periodFromDate, periodDueDate, periodDueDate));
+
+        Assertions.assertTrue(exception.getMessage().contains(periodFromDate.toString()), exception.getMessage());
+        Assertions.assertTrue(exception.getMessage().contains(periodDueDate.toString()), exception.getMessage());
+    }
+
+    /**
+     * Guards the invariant the payment allocation relies on: down payment and additional installments are filtered out
+     * of the interest schedule model, hence they have no repayment period to be paid against.
+     */
+    @Test
+    public void test_generateInstallmentInterestScheduleModel_excludesDownPaymentAndAdditionalInstallments() {
+        Mockito.when(loanProductRelatedDetail.getCurrencyData()).thenReturn(currency);
+
+        final LocalDate disbursementDate = LocalDate.of(2024, 1, 1);
+        final List<RepaymentScheduleInstallmentData> installments = List.of(
+                RepaymentScheduleInstallmentData.of(disbursementDate, disbursementDate, true, false, BigDecimal.ZERO, BigDecimal.ZERO),
+                RepaymentScheduleInstallmentData.of(disbursementDate, disbursementDate.plusMonths(1), false, false, BigDecimal.ZERO,
+                        BigDecimal.ZERO),
+                RepaymentScheduleInstallmentData.of(disbursementDate.plusMonths(1), disbursementDate.plusMonths(2), false, false,
+                        BigDecimal.ZERO, BigDecimal.ZERO),
+                RepaymentScheduleInstallmentData.of(disbursementDate.plusMonths(2), disbursementDate.plusMonths(2).plusDays(15), false,
+                        true, BigDecimal.ZERO, BigDecimal.ZERO));
+
+        final ProgressiveLoanInterestScheduleModel model = emiCalculator.generateInstallmentInterestScheduleModel(installments,
+                loanProductRelatedDetail, null, mc);
+
+        Assertions.assertEquals(2, model.repaymentPeriods().size());
+        Assertions.assertEquals(disbursementDate, model.repaymentPeriods().getFirst().getFromDate());
+        Assertions.assertEquals(disbursementDate.plusMonths(2), model.getMaturityDate());
+    }
+
     // utilities
+    @SuppressWarnings("DirectInvocationOnMock") // Each test keeps its schedule settings on this mock
     private List<LoanScheduleModelRepaymentPeriod> generateExpectedRepaymentPeriods(LocalDate disbursementDate) {
         return switch (loanProductRelatedDetail.getRepaymentPeriodFrequencyType()) {
             case MONTHS -> expectedRepaymentsMonthly(disbursementDate, loanProductRelatedDetail.getNumberOfRepayments(),
@@ -5228,6 +5851,20 @@ class ProgressiveEMICalculatorTest {
     }
 
     private static void checkPeriod(final ProgressiveLoanInterestScheduleModel interestScheduleModel, final int repaymentIdx,
+            final LocalDate fromDate, final LocalDate dueDate, final double emiValue, final double interestDueCumulated,
+            final double principalDue, final double remainingBalance, final boolean fullyRepaid) {
+        final RepaymentPeriod repaymentPeriod = interestScheduleModel.repaymentPeriods().get(repaymentIdx);
+
+        Assertions.assertEquals(fromDate, repaymentPeriod.getFromDate());
+        Assertions.assertEquals(dueDate, repaymentPeriod.getDueDate());
+        Assertions.assertEquals(emiValue, toDouble(repaymentPeriod.getEmi()));
+        Assertions.assertEquals(interestDueCumulated, toDouble(repaymentPeriod.getDueInterest()));
+        Assertions.assertEquals(principalDue, toDouble(repaymentPeriod.getDuePrincipal()));
+        Assertions.assertEquals(remainingBalance, toDouble(repaymentPeriod.getOutstandingLoanBalance()));
+        Assertions.assertEquals(fullyRepaid, repaymentPeriod.isFullyPaid());
+    }
+
+    private static void checkPeriod(final ProgressiveLoanInterestScheduleModel interestScheduleModel, final int repaymentIdx,
             final int interestIdx, final double emiValue, final double rateFactor, final double interestDue,
             final double interestDueCumulated, final double principalDue, final double remaingBalance) {
         Assertions.assertTrue(repaymentIdx < interestScheduleModel.repaymentPeriods().size(),
@@ -5259,6 +5896,13 @@ class ProgressiveEMICalculatorTest {
 
     private static Money toMoney(final double value) {
         return Money.of(currency, BigDecimal.valueOf(value));
+    }
+
+    /**
+     * Outstanding principal and interest that the model does not hold, for example a chargeback posted after maturity.
+     */
+    private static OutstandingDetails notInModel(final double principal, final double interest) {
+        return new OutstandingDetails(toMoney(principal), toMoney(interest));
     }
 
     private static void verifyAllPeriods(final ProgressiveLoanInterestScheduleModel expectedModel,
@@ -5311,6 +5955,594 @@ class ProgressiveEMICalculatorTest {
         checkPeriod(interestSchedule, 3, 25.37, 0.44, 24.93, 50.28, false);
         checkPeriod(interestSchedule, 4, 25.37, 0.29, 25.08, 25.20, false);
         checkPeriod(interestSchedule, 5, 25.35, 0.15, 25.20, 0.0, false);
+    }
+
+    /**
+     * Progressive declining-balance loan with N = 8 repayments and graceOnPrincipalPayment = N-2 = 6.
+     *
+     * <p>
+     * Installments 1..6 are interest-only and the principal is amortized across the final two installments (7 and 8).
+     * EMI equalization runs on those amortizing installments only, so the last two EMIs stay aligned.
+     */
+    @Test
+    public void test_principalGrace_nMinus2_deferralWorks() {
+        final List<LoanScheduleModelRepaymentPeriod> expectedRepaymentPeriods = new ArrayList<>();
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2024, 1, 1), LocalDate.of(2024, 2, 1)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2024, 2, 1), LocalDate.of(2024, 3, 1)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2024, 3, 1), LocalDate.of(2024, 4, 1)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2024, 4, 1), LocalDate.of(2024, 5, 1)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2024, 5, 1), LocalDate.of(2024, 6, 1)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2024, 6, 1), LocalDate.of(2024, 7, 1)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2024, 7, 1), LocalDate.of(2024, 8, 1)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2024, 8, 1), LocalDate.of(2024, 9, 1)));
+
+        Mockito.when(loanProductRelatedDetail.getAnnualNominalInterestRate()).thenReturn(BigDecimal.valueOf(30.0));
+        Mockito.when(loanProductRelatedDetail.getDaysInYearType()).thenReturn(DaysInYearType.DAYS_360.getValue());
+        Mockito.when(loanProductRelatedDetail.getDaysInMonthType()).thenReturn(DaysInMonthType.DAYS_30.getValue());
+        Mockito.when(loanProductRelatedDetail.getRepaymentPeriodFrequencyType()).thenReturn(PeriodFrequencyType.MONTHS);
+        Mockito.when(loanProductRelatedDetail.getRepayEvery()).thenReturn(1);
+        Mockito.when(loanProductRelatedDetail.getNumberOfRepayments()).thenReturn(8);
+        Mockito.when(loanProductRelatedDetail.getGraceOnPrincipalPayment()).thenReturn(6);
+        Mockito.when(loanProductRelatedDetail.getGraceOnInterestPayment()).thenReturn(0);
+
+        final ProgressiveLoanInterestScheduleModel interestSchedule = emiCalculator
+                .generatePeriodInterestScheduleModel(expectedRepaymentPeriods, loanProductRelatedDetail, null, mc);
+
+        emiCalculator.addDisbursement(interestSchedule, LocalDate.of(2024, 1, 1), toMoney(100.0));
+
+        // Installments 1..6 (index 0..5) are interest-only: 100 * 30% / 12 = 2.50 each, balance stays at 100.
+        for (int idx = 0; idx <= 5; idx++) {
+            checkPeriod(interestSchedule, idx, 2.5, 2.5, 0.0, 100.0, false);
+        }
+
+        // Principal is deferred out of the grace periods and repaid over the final two installments.
+        final List<RepaymentPeriod> repaymentPeriods = interestSchedule.repaymentPeriods();
+        Assertions.assertEquals(0.0, toDouble(repaymentPeriods.get(0).getDuePrincipal()));
+        Assertions.assertTrue(toDouble(repaymentPeriods.get(6).getDuePrincipal()) > 0.0,
+                "Installment 7 should carry principal when grace = N-2");
+        Assertions.assertTrue(toDouble(repaymentPeriods.get(7).getDuePrincipal()) > 0.0,
+                "Installment 8 should carry principal when grace = N-2");
+        final double totalPrincipal = repaymentPeriods.stream().mapToDouble(rp -> toDouble(rp.getDuePrincipal())).sum();
+        Assertions.assertEquals(100.0, totalPrincipal, 0.01, "All principal must be scheduled");
+
+        // Evening-out is given only the amortizing installments, so grace periods are not uncountable and do not
+        // move the gate. The last two EMIs are the pair that gets equalized.
+        final List<RepaymentPeriod> amortizingPeriods = repaymentPeriods.stream().filter(rp -> !rp.isPrincipalPaymentGrace()).toList();
+        final EmiAdjustment emiAdjustment = emiCalculator.getEmiAdjustment(amortizingPeriods);
+        Assertions.assertEquals(0, emiAdjustment.uncountablePeriods(),
+                "Grace periods are left out of the evening-out list, so they are not uncountable");
+        Assertions.assertEquals(2, amortizingPeriods.size(), "Grace = N-2 leaves two amortizing installments");
+        Assertions.assertEquals(toDouble(repaymentPeriods.get(6).getEmi()), toDouble(repaymentPeriods.get(7).getEmi()), 0.05,
+                "Last two EMIs should equalize when evening-out sees only the amortizing installments");
+    }
+
+    /**
+     * Progressive declining-balance loan with N = 8 repayments and graceOnPrincipalPayment = N-1 = 7 produces a balloon
+     * (bullet) schedule.
+     *
+     * <p>
+     * Installments 1..7 are interest-only (principal 0, balance stays at 100) and installment 8 carries the full
+     * principal.
+     */
+    @Test
+    public void test_principalGrace_nMinus1_shouldProduceBulletLoan() {
+        final List<LoanScheduleModelRepaymentPeriod> expectedRepaymentPeriods = new ArrayList<>();
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2024, 1, 1), LocalDate.of(2024, 2, 1)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2024, 2, 1), LocalDate.of(2024, 3, 1)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2024, 3, 1), LocalDate.of(2024, 4, 1)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2024, 4, 1), LocalDate.of(2024, 5, 1)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2024, 5, 1), LocalDate.of(2024, 6, 1)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2024, 6, 1), LocalDate.of(2024, 7, 1)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2024, 7, 1), LocalDate.of(2024, 8, 1)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2024, 8, 1), LocalDate.of(2024, 9, 1)));
+
+        Mockito.when(loanProductRelatedDetail.getAnnualNominalInterestRate()).thenReturn(BigDecimal.valueOf(30.0));
+        Mockito.when(loanProductRelatedDetail.getDaysInYearType()).thenReturn(DaysInYearType.DAYS_360.getValue());
+        Mockito.when(loanProductRelatedDetail.getDaysInMonthType()).thenReturn(DaysInMonthType.DAYS_30.getValue());
+        Mockito.when(loanProductRelatedDetail.getRepaymentPeriodFrequencyType()).thenReturn(PeriodFrequencyType.MONTHS);
+        Mockito.when(loanProductRelatedDetail.getRepayEvery()).thenReturn(1);
+        Mockito.when(loanProductRelatedDetail.getNumberOfRepayments()).thenReturn(8);
+        Mockito.when(loanProductRelatedDetail.getGraceOnPrincipalPayment()).thenReturn(7);
+        Mockito.when(loanProductRelatedDetail.getGraceOnInterestPayment()).thenReturn(0);
+
+        final ProgressiveLoanInterestScheduleModel interestSchedule = emiCalculator
+                .generatePeriodInterestScheduleModel(expectedRepaymentPeriods, loanProductRelatedDetail, null, mc);
+
+        emiCalculator.addDisbursement(interestSchedule, LocalDate.of(2024, 1, 1), toMoney(100.0));
+
+        // Installments 1..7 (index 0..6) must be interest-only: 100 * 30% / 12 = 2.50 each, balance stays at 100.
+        checkPeriod(interestSchedule, 0, 2.5, 2.5, 0.0, 100.0, false);
+        checkPeriod(interestSchedule, 1, 2.5, 2.5, 0.0, 100.0, false);
+        checkPeriod(interestSchedule, 2, 2.5, 2.5, 0.0, 100.0, false);
+        checkPeriod(interestSchedule, 3, 2.5, 2.5, 0.0, 100.0, false);
+        checkPeriod(interestSchedule, 4, 2.5, 2.5, 0.0, 100.0, false);
+        checkPeriod(interestSchedule, 5, 2.5, 2.5, 0.0, 100.0, false);
+        checkPeriod(interestSchedule, 6, 2.5, 2.5, 0.0, 100.0, false);
+
+        // Installment 8 (index 7) must carry the full principal as a single balloon payment.
+        checkPeriod(interestSchedule, 7, 102.5, 2.5, 100.0, 0.0, false);
+
+        // A lone amortizing period has nothing to equalize against, so the adjustment gate stays closed.
+        Assertions.assertFalse(emiCalculator.getEmiAdjustment(interestSchedule.repaymentPeriods()).shouldBeAdjusted(),
+                "Bullet schedules must not re-equalize the balloon back onto grace periods");
+    }
+
+    /**
+     * Generic guard for the grace = N-1 bullet boundary using a longer term (N = 12, graceOnPrincipalPayment = 11).
+     *
+     * <p>
+     * Installments 1..11 must be interest-only (100 * 30% / 12 = 2.50 each, balance stays at 100) and the final
+     * installment (12) must carry the full principal as a single balloon payment. This protects the boundary fix
+     * independently of the specific N = 8 reproduction.
+     */
+    @Test
+    public void test_principalGrace_nMinus1_longerTerm_shouldProduceBulletLoan() {
+        final List<LoanScheduleModelRepaymentPeriod> expectedRepaymentPeriods = new ArrayList<>();
+        LocalDate cursor = LocalDate.of(2024, 1, 1);
+        for (int i = 0; i < 12; i++) {
+            final LocalDate next = cursor.plusMonths(1);
+            expectedRepaymentPeriods.add(periodData(cursor, next));
+            cursor = next;
+        }
+
+        Mockito.when(loanProductRelatedDetail.getAnnualNominalInterestRate()).thenReturn(BigDecimal.valueOf(30.0));
+        Mockito.when(loanProductRelatedDetail.getDaysInYearType()).thenReturn(DaysInYearType.DAYS_360.getValue());
+        Mockito.when(loanProductRelatedDetail.getDaysInMonthType()).thenReturn(DaysInMonthType.DAYS_30.getValue());
+        Mockito.when(loanProductRelatedDetail.getRepaymentPeriodFrequencyType()).thenReturn(PeriodFrequencyType.MONTHS);
+        Mockito.when(loanProductRelatedDetail.getRepayEvery()).thenReturn(1);
+        Mockito.when(loanProductRelatedDetail.getNumberOfRepayments()).thenReturn(12);
+        Mockito.when(loanProductRelatedDetail.getGraceOnPrincipalPayment()).thenReturn(11);
+        Mockito.when(loanProductRelatedDetail.getGraceOnInterestPayment()).thenReturn(0);
+
+        final ProgressiveLoanInterestScheduleModel interestSchedule = emiCalculator
+                .generatePeriodInterestScheduleModel(expectedRepaymentPeriods, loanProductRelatedDetail, null, mc);
+
+        emiCalculator.addDisbursement(interestSchedule, LocalDate.of(2024, 1, 1), toMoney(100.0));
+
+        // Installments 1..11 (index 0..10) must be interest-only.
+        for (int idx = 0; idx <= 10; idx++) {
+            checkPeriod(interestSchedule, idx, 2.5, 2.5, 0.0, 100.0, false);
+        }
+
+        // Installment 12 (index 11) must carry the full principal as a single balloon payment.
+        checkPeriod(interestSchedule, 11, 102.5, 2.5, 100.0, 0.0, false);
+    }
+
+    /**
+     * An existing N-1 balloon must stay a balloon after a mid-grace interest-rate change. The related suffix (p6/p7/p8)
+     * is shorter than graceOnPrincipalPayment, so suffix-scoped marking would have flagged the balloon period itself.
+     */
+    @Test
+    public void test_principalGrace_nMinus1_interestRateChangeDuringGrace_staysBullet() {
+        final ProgressiveLoanInterestScheduleModel interestSchedule = generatePrincipalGraceBulletSchedule();
+
+        emiCalculator.changeInterestRate(interestSchedule, LocalDate.of(2024, 7, 1), BigDecimal.valueOf(24));
+
+        final List<RepaymentPeriod> repaymentPeriods = interestSchedule.repaymentPeriods();
+        for (int idx = 0; idx <= 6; idx++) {
+            Assertions.assertTrue(repaymentPeriods.get(idx).isPrincipalPaymentGrace(),
+                    "Period " + idx + " is in the loan grace window and must stay flagged");
+            Assertions.assertEquals(0.0, toDouble(repaymentPeriods.get(idx).getDuePrincipal()), 0.01,
+                    "Period " + idx + " must stay interest-only after the rate change");
+            Assertions.assertEquals(100.0, toDouble(repaymentPeriods.get(idx).getOutstandingLoanBalance()), 0.01);
+        }
+        Assertions.assertFalse(repaymentPeriods.get(7).isPrincipalPaymentGrace(),
+                "The balloon period must not be marked grace just because the suffix is shorter than the grace count");
+        Assertions.assertEquals(100.0, toDouble(repaymentPeriods.get(7).getDuePrincipal()), 0.01,
+                "The last installment must still carry the full principal");
+        Assertions.assertEquals(0.0, toDouble(repaymentPeriods.get(7).getOutstandingLoanBalance()), 0.01);
+
+        // Periods fully before the 30 June effective date keep the original 30% interest-only EMI.
+        checkPeriod(interestSchedule, 0, 2.5, 2.5, 0.0, 100.0, false);
+        checkPeriod(interestSchedule, 1, 2.5, 2.5, 0.0, 100.0, false);
+        checkPeriod(interestSchedule, 2, 2.5, 2.5, 0.0, 100.0, false);
+        checkPeriod(interestSchedule, 3, 2.5, 2.5, 0.0, 100.0, false);
+        checkPeriod(interestSchedule, 4, 2.5, 2.5, 0.0, 100.0, false);
+        // Periods fully after the change accrue at 24%: 100 * 0.24 / 12 = 2.00.
+        checkPeriod(interestSchedule, 6, 2.0, 2.0, 0.0, 100.0, false);
+        checkPeriod(interestSchedule, 7, 102.0, 2.0, 100.0, 0.0, false);
+
+        Assertions.assertFalse(emiCalculator.getEmiAdjustment(repaymentPeriods).shouldBeAdjusted(),
+                "A lone amortizing balloon period must not re-equalize onto grace periods");
+        final double totalPrincipal = repaymentPeriods.stream().mapToDouble(rp -> toDouble(rp.getDuePrincipal())).sum();
+        Assertions.assertEquals(100.0, totalPrincipal, 0.01, "All principal must still be scheduled");
+    }
+
+    /**
+     * Rate change whose related suffix is only the balloon installment (due 1 September). The last period must keep
+     * amortizing; it must not be re-marked interest-only from min(grace, suffixSize).
+     */
+    @Test
+    public void test_principalGrace_nMinus1_interestRateChangeOnBalloonPeriod_staysBullet() {
+        final ProgressiveLoanInterestScheduleModel interestSchedule = generatePrincipalGraceBulletSchedule();
+
+        emiCalculator.changeInterestRate(interestSchedule, LocalDate.of(2024, 9, 1), BigDecimal.valueOf(24));
+
+        final List<RepaymentPeriod> repaymentPeriods = interestSchedule.repaymentPeriods();
+        for (int idx = 0; idx <= 6; idx++) {
+            Assertions.assertTrue(repaymentPeriods.get(idx).isPrincipalPaymentGrace());
+            checkPeriod(interestSchedule, idx, 2.5, 2.5, 0.0, 100.0, false);
+        }
+        Assertions.assertFalse(repaymentPeriods.get(7).isPrincipalPaymentGrace(),
+                "The balloon period is outside the loan grace window and must keep amortizing");
+        Assertions.assertEquals(100.0, toDouble(repaymentPeriods.get(7).getDuePrincipal()), 0.01);
+        Assertions.assertEquals(0.0, toDouble(repaymentPeriods.get(7).getOutstandingLoanBalance()), 0.01);
+        Assertions.assertTrue(toDouble(repaymentPeriods.get(7).getDueInterest()) > 0.0);
+        Assertions.assertFalse(emiCalculator.getEmiAdjustment(repaymentPeriods).shouldBeAdjusted());
+        final double totalPrincipal = repaymentPeriods.stream().mapToDouble(rp -> toDouble(rp.getDuePrincipal())).sum();
+        Assertions.assertEquals(100.0, totalPrincipal, 0.01, "All principal must still be scheduled");
+    }
+
+    /**
+     * Mid-loan recalculation re-stamps principalPaymentGrace on the loan's grace window, not the related suffix. A
+     * later disbursement must keep periods 1..grace flagged and must not mark suffix periods as interest-only.
+     */
+    @Test
+    public void test_principalGrace_midLoanRecalc_marksLoanGraceWindowNotSuffix() {
+        final List<LoanScheduleModelRepaymentPeriod> expectedRepaymentPeriods = new ArrayList<>();
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2024, 1, 1), LocalDate.of(2024, 2, 1)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2024, 2, 1), LocalDate.of(2024, 3, 1)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2024, 3, 1), LocalDate.of(2024, 4, 1)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2024, 4, 1), LocalDate.of(2024, 5, 1)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2024, 5, 1), LocalDate.of(2024, 6, 1)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2024, 6, 1), LocalDate.of(2024, 7, 1)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2024, 7, 1), LocalDate.of(2024, 8, 1)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2024, 8, 1), LocalDate.of(2024, 9, 1)));
+
+        Mockito.when(loanProductRelatedDetail.getAnnualNominalInterestRate()).thenReturn(BigDecimal.valueOf(30.0));
+        Mockito.when(loanProductRelatedDetail.getDaysInYearType()).thenReturn(DaysInYearType.DAYS_360.getValue());
+        Mockito.when(loanProductRelatedDetail.getDaysInMonthType()).thenReturn(DaysInMonthType.DAYS_30.getValue());
+        Mockito.when(loanProductRelatedDetail.getRepaymentPeriodFrequencyType()).thenReturn(PeriodFrequencyType.MONTHS);
+        Mockito.when(loanProductRelatedDetail.getRepayEvery()).thenReturn(1);
+        Mockito.when(loanProductRelatedDetail.getNumberOfRepayments()).thenReturn(8);
+        Mockito.when(loanProductRelatedDetail.getGraceOnPrincipalPayment()).thenReturn(3);
+        Mockito.when(loanProductRelatedDetail.getGraceOnInterestPayment()).thenReturn(0);
+
+        final ProgressiveLoanInterestScheduleModel interestSchedule = emiCalculator
+                .generatePeriodInterestScheduleModel(expectedRepaymentPeriods, loanProductRelatedDetail, null, mc);
+
+        emiCalculator.addDisbursement(interestSchedule, LocalDate.of(2024, 1, 1), toMoney(100.0));
+
+        final List<RepaymentPeriod> afterFirst = interestSchedule.repaymentPeriods();
+        Assertions.assertTrue(afterFirst.get(0).isPrincipalPaymentGrace());
+        Assertions.assertTrue(afterFirst.get(1).isPrincipalPaymentGrace());
+        Assertions.assertTrue(afterFirst.get(2).isPrincipalPaymentGrace());
+        Assertions.assertFalse(afterFirst.get(3).isPrincipalPaymentGrace());
+
+        emiCalculator.addDisbursement(interestSchedule, LocalDate.of(2024, 4, 15), toMoney(50.0));
+
+        final List<RepaymentPeriod> afterSecond = interestSchedule.repaymentPeriods();
+        Assertions.assertTrue(afterSecond.get(0).isPrincipalPaymentGrace(),
+                "Period 0 is in the loan grace window and must stay flagged after a mid-loan recalc");
+        Assertions.assertTrue(afterSecond.get(1).isPrincipalPaymentGrace(),
+                "Period 1 is in the loan grace window and must stay flagged after a mid-loan recalc");
+        Assertions.assertTrue(afterSecond.get(2).isPrincipalPaymentGrace(),
+                "Period 2 is in the loan grace window and must stay flagged after a mid-loan recalc");
+        for (int idx = 3; idx <= 7; idx++) {
+            Assertions.assertFalse(afterSecond.get(idx).isPrincipalPaymentGrace(),
+                    "Period " + idx + " is outside the loan grace window and must not be marked from the suffix");
+            Assertions.assertTrue(toDouble(afterSecond.get(idx).getDuePrincipal()) > 0.0,
+                    "Period " + idx + " must keep amortizing after the second disbursement");
+        }
+    }
+
+    /**
+     * Recalculation whose related suffix is no longer than graceOnPrincipalPayment must not re-mark that suffix as
+     * interest-only. N=8, grace=3, rate change on 1 July 2024 yields suffix p6/p7/p8; those periods must stay equal
+     * installments and keep amortizing.
+     */
+    @Test
+    public void test_principalGrace_interestRateChangeOnSuffixInsideGraceCount_doesNotBalloonTail() {
+        final ProgressiveLoanInterestScheduleModel interestSchedule = generatePrincipalGraceScheduleForReAmortProbe();
+
+        emiCalculator.changeInterestRate(interestSchedule, LocalDate.of(2024, 7, 1), BigDecimal.valueOf(24));
+
+        final List<RepaymentPeriod> repaymentPeriods = interestSchedule.repaymentPeriods();
+        Assertions.assertTrue(repaymentPeriods.get(0).isPrincipalPaymentGrace());
+        Assertions.assertTrue(repaymentPeriods.get(1).isPrincipalPaymentGrace());
+        Assertions.assertTrue(repaymentPeriods.get(2).isPrincipalPaymentGrace());
+        for (int idx = 3; idx <= 7; idx++) {
+            Assertions.assertFalse(repaymentPeriods.get(idx).isPrincipalPaymentGrace(),
+                    "Period " + idx + " is outside the loan grace window and must keep amortizing");
+        }
+
+        final double p6Emi = toDouble(repaymentPeriods.get(5).getEmi());
+        Assertions.assertEquals(p6Emi, toDouble(repaymentPeriods.get(6).getEmi()), 0.05,
+                "p7 EMI must stay aligned with p6 after the rate change");
+        Assertions.assertEquals(p6Emi, toDouble(repaymentPeriods.get(7).getEmi()), 0.05,
+                "p8 EMI must stay aligned with p6 after the rate change");
+        Assertions.assertTrue(toDouble(repaymentPeriods.get(5).getDuePrincipal()) > 0.0, "p6 must keep amortizing principal");
+        Assertions.assertTrue(toDouble(repaymentPeriods.get(6).getDuePrincipal()) > 0.0, "p7 must keep amortizing principal");
+        Assertions.assertTrue(toDouble(repaymentPeriods.get(7).getDuePrincipal()) > 0.0, "p8 must keep amortizing principal");
+        final double totalPrincipal = repaymentPeriods.stream().mapToDouble(rp -> toDouble(rp.getDuePrincipal())).sum();
+        Assertions.assertEquals(100.0, totalPrincipal, 0.01, "All principal must still be scheduled");
+    }
+
+    /**
+     * Re-amortization overrides principal grace: flags are lifted and the remaining periods are equalized again.
+     */
+    @Test
+    public void test_principalGrace_reAmortization_liftsFlagAndEqualizesEmi() {
+        final ProgressiveLoanInterestScheduleModel interestSchedule = generatePrincipalGraceScheduleForReAmortProbe();
+        final List<RepaymentPeriod> before = interestSchedule.repaymentPeriods();
+        Assertions.assertTrue(before.get(0).isPrincipalPaymentGrace());
+        Assertions.assertTrue(before.get(1).isPrincipalPaymentGrace());
+        Assertions.assertTrue(before.get(2).isPrincipalPaymentGrace());
+
+        emiCalculator.updateModelRepaymentPeriodsDuringReAmortization(interestSchedule, LocalDate.of(2024, 2, 15));
+
+        assertPrincipalGraceLiftedAndFutureEmisEqualized(interestSchedule);
+    }
+
+    /**
+     * Equal-interest-split re-amortization also lifts principal grace so equalization is not skipped.
+     */
+    @Test
+    public void test_principalGrace_reAmortizationEqualInterestSplit_liftsFlagAndEqualizesEmi() {
+        final ProgressiveLoanInterestScheduleModel interestSchedule = generatePrincipalGraceScheduleForReAmortProbe();
+
+        emiCalculator.updateModelRepaymentPeriodsDuringReAmortizationWithEqualInterestSplit(interestSchedule, LocalDate.of(2024, 2, 15));
+
+        assertPrincipalGraceLiftedAndFutureEmisEqualized(interestSchedule);
+    }
+
+    /**
+     * After re-amortization puts principal onto a former grace period, a later mid-loan recalc must not restamp
+     * principalPaymentGrace on that period. The flag means interest-only, so it has to follow the money.
+     *
+     * <p>
+     * Probe: N=8, grace=3, disburse 100 on 1 January, re-amortize on 15 February, change the rate on 1 April. Period 2
+     * (due 1 March) sits before the rate-change slice, so the current engine flags it as grace while it still carries
+     * principal.
+     */
+    @Test
+    public void test_principalGrace_reAmortThenRateChange_flagFollowsZeroPrincipal() {
+        final ProgressiveLoanInterestScheduleModel interestSchedule = generatePrincipalGraceScheduleForReAmortProbe();
+
+        emiCalculator.updateModelRepaymentPeriodsDuringReAmortization(interestSchedule, LocalDate.of(2024, 2, 15));
+        emiCalculator.changeInterestRate(interestSchedule, LocalDate.of(2024, 4, 1), BigDecimal.valueOf(24));
+
+        final List<RepaymentPeriod> repaymentPeriods = interestSchedule.repaymentPeriods();
+        final RepaymentPeriod period2 = repaymentPeriods.get(1);
+        Assertions.assertTrue(toDouble(period2.getDuePrincipal()) > 0.0,
+                "Period 2 must still carry principal after re-amortization; this test does not rewrite old money");
+        Assertions.assertFalse(period2.isPrincipalPaymentGrace(),
+                "Period 2 has principal, so it must not keep the principalPaymentGrace sticker");
+
+        for (int idx = 0; idx < repaymentPeriods.size(); idx++) {
+            final RepaymentPeriod period = repaymentPeriods.get(idx);
+            if (period.isPrincipalPaymentGrace()) {
+                Assertions.assertEquals(0.0, toDouble(period.getDuePrincipal()), 0.01,
+                        "Period " + idx + " is flagged principalPaymentGrace but still has principal");
+            }
+        }
+        final double totalPrincipal = repaymentPeriods.stream().mapToDouble(rp -> toDouble(rp.getDuePrincipal())).sum();
+        Assertions.assertEquals(100.0, totalPrincipal, 0.01, "All principal must still be scheduled");
+    }
+
+    /**
+     * Re-amortization keeps precedence over principal grace through a later recalculation.
+     *
+     * <p>
+     * N=8, 30% p.a., graceOnPrincipalPayment=3, disburse 100 on 1 January 2024, re-amortize on 15 February 2024, then
+     * change the rate on 1 April 2024 (effective 31 March). The next recalculation must not stamp principalPaymentGrace
+     * back on from the product grace setting. Periods still open after the re-amortization date keep principal, and
+     * installments due after the rate change stay equal.
+     */
+    @Test
+    public void test_principalGrace_reAmortizationThenRateChange_keepsGraceLifted() {
+        final ProgressiveLoanInterestScheduleModel interestSchedule = generatePrincipalGraceScheduleForReAmortProbe();
+        final LocalDate reAmortizationDate = LocalDate.of(2024, 2, 15);
+
+        emiCalculator.updateModelRepaymentPeriodsDuringReAmortization(interestSchedule, reAmortizationDate);
+        assertPrincipalGraceLiftedAndFutureEmisEqualized(interestSchedule);
+
+        emiCalculator.changeInterestRate(interestSchedule, LocalDate.of(2024, 4, 1), BigDecimal.valueOf(24));
+
+        final List<RepaymentPeriod> repaymentPeriods = interestSchedule.repaymentPeriods();
+        final String schedule = formatPrincipalGraceProbe(repaymentPeriods);
+
+        Assertions.assertTrue(repaymentPeriods.stream().noneMatch(RepaymentPeriod::isPrincipalPaymentGrace),
+                "A later rate change must not restore principalPaymentGrace after re-amortization\n" + schedule);
+        for (final RepaymentPeriod period : repaymentPeriods) {
+            if (!period.getDueDate().isAfter(reAmortizationDate)) {
+                continue;
+            }
+            Assertions.assertTrue(toDouble(period.getDuePrincipal()) > 0.0,
+                    "Period due " + period.getDueDate() + " was re-amortized and must keep principal\n" + schedule);
+        }
+
+        final List<RepaymentPeriod> periodsAfterRateChange = repaymentPeriods.stream()
+                .filter(period -> period.getDueDate().isAfter(LocalDate.of(2024, 3, 31))).toList();
+        Assertions.assertFalse(periodsAfterRateChange.isEmpty(), schedule);
+        final double emiAfterRateChange = toDouble(periodsAfterRateChange.getFirst().getEmi());
+        for (final RepaymentPeriod period : periodsAfterRateChange) {
+            Assertions.assertEquals(emiAfterRateChange, toDouble(period.getEmi()), 0.05,
+                    "Installments due after the rate change should stay equal once grace stays lifted\n" + schedule);
+        }
+
+        final double totalPrincipal = repaymentPeriods.stream().mapToDouble(period -> toDouble(period.getDuePrincipal())).sum();
+        Assertions.assertEquals(100.0, totalPrincipal, 0.01, "All principal must still be scheduled\n" + schedule);
+    }
+
+    private ProgressiveLoanInterestScheduleModel generatePrincipalGraceBulletSchedule() {
+        final List<LoanScheduleModelRepaymentPeriod> expectedRepaymentPeriods = new ArrayList<>();
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2024, 1, 1), LocalDate.of(2024, 2, 1)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2024, 2, 1), LocalDate.of(2024, 3, 1)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2024, 3, 1), LocalDate.of(2024, 4, 1)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2024, 4, 1), LocalDate.of(2024, 5, 1)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2024, 5, 1), LocalDate.of(2024, 6, 1)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2024, 6, 1), LocalDate.of(2024, 7, 1)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2024, 7, 1), LocalDate.of(2024, 8, 1)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2024, 8, 1), LocalDate.of(2024, 9, 1)));
+
+        Mockito.when(loanProductRelatedDetail.getAnnualNominalInterestRate()).thenReturn(BigDecimal.valueOf(30.0));
+        Mockito.when(loanProductRelatedDetail.getDaysInYearType()).thenReturn(DaysInYearType.DAYS_360.getValue());
+        Mockito.when(loanProductRelatedDetail.getDaysInMonthType()).thenReturn(DaysInMonthType.DAYS_30.getValue());
+        Mockito.when(loanProductRelatedDetail.getRepaymentPeriodFrequencyType()).thenReturn(PeriodFrequencyType.MONTHS);
+        Mockito.when(loanProductRelatedDetail.getRepayEvery()).thenReturn(1);
+        Mockito.when(loanProductRelatedDetail.getNumberOfRepayments()).thenReturn(8);
+        Mockito.when(loanProductRelatedDetail.getGraceOnPrincipalPayment()).thenReturn(7);
+        Mockito.when(loanProductRelatedDetail.getGraceOnInterestPayment()).thenReturn(0);
+
+        final ProgressiveLoanInterestScheduleModel interestSchedule = emiCalculator
+                .generatePeriodInterestScheduleModel(expectedRepaymentPeriods, loanProductRelatedDetail, null, mc);
+        emiCalculator.addDisbursement(interestSchedule, LocalDate.of(2024, 1, 1), toMoney(100.0));
+        return interestSchedule;
+    }
+
+    private ProgressiveLoanInterestScheduleModel generatePrincipalGraceScheduleForReAmortProbe() {
+        final List<LoanScheduleModelRepaymentPeriod> expectedRepaymentPeriods = new ArrayList<>();
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2024, 1, 1), LocalDate.of(2024, 2, 1)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2024, 2, 1), LocalDate.of(2024, 3, 1)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2024, 3, 1), LocalDate.of(2024, 4, 1)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2024, 4, 1), LocalDate.of(2024, 5, 1)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2024, 5, 1), LocalDate.of(2024, 6, 1)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2024, 6, 1), LocalDate.of(2024, 7, 1)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2024, 7, 1), LocalDate.of(2024, 8, 1)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2024, 8, 1), LocalDate.of(2024, 9, 1)));
+
+        Mockito.when(loanProductRelatedDetail.getAnnualNominalInterestRate()).thenReturn(BigDecimal.valueOf(30.0));
+        Mockito.when(loanProductRelatedDetail.getDaysInYearType()).thenReturn(DaysInYearType.DAYS_360.getValue());
+        Mockito.when(loanProductRelatedDetail.getDaysInMonthType()).thenReturn(DaysInMonthType.DAYS_30.getValue());
+        Mockito.when(loanProductRelatedDetail.getRepaymentPeriodFrequencyType()).thenReturn(PeriodFrequencyType.MONTHS);
+        Mockito.when(loanProductRelatedDetail.getRepayEvery()).thenReturn(1);
+        Mockito.when(loanProductRelatedDetail.getNumberOfRepayments()).thenReturn(8);
+        Mockito.when(loanProductRelatedDetail.getGraceOnPrincipalPayment()).thenReturn(3);
+        Mockito.when(loanProductRelatedDetail.getGraceOnInterestPayment()).thenReturn(0);
+
+        final ProgressiveLoanInterestScheduleModel interestSchedule = emiCalculator
+                .generatePeriodInterestScheduleModel(expectedRepaymentPeriods, loanProductRelatedDetail, null, mc);
+        emiCalculator.addDisbursement(interestSchedule, LocalDate.of(2024, 1, 1), toMoney(100.0));
+        return interestSchedule;
+    }
+
+    private static void assertPrincipalGraceLiftedAndFutureEmisEqualized(final ProgressiveLoanInterestScheduleModel interestSchedule) {
+        final LocalDate transactionDate = LocalDate.of(2024, 2, 15);
+        final List<RepaymentPeriod> repaymentPeriods = interestSchedule.repaymentPeriods();
+        Assertions.assertTrue(repaymentPeriods.stream().noneMatch(RepaymentPeriod::isPrincipalPaymentGrace),
+                "Re-amortization must lift principalPaymentGrace so equalization is not skipped");
+
+        final List<RepaymentPeriod> futurePeriods = repaymentPeriods.stream().filter(rp -> rp.getDueDate().isAfter(transactionDate))
+                .toList();
+        Assertions.assertFalse(futurePeriods.isEmpty());
+        final double firstFutureEmi = toDouble(futurePeriods.getFirst().getEmi());
+        for (final RepaymentPeriod futurePeriod : futurePeriods) {
+            Assertions.assertEquals(firstFutureEmi, toDouble(futurePeriod.getEmi()), 0.05,
+                    "Re-amortized remaining periods should be equal-installment after grace flags are lifted");
+        }
+        final double totalPrincipal = repaymentPeriods.stream().mapToDouble(rp -> toDouble(rp.getDuePrincipal())).sum();
+        Assertions.assertEquals(100.0, totalPrincipal, 0.01, "All principal must still be scheduled");
+    }
+
+    private static String formatPrincipalGraceProbe(final List<RepaymentPeriod> repaymentPeriods) {
+        final StringBuilder schedule = new StringBuilder();
+        for (int idx = 0; idx < repaymentPeriods.size(); idx++) {
+            final RepaymentPeriod period = repaymentPeriods.get(idx);
+            if (idx > 0) {
+                schedule.append('\n');
+            }
+            schedule.append("p").append(idx + 1).append(" due=").append(period.getDueDate()).append(" grace=")
+                    .append(period.isPrincipalPaymentGrace()).append(" emi=").append(toDouble(period.getEmi())).append(" principal=")
+                    .append(toDouble(period.getDuePrincipal()));
+        }
+        return schedule.toString();
+    }
+
+    /**
+     * Overpaid installments must not make evening-out easier. Six of eight installments are overpaid, and the last two
+     * differ by 0.02. Half of all eight is 4, and 0.02 is too small to clear that bar. Half of the two that were not
+     * overpaid is 1, which the current gate uses, so this fails until overpayments stop lowering the bar.
+     */
+    @Test
+    public void test_shouldBeAdjusted_overpaidPeriodsDoNotLowerTheGate() {
+        final List<RepaymentPeriod> periods = generateEightPeriodSchedule(0).repaymentPeriods();
+        setLastTwoEmis(periods, 10.00, 10.02);
+        overpay(periods, 6);
+
+        final EmiAdjustment adjustment = emiCalculator.getEmiAdjustment(periods);
+        Assertions.assertEquals(6, adjustment.uncountablePeriods(), "Overpaid installments stay out of the split");
+        Assertions.assertFalse(adjustment.shouldBeAdjusted(),
+                "A 0.02 gap across eight installments must not be evened out just because six were overpaid");
+    }
+
+    /**
+     * Overpaid installments must not switch evening-out off. Seven of eight are overpaid, so the current gate sees one
+     * payment left and refuses to even out. The last two still differ by 1.00, which is enough when all eight count.
+     */
+    @Test
+    public void test_shouldBeAdjusted_manyOverpaymentsDoNotCloseTheGate() {
+        final List<RepaymentPeriod> periods = generateEightPeriodSchedule(0).repaymentPeriods();
+        setLastTwoEmis(periods, 10.00, 11.00);
+        overpay(periods, 7);
+
+        final EmiAdjustment adjustment = emiCalculator.getEmiAdjustment(periods);
+        Assertions.assertEquals(7, adjustment.uncountablePeriods(), "Overpaid installments stay out of the split");
+        Assertions.assertTrue(adjustment.shouldBeAdjusted(),
+                "Evening-out must still be considered when overpayments leave fewer than two payments");
+    }
+
+    /**
+     * Grace installments are left out of the evening-out list. They do not lower the gate and they are not uncountable.
+     * Six of eight are grace, and the last two differ by 0.02: too small across all eight, large enough across the two
+     * amortizing payments.
+     */
+    @Test
+    public void test_shouldBeAdjusted_gracePeriodsAreExcludedBeforeTheGate() {
+        final List<RepaymentPeriod> periods = generateEightPeriodSchedule(6).repaymentPeriods();
+        setLastTwoEmis(periods, 10.00, 10.02);
+
+        final EmiAdjustment fullSchedule = emiCalculator.getEmiAdjustment(periods);
+        Assertions.assertEquals(0, fullSchedule.uncountablePeriods(), "Grace installments are not uncountable");
+        Assertions.assertFalse(fullSchedule.shouldBeAdjusted(),
+                "A 0.02 gap across all eight installments must not be evened out; grace does not lower the gate");
+
+        final List<RepaymentPeriod> amortizingPeriods = periods.stream().filter(rp -> !rp.isPrincipalPaymentGrace()).toList();
+        final EmiAdjustment amortizing = emiCalculator.getEmiAdjustment(amortizingPeriods);
+        Assertions.assertEquals(0, amortizing.uncountablePeriods());
+        Assertions.assertTrue(amortizing.shouldBeAdjusted(),
+                "A 0.02 gap must still be evened out across the two payments that are not grace");
+    }
+
+    private ProgressiveLoanInterestScheduleModel generateEightPeriodSchedule(final int graceOnPrincipalPayment) {
+        final List<LoanScheduleModelRepaymentPeriod> expectedRepaymentPeriods = new ArrayList<>();
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2024, 1, 1), LocalDate.of(2024, 2, 1)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2024, 2, 1), LocalDate.of(2024, 3, 1)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2024, 3, 1), LocalDate.of(2024, 4, 1)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2024, 4, 1), LocalDate.of(2024, 5, 1)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2024, 5, 1), LocalDate.of(2024, 6, 1)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2024, 6, 1), LocalDate.of(2024, 7, 1)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2024, 7, 1), LocalDate.of(2024, 8, 1)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2024, 8, 1), LocalDate.of(2024, 9, 1)));
+
+        Mockito.when(loanProductRelatedDetail.getAnnualNominalInterestRate()).thenReturn(BigDecimal.valueOf(30.0));
+        Mockito.when(loanProductRelatedDetail.getDaysInYearType()).thenReturn(DaysInYearType.DAYS_360.getValue());
+        Mockito.when(loanProductRelatedDetail.getDaysInMonthType()).thenReturn(DaysInMonthType.DAYS_30.getValue());
+        Mockito.when(loanProductRelatedDetail.getRepaymentPeriodFrequencyType()).thenReturn(PeriodFrequencyType.MONTHS);
+        Mockito.when(loanProductRelatedDetail.getRepayEvery()).thenReturn(1);
+        Mockito.when(loanProductRelatedDetail.getNumberOfRepayments()).thenReturn(8);
+        Mockito.when(loanProductRelatedDetail.getGraceOnPrincipalPayment()).thenReturn(graceOnPrincipalPayment);
+        Mockito.when(loanProductRelatedDetail.getGraceOnInterestPayment()).thenReturn(0);
+
+        final ProgressiveLoanInterestScheduleModel interestSchedule = emiCalculator
+                .generatePeriodInterestScheduleModel(expectedRepaymentPeriods, loanProductRelatedDetail, null, mc);
+        emiCalculator.addDisbursement(interestSchedule, LocalDate.of(2024, 1, 1), toMoney(100.0));
+        return interestSchedule;
+    }
+
+    private static void setLastTwoEmis(final List<RepaymentPeriod> periods, final double penultimateEmi, final double lastEmi) {
+        final RepaymentPeriod penultimate = periods.get(periods.size() - 2);
+        final RepaymentPeriod last = periods.get(periods.size() - 1);
+        penultimate.setEmi(toMoney(penultimateEmi));
+        penultimate.setOriginalEmi(toMoney(penultimateEmi));
+        last.setEmi(toMoney(lastEmi));
+        last.setOriginalEmi(toMoney(lastEmi));
+    }
+
+    private static void overpay(final List<RepaymentPeriod> periods, final int count) {
+        for (int idx = 0; idx < count; idx++) {
+            periods.get(idx).addPaidPrincipalAmount(toMoney(20.0));
+        }
     }
 
     @Test
@@ -5411,4 +6643,624 @@ class ProgressiveEMICalculatorTest {
         Assertions.assertEquals(17.13, toDouble(interestSchedule.repaymentPeriods().get(6).getEmi()), 0.01,
                 "Period 6 EMI (single tranche)");
     }
+
+    /**
+     * Several installment snapshots can resolve to the same model period. Principal and interest must be accumulated
+     * independently, and amounts from different periods must remain separate. The model intentionally starts with zero
+     * EMI amounts: the nonzero paid amounts then trigger alignment without introducing disbursement and interest
+     * calculation into this focused regression test. This fixture does not represent a complete loan lifecycle.
+     */
+    @Test
+    public void test_shouldAccumulatePaidAmountsByPeriod() {
+        // Arrange: one calendar period per month.
+        RepaymentScheduleInstallmentData jan = installmentJan(BigDecimal.ZERO, BigDecimal.ZERO);
+        RepaymentScheduleInstallmentData feb = installmentFeb(BigDecimal.ZERO, BigDecimal.ZERO);
+        RepaymentScheduleInstallmentData mar = installmentMar(BigDecimal.ZERO, BigDecimal.ZERO);
+        List<RepaymentScheduleInstallmentData> installments = List.of(jan, feb, mar);
+
+        // January: paid principal = 85.00; paid interest = 8.00.
+        RepaymentScheduleInstallmentData jan1 = installmentJan(new BigDecimal("20.00"), new BigDecimal("2.00"));
+        RepaymentScheduleInstallmentData jan2 = installmentJan(new BigDecimal("50.00"), new BigDecimal("5.00"));
+        RepaymentScheduleInstallmentData jan3 = installmentJan(new BigDecimal("15.00"), new BigDecimal("1.00"));
+
+        // February: paid principal = 70.00; paid interest = 7.00.
+        RepaymentScheduleInstallmentData feb1 = installmentFeb(new BigDecimal("30.00"), new BigDecimal("3.00"));
+        RepaymentScheduleInstallmentData feb2 = installmentFeb(new BigDecimal("25.00"), new BigDecimal("2.50"));
+        RepaymentScheduleInstallmentData feb3 = installmentFeb(new BigDecimal("15.00"), new BigDecimal("1.50"));
+
+        // March: paid principal = 100.00; paid interest = 10.00.
+        RepaymentScheduleInstallmentData mar1 = installmentMar(new BigDecimal("45.00"), new BigDecimal("4.50"));
+        RepaymentScheduleInstallmentData mar2 = installmentMar(new BigDecimal("35.00"), new BigDecimal("3.50"));
+        RepaymentScheduleInstallmentData mar3 = installmentMar(new BigDecimal("20.00"), new BigDecimal("2.00"));
+        List<RepaymentScheduleInstallmentData> payments = List.of(jan1, jan2, jan3, feb1, feb2, feb3, mar1, mar2, mar3);
+
+        // Reuse the calculator, currency, math context and loan product configured by this test class.
+        ProgressiveLoanInterestScheduleModel scheduleModel = emiCalculator.generateInstallmentInterestScheduleModel(installments,
+                loanProductRelatedDetail, null, mc);
+        LocalDate tillDate = LocalDate.of(2000, 1, 3);
+
+        // Act
+        emiCalculator.alignPeriodsWithPaidAmounts(scheduleModel, payments, tillDate);
+
+        // Assert
+        List<RepaymentPeriod> repaymentPeriods = List.copyOf(scheduleModel.repaymentPeriods());
+        Assertions.assertEquals(3, repaymentPeriods.size(), "The calendar must contain one period per month");
+
+        // January
+        Assertions.assertEquals(0, new BigDecimal("85.00").compareTo(repaymentPeriods.get(0).getPaidPrincipal().getAmount()),
+                "January paid principal");
+        Assertions.assertEquals(0, new BigDecimal("8.00").compareTo(repaymentPeriods.get(0).getPaidInterest().getAmount()),
+                "January paid interest");
+        // February
+        Assertions.assertEquals(0, new BigDecimal("70.00").compareTo(repaymentPeriods.get(1).getPaidPrincipal().getAmount()),
+                "February paid principal");
+        Assertions.assertEquals(0, new BigDecimal("7.00").compareTo(repaymentPeriods.get(1).getPaidInterest().getAmount()),
+                "February paid interest");
+        // March
+        Assertions.assertEquals(0, new BigDecimal("100.00").compareTo(repaymentPeriods.get(2).getPaidPrincipal().getAmount()),
+                "March paid principal");
+        Assertions.assertEquals(0, new BigDecimal("10.00").compareTo(repaymentPeriods.get(2).getPaidInterest().getAmount()),
+                "March paid interest");
+    }
+
+    private static RepaymentScheduleInstallmentData installmentJan(BigDecimal principal, BigDecimal interest) {
+        return RepaymentScheduleInstallmentData.of(LocalDate.of(2000, 1, 1), LocalDate.of(2000, 2, 1), false, false, principal, interest);
+    }
+
+    private static RepaymentScheduleInstallmentData installmentFeb(BigDecimal principal, BigDecimal interest) {
+        return RepaymentScheduleInstallmentData.of(LocalDate.of(2000, 2, 1), LocalDate.of(2000, 3, 1), false, false, principal, interest);
+    }
+
+    private static RepaymentScheduleInstallmentData installmentMar(BigDecimal principal, BigDecimal interest) {
+        return RepaymentScheduleInstallmentData.of(LocalDate.of(2000, 3, 1), LocalDate.of(2000, 4, 1), false, false, principal, interest);
+    }
+
+    @Test
+    public void test_disbursementAfterLastPeriodFullyPaid_zeroInterest_keepsPeriodsAbovePaidAmounts() {
+        final List<LoanScheduleModelRepaymentPeriod> expectedRepaymentPeriods = new ArrayList<>();
+        final LocalDate firstFromDate = LocalDate.of(2025, 11, 5);
+        final LocalDate firstDueDate = LocalDate.of(2025, 11, 21);
+        final LocalDate secondDueDate = LocalDate.of(2025, 12, 7);
+        final LocalDate thirdDueDate = LocalDate.of(2025, 12, 23);
+        expectedRepaymentPeriods.add(periodData(firstFromDate, firstDueDate));
+        expectedRepaymentPeriods.add(periodData(firstDueDate, secondDueDate));
+        expectedRepaymentPeriods.add(periodData(secondDueDate, thirdDueDate));
+
+        Mockito.when(loanProductRelatedDetail.getAnnualNominalInterestRate()).thenReturn(BigDecimal.ZERO);
+        Mockito.when(loanProductRelatedDetail.getDaysInYearType()).thenReturn(DaysInYearType.DAYS_360.getValue());
+        Mockito.when(loanProductRelatedDetail.getDaysInMonthType()).thenReturn(DaysInMonthType.DAYS_30.getValue());
+        Mockito.when(loanProductRelatedDetail.getRepaymentPeriodFrequencyType()).thenReturn(PeriodFrequencyType.DAYS);
+        Mockito.when(loanProductRelatedDetail.getRepayEvery()).thenReturn(16);
+
+        final ProgressiveLoanInterestScheduleModel interestSchedule = emiCalculator
+                .generatePeriodInterestScheduleModel(expectedRepaymentPeriods, loanProductRelatedDetail, null, mc);
+
+        // Two tranches, disbursed on the same day, leave 70.15 to amortize: 23.38 / 23.38 / 23.39
+        emiCalculator.addDisbursement(interestSchedule, firstFromDate, toMoney(70.15));
+
+        Assertions.assertEquals(23.38, toDouble(interestSchedule.repaymentPeriods().get(0).getEmi()), 0.001);
+        Assertions.assertEquals(23.38, toDouble(interestSchedule.repaymentPeriods().get(1).getEmi()), 0.001);
+        Assertions.assertEquals(23.39, toDouble(interestSchedule.repaymentPeriods().get(2).getEmi()), 0.001);
+
+        // A refund allocated to the last installment pays it in full and part of the previous one. Loans without
+        // interest recalculation report their payments only on the installments, so this is all the model can know.
+        final List<RepaymentScheduleInstallmentData> installments = List.of(//
+                RepaymentScheduleInstallmentData.of(firstFromDate, firstDueDate, false, false, BigDecimal.ZERO, BigDecimal.ZERO), //
+                RepaymentScheduleInstallmentData.of(firstDueDate, secondDueDate, false, false, BigDecimal.valueOf(9.52), BigDecimal.ZERO), //
+                RepaymentScheduleInstallmentData.of(secondDueDate, thirdDueDate, false, false, BigDecimal.valueOf(23.39), BigDecimal.ZERO));
+
+        // Nothing is out of line yet, so the model has to be left untouched
+        emiCalculator.alignPeriodsWithPaidAmounts(interestSchedule, installments, firstFromDate);
+        Assertions.assertEquals(0.0, toDouble(interestSchedule.repaymentPeriods().get(2).getPaidPrincipal()), 0.001,
+                "An aligning which corrects nothing must not take over the paid amounts");
+        Assertions.assertEquals(23.38, toDouble(interestSchedule.repaymentPeriods().get(0).getEmi()), 0.001,
+                "An aligning which corrects nothing must not change the EMI amounts");
+        Assertions.assertEquals(23.38, toDouble(interestSchedule.repaymentPeriods().get(1).getEmi()), 0.001,
+                "An aligning which corrects nothing must not change the EMI amounts");
+        Assertions.assertEquals(23.39, toDouble(interestSchedule.repaymentPeriods().get(2).getEmi()), 0.001,
+                "An aligning which corrects nothing must not change the EMI amounts");
+
+        // Amortizing 70.16 over 3 periods rounds the EMI up to 23.39, so a cent has to be taken off somewhere. It must
+        // not be taken off the last period, which has 23.39 paid on it already.
+        final LocalDate secondDisbursementDate = LocalDate.of(2025, 11, 10);
+        emiCalculator.addDisbursement(interestSchedule, secondDisbursementDate, toMoney(0.01));
+        emiCalculator.alignPeriodsWithPaidAmounts(interestSchedule, installments, secondDisbursementDate);
+
+        // The EMI is the amount which ends up on the installment, so that is what must not fall below the paid amount.
+        // getDuePrincipal() would not show a violation, it is floored at the paid principal by definition.
+        for (RepaymentPeriod repaymentPeriod : interestSchedule.repaymentPeriods()) {
+            Assertions.assertTrue(!repaymentPeriod.getEmi().isLessThan(repaymentPeriod.getTotalPaidAmount()),
+                    "Period %s has a smaller EMI (%s) than what has been paid on it (%s)".formatted(repaymentPeriod.getDueDate(),
+                            repaymentPeriod.getEmi(), repaymentPeriod.getTotalPaidAmount()));
+        }
+        Assertions.assertEquals(23.39, toDouble(interestSchedule.repaymentPeriods().get(0).getEmi()), 0.001, "Period 1 EMI");
+        Assertions.assertEquals(23.38, toDouble(interestSchedule.repaymentPeriods().get(1).getEmi()), 0.001,
+                "The cent has to be taken off the period which still has room for it");
+        Assertions.assertEquals(23.39, toDouble(interestSchedule.repaymentPeriods().get(2).getEmi()), 0.001,
+                "The fully paid last period must keep its EMI");
+        Assertions.assertEquals(70.16, toDouble(interestSchedule.getTotalDuePrincipal()), 0.001,
+                "The amortized principal must stay equal to the disbursed amount");
+    }
+
+    @Test
+    public void getPeriodInterestTillDateThrowsLoanTransactionProcessingExceptionForAdditionalInstallment() {
+        // given
+        Mockito.when(loanProductRelatedDetail.getAnnualNominalInterestRate()).thenReturn(BigDecimal.valueOf(12));
+        Mockito.when(loanProductRelatedDetail.getDaysInYearType()).thenReturn(DaysInYearType.DAYS_360.getValue());
+        Mockito.when(loanProductRelatedDetail.getDaysInMonthType()).thenReturn(DaysInMonthType.DAYS_30.getValue());
+        Mockito.when(loanProductRelatedDetail.getRepaymentPeriodFrequencyType()).thenReturn(PeriodFrequencyType.MONTHS);
+        Mockito.when(loanProductRelatedDetail.getRepayEvery()).thenReturn(1);
+        Mockito.when(loanProductRelatedDetail.isAllowFullTermForTranche()).thenReturn(false);
+
+        LocalDate start = LocalDate.of(2024, 1, 1);
+        // Normal installment 1: Jan 1 - Feb 1
+        RepaymentScheduleInstallmentData normal1 = RepaymentScheduleInstallmentData.of(start, start.plusMonths(1), false, false,
+                BigDecimal.ZERO, BigDecimal.ZERO);
+        // "Additional" installment left over from a prior re-age: Feb 1 - Feb 15 (never gets a RepaymentPeriod)
+        RepaymentScheduleInstallmentData additional = RepaymentScheduleInstallmentData.of(start.plusMonths(1),
+                start.plusMonths(1).plusDays(14), false, true, BigDecimal.ZERO, BigDecimal.ZERO);
+        // Normal installment 2 continues after the additional stub: Feb 15 - Mar 15
+        RepaymentScheduleInstallmentData normal2 = RepaymentScheduleInstallmentData.of(start.plusMonths(1).plusDays(14),
+                start.plusMonths(2).plusDays(14), false, false, BigDecimal.ZERO, BigDecimal.ZERO);
+
+        List<RepaymentScheduleInstallmentData> installments = List.of(normal1, additional, normal2);
+
+        // No mocking of the calculator itself -- this builds the real model the same way production code does,
+        // which filters out isAdditional() installments when constructing repaymentPeriods.
+        ProgressiveLoanInterestScheduleModel model = emiCalculator.generateInstallmentInterestScheduleModel(installments,
+                loanProductRelatedDetail, null, mc);
+
+        // then
+        // Additional installments are excluded from repaymentPeriods(), so resolving
+        // their raw dates through the interest schedule model has no matching period.
+        Assertions.assertThrows(LoanTransactionProcessingException.class,
+                () -> emiCalculator.getPeriodInterestTillDate(model, additional.getFromDate(), additional.getDueDate(),
+                        additional.getDueDate(), true, false),
+                "Expected LoanTransactionProcessingException when getPeriodInterestTillDate is "
+                        + "called with an 'additional' installment's dates");
+    }
+
+    @Test
+    public void test_getDueAmounts_reAgedFixedInterestModel_futurePeriodKeepsItsDues() throws Exception {
+        // given: the persisted interest schedule model of a loan that was re-aged with
+        // EQUAL_AMORTIZATION_PAYABLE_INTEREST (rate frozen to zero, interest carried as fixedInterest per re-aged
+        // period) and then received an additional disbursement. Reduced from the persisted model of a live
+        // reproduction of the MIR-after-re-age infinite allocation loop: opener, re-age holder, one mid
+        // re-aged period and the last re-aged period, which carries the remainder-cent EMI adjustment
+        // (emi 45.42 vs originalEmi 45.41).
+        Mockito.when(loanProductRelatedDetail.getAnnualNominalInterestRate()).thenReturn(BigDecimal.valueOf(9.99));
+        Mockito.when(loanProductRelatedDetail.getDaysInYearType()).thenReturn(DaysInYearType.DAYS_360.getValue());
+        Mockito.when(loanProductRelatedDetail.getDaysInMonthType()).thenReturn(DaysInMonthType.DAYS_30.getValue());
+        Mockito.when(loanProductRelatedDetail.getRepaymentPeriodFrequencyType()).thenReturn(PeriodFrequencyType.MONTHS);
+        Mockito.when(loanProductRelatedDetail.getRepayEvery()).thenReturn(1);
+
+        // Inlined as a text block: JSON cannot carry the ASF license header, so it must not live in a
+        // standalone resource file. Kept verbatim so the production Gson parser rebuilds the exact state.
+        final String json = """
+                {"repaymentPeriods":[{"fromDate":"2026-04-21","dueDate":"2026-05-21","interestPeriods":[{"fromDate":"2026-04-21",
+                "dueDate":"2026-04-21","rateFactor":0.0,"rateFactorTillPeriodDueDate":0.008325,"creditedPrincipal":0.0,"creditedInterest":0.0,
+                "disbursementAmount":300.0,"balanceCorrectionAmount":0.0,"outstandingLoanBalance":0.0,"capitalizedIncomePrincipal":0.0,
+                "isPaused":false},{"fromDate":"2026-04-21","dueDate":"2026-05-21","rateFactor":0.008325,"rateFactorTillPeriodDueDate":0.008325,
+                "creditedPrincipal":0.0,"creditedInterest":0.0,"disbursementAmount":0.0,"balanceCorrectionAmount":99.17,"outstandingLoanBalance":300.0,
+                "capitalizedIncomePrincipal":0.0,"isPaused":false}],"emi":0.0,"originalEmi":101.67,"paidPrincipal":0.0,"paidInterest":0.0,
+                "futureUnrecognizedInterest":0.0,"isInterestMovedUpward":false,"interestPaymentGrace":false,"totalDisbursedAmount":300.0,
+                "creditedPrincipalMovedDueReAge":0.0,"creditedInterestMovedDueReAge":0.0,"isInterestMovedDownward":true,"reAged":false,
+                "reAgedEarlyRepaymentHolder":false,"fixedInterest":0.0},{"fromDate":"2026-05-21","dueDate":"2026-06-10","interestPeriods":[{"fromDate":"2026-05-21",
+                "dueDate":"2026-06-10","rateFactor":0.008325,"rateFactorTillPeriodDueDate":0.005370967741935484,"creditedPrincipal":0.0,
+                "creditedInterest":0.0,"disbursementAmount":150.0,"balanceCorrectionAmount":-99.17,"outstandingLoanBalance":399.17,
+                "capitalizedIncomePrincipal":0.0,"isPaused":false},{"fromDate":"2026-06-10","dueDate":"2026-06-10","rateFactor":0.0,
+                "rateFactorTillPeriodDueDate":0.0,"creditedPrincipal":0.0,"creditedInterest":0.0,"disbursementAmount":0.0,"balanceCorrectionAmount":0.0,
+                "outstandingLoanBalance":450.0,"capitalizedIncomePrincipal":0.0,"isPaused":false}],"emi":0.0,"originalEmi":101.67,
+                "paidPrincipal":0.0,"paidInterest":0.0,"futureUnrecognizedInterest":0.0,"isInterestMovedUpward":false,"interestPaymentGrace":false,
+                "totalDisbursedAmount":300.0,"creditedPrincipalMovedDueReAge":0.0,"creditedInterestMovedDueReAge":0.0,"isInterestMovedDownward":true,
+                "reAged":true,"reAgedEarlyRepaymentHolder":true,"fixedInterest":0.0},{"fromDate":"2026-06-10","dueDate":"2026-07-10",
+                "interestPeriods":[{"fromDate":"2026-06-10","dueDate":"2026-07-10","rateFactor":0.0,"rateFactorTillPeriodDueDate":0.0,
+                "creditedPrincipal":0.0,"creditedInterest":0.0,"disbursementAmount":0.0,"balanceCorrectionAmount":0.0,"outstandingLoanBalance":450.0,
+                "capitalizedIncomePrincipal":0.0,"isPaused":false}],"emi":45.41,"originalEmi":45.41,"paidPrincipal":0.0,"paidInterest":0.0,
+                "futureUnrecognizedInterest":0.0,"isInterestMovedUpward":false,"interestPaymentGrace":false,"totalDisbursedAmount":450.0,
+                "totalCapitalizedIncomeAmount":0.0,"creditedInterestMovedDueReAge":0.0,"isInterestMovedDownward":false,"reAged":true,
+                "reAgedEarlyRepaymentHolder":false,"fixedInterest":0.41},{"fromDate":"2026-07-10","dueDate":"2026-08-10","interestPeriods":[{"fromDate":"2026-07-10",
+                "dueDate":"2026-08-10","rateFactor":0.0,"rateFactorTillPeriodDueDate":0.0,"creditedPrincipal":0.0,"creditedInterest":0.0,
+                "disbursementAmount":0.0,"balanceCorrectionAmount":0.0,"outstandingLoanBalance":405.0,"capitalizedIncomePrincipal":0.0,
+                "isPaused":false}],"emi":45.42,"originalEmi":45.41,"paidPrincipal":0.0,"paidInterest":0.0,"futureUnrecognizedInterest":0.0,
+                "isInterestMovedUpward":false,"interestPaymentGrace":false,"totalDisbursedAmount":450.0,"totalCapitalizedIncomeAmount":0.0,
+                "creditedInterestMovedDueReAge":0.0,"isInterestMovedDownward":false,"reAged":true,"reAgedEarlyRepaymentHolder":false,
+                "fixedInterest":0.42}],"interestRates":[{"effectiveFrom":"2026-06-10","interestRate":0}],"modifiers":{"COPY":false,
+                "EMI_RECALCULATION":true,"INTEREST_PAUSE_FOR_EMI_CALCULATION":false,"INTEREST_RECALCULATION_ENABLED":true},"lastOverdueBalanceChange":"2026-06-10",
+                "overdueCorrections":[{"correctionDate":"2026-05-21","amount":99.17,"affectedRpDueDate":"2026-05-21"},{"correctionDate":"2026-06-10",
+                "amount":-99.17,"affectedRpDueDate":"2026-06-21"}]}\
+                """;
+        final ProgressiveLoanInterestScheduleModel model = interestScheduleModelService.fromJson(json, loanProductRelatedDetail, mc, null);
+        Assertions.assertNotNull(model);
+        Assertions.assertEquals(4, model.repaymentPeriods().size());
+
+        // when: a MERCHANT_ISSUED_REFUND with LAST_INSTALLMENT allocation targets the last re-aged period
+        // (2026-07-10 - 2026-08-10) while the business date is 2026-06-10
+        final PeriodDueDetails dueAmounts = emiCalculator.getDueAmounts(model, LocalDate.of(2026, 7, 10), LocalDate.of(2026, 8, 10),
+                LocalDate.of(2026, 6, 10));
+
+        log.info("reAged last period dueAmounts: emi={} duePrincipal={} dueInterest={}", dueAmounts.getEmi(), dueAmounts.getDuePrincipal(),
+                dueAmounts.getDueInterest());
+
+        // then: the re-aged period must keep its contractual dues (EMI 45.42 = 45.00 principal + 0.42 fixed
+        // interest). Returning zero dues here starves the horizontal allocation loop: the installment is added to
+        // the skip list with zero payable amounts, keeps being re-selected and the LoopGuard aborts the transaction.
+        Assertions.assertTrue(dueAmounts.getDuePrincipal().isGreaterThanZero(),
+                "duePrincipal of a future re-aged period must not collapse to zero on early payment");
+        Assertions.assertEquals(BigDecimal.valueOf(45.00).setScale(2), dueAmounts.getDuePrincipal().getAmount().setScale(2));
+        Assertions.assertEquals(BigDecimal.valueOf(0.42).setScale(2), dueAmounts.getDueInterest().getAmount().setScale(2));
+    }
+
+    @Test
+    public void test_fullTermTranche_31stAnchor_lateMidPeriod2ndDisburse_extendsWithoutDuplicateOrInvertedDates() {
+        // Month-end shortened first due (31 Jan → 28 Feb) must not duplicate or invert periods on late tranche.
+        final List<LoanScheduleModelRepaymentPeriod> expectedRepaymentPeriods = new ArrayList<>();
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2026, 1, 31), LocalDate.of(2026, 2, 28)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2026, 2, 28), LocalDate.of(2026, 3, 31)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2026, 3, 31), LocalDate.of(2026, 4, 30)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2026, 4, 30), LocalDate.of(2026, 5, 31)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2026, 5, 31), LocalDate.of(2026, 6, 30)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2026, 6, 30), LocalDate.of(2026, 7, 31)));
+
+        final BigDecimal interestRate = BigDecimal.valueOf(9.4822);
+        Mockito.when(loanProductRelatedDetail.getAnnualNominalInterestRate()).thenReturn(interestRate);
+        Mockito.when(loanProductRelatedDetail.getDaysInYearType()).thenReturn(DaysInYearType.DAYS_360.getValue());
+        Mockito.when(loanProductRelatedDetail.getDaysInMonthType()).thenReturn(DaysInMonthType.DAYS_30.getValue());
+        Mockito.when(loanProductRelatedDetail.getRepaymentPeriodFrequencyType()).thenReturn(PeriodFrequencyType.MONTHS);
+        Mockito.when(loanProductRelatedDetail.getRepayEvery()).thenReturn(1);
+        Mockito.when(loanProductRelatedDetail.getCurrencyData()).thenReturn(currency);
+        Mockito.when(loanProductRelatedDetail.getNumberOfRepayments()).thenReturn(6);
+        Mockito.when(loanProductRelatedDetail.isAllowFullTermForTranche()).thenReturn(true);
+
+        final ProgressiveLoanInterestScheduleModel interestSchedule = emiCalculator
+                .generatePeriodInterestScheduleModel(expectedRepaymentPeriods, loanProductRelatedDetail, null, mc);
+
+        emiCalculator.addDisbursement(interestSchedule, LocalDate.of(2026, 1, 31), toMoney(100.0));
+        // Late mid-period 2nd disbursement in Mar period (index 1)
+        emiCalculator.addDisbursement(interestSchedule, LocalDate.of(2026, 3, 15), toMoney(100.0));
+
+        Assertions.assertEquals(7, interestSchedule.repaymentPeriods().size());
+        checkPeriod(interestSchedule, 0, LocalDate.of(2026, 1, 31), LocalDate.of(2026, 2, 28), 17.13, 0.79, 16.34, 83.66, false);
+        checkPeriod(interestSchedule, 1, LocalDate.of(2026, 2, 28), LocalDate.of(2026, 3, 31), 34.21, 1.07, 33.14, 150.52, false);
+        checkPeriod(interestSchedule, 2, LocalDate.of(2026, 3, 31), LocalDate.of(2026, 4, 30), 34.21, 1.19, 33.02, 117.50, false);
+        checkPeriod(interestSchedule, 3, LocalDate.of(2026, 4, 30), LocalDate.of(2026, 5, 31), 34.21, 0.93, 33.28, 84.22, false);
+        checkPeriod(interestSchedule, 4, LocalDate.of(2026, 5, 31), LocalDate.of(2026, 6, 30), 34.21, 0.67, 33.54, 50.68, false);
+        checkPeriod(interestSchedule, 5, LocalDate.of(2026, 6, 30), LocalDate.of(2026, 7, 31), 34.21, 0.40, 33.81, 16.87, false);
+        checkPeriod(interestSchedule, 6, LocalDate.of(2026, 7, 31), LocalDate.of(2026, 8, 31), 17.00, 0.13, 16.87, 0.00, false);
+    }
+
+    @Test
+    public void test_fullTermTranche_29thAnchor_afterFeb28_extendsWithoutDuplicate() {
+        final List<LoanScheduleModelRepaymentPeriod> expectedRepaymentPeriods = new ArrayList<>();
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2026, 1, 29), LocalDate.of(2026, 2, 28)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2026, 2, 28), LocalDate.of(2026, 3, 29)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2026, 3, 29), LocalDate.of(2026, 4, 29)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2026, 4, 29), LocalDate.of(2026, 5, 29)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2026, 5, 29), LocalDate.of(2026, 6, 29)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2026, 6, 29), LocalDate.of(2026, 7, 29)));
+
+        final BigDecimal interestRate = BigDecimal.valueOf(9.4822);
+        Mockito.when(loanProductRelatedDetail.getAnnualNominalInterestRate()).thenReturn(interestRate);
+        Mockito.when(loanProductRelatedDetail.getDaysInYearType()).thenReturn(DaysInYearType.DAYS_360.getValue());
+        Mockito.when(loanProductRelatedDetail.getDaysInMonthType()).thenReturn(DaysInMonthType.DAYS_30.getValue());
+        Mockito.when(loanProductRelatedDetail.getRepaymentPeriodFrequencyType()).thenReturn(PeriodFrequencyType.MONTHS);
+        Mockito.when(loanProductRelatedDetail.getRepayEvery()).thenReturn(1);
+        Mockito.when(loanProductRelatedDetail.getCurrencyData()).thenReturn(currency);
+        Mockito.when(loanProductRelatedDetail.getNumberOfRepayments()).thenReturn(6);
+        Mockito.when(loanProductRelatedDetail.isAllowFullTermForTranche()).thenReturn(true);
+
+        final ProgressiveLoanInterestScheduleModel interestSchedule = emiCalculator
+                .generatePeriodInterestScheduleModel(expectedRepaymentPeriods, loanProductRelatedDetail, null, mc);
+
+        emiCalculator.addDisbursement(interestSchedule, LocalDate.of(2026, 1, 29), toMoney(100.0));
+        emiCalculator.addDisbursement(interestSchedule, LocalDate.of(2026, 3, 10), toMoney(100.0));
+
+        Assertions.assertEquals(7, interestSchedule.repaymentPeriods().size());
+        checkPeriod(interestSchedule, 0, LocalDate.of(2026, 1, 29), LocalDate.of(2026, 2, 28), 17.13, 0.79, 16.34, 83.66, false);
+        checkPeriod(interestSchedule, 1, LocalDate.of(2026, 2, 28), LocalDate.of(2026, 3, 29), 34.22, 1.18, 33.04, 150.62, false);
+        checkPeriod(interestSchedule, 2, LocalDate.of(2026, 3, 29), LocalDate.of(2026, 4, 29), 34.22, 1.19, 33.03, 117.59, false);
+        checkPeriod(interestSchedule, 3, LocalDate.of(2026, 4, 29), LocalDate.of(2026, 5, 29), 34.22, 0.93, 33.29, 84.30, false);
+        checkPeriod(interestSchedule, 4, LocalDate.of(2026, 5, 29), LocalDate.of(2026, 6, 29), 34.22, 0.67, 33.55, 50.75, false);
+        checkPeriod(interestSchedule, 5, LocalDate.of(2026, 6, 29), LocalDate.of(2026, 7, 29), 34.22, 0.40, 33.82, 16.93, false);
+        checkPeriod(interestSchedule, 6, LocalDate.of(2026, 7, 29), LocalDate.of(2026, 8, 29), 17.06, 0.13, 16.93, 0.00, false);
+    }
+
+    @Test
+    public void test_fullTermTranche_30thAnchor_afterFeb28_extendsWithoutDuplicate() {
+        final List<LoanScheduleModelRepaymentPeriod> expectedRepaymentPeriods = new ArrayList<>();
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2026, 1, 30), LocalDate.of(2026, 2, 28)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2026, 2, 28), LocalDate.of(2026, 3, 30)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2026, 3, 30), LocalDate.of(2026, 4, 30)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2026, 4, 30), LocalDate.of(2026, 5, 30)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2026, 5, 30), LocalDate.of(2026, 6, 30)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2026, 6, 30), LocalDate.of(2026, 7, 30)));
+
+        final BigDecimal interestRate = BigDecimal.valueOf(9.4822);
+        Mockito.when(loanProductRelatedDetail.getAnnualNominalInterestRate()).thenReturn(interestRate);
+        Mockito.when(loanProductRelatedDetail.getDaysInYearType()).thenReturn(DaysInYearType.DAYS_360.getValue());
+        Mockito.when(loanProductRelatedDetail.getDaysInMonthType()).thenReturn(DaysInMonthType.DAYS_30.getValue());
+        Mockito.when(loanProductRelatedDetail.getRepaymentPeriodFrequencyType()).thenReturn(PeriodFrequencyType.MONTHS);
+        Mockito.when(loanProductRelatedDetail.getRepayEvery()).thenReturn(1);
+        Mockito.when(loanProductRelatedDetail.getCurrencyData()).thenReturn(currency);
+        Mockito.when(loanProductRelatedDetail.getNumberOfRepayments()).thenReturn(6);
+        Mockito.when(loanProductRelatedDetail.isAllowFullTermForTranche()).thenReturn(true);
+
+        final ProgressiveLoanInterestScheduleModel interestSchedule = emiCalculator
+                .generatePeriodInterestScheduleModel(expectedRepaymentPeriods, loanProductRelatedDetail, null, mc);
+
+        emiCalculator.addDisbursement(interestSchedule, LocalDate.of(2026, 1, 30), toMoney(100.0));
+        emiCalculator.addDisbursement(interestSchedule, LocalDate.of(2026, 3, 10), toMoney(100.0));
+
+        Assertions.assertEquals(7, interestSchedule.repaymentPeriods().size());
+        checkPeriod(interestSchedule, 0, LocalDate.of(2026, 1, 30), LocalDate.of(2026, 2, 28), 17.13, 0.79, 16.34, 83.66, false);
+        checkPeriod(interestSchedule, 1, LocalDate.of(2026, 2, 28), LocalDate.of(2026, 3, 30), 34.22, 1.19, 33.03, 150.63, false);
+        checkPeriod(interestSchedule, 2, LocalDate.of(2026, 3, 30), LocalDate.of(2026, 4, 30), 34.22, 1.19, 33.03, 117.60, false);
+        checkPeriod(interestSchedule, 3, LocalDate.of(2026, 4, 30), LocalDate.of(2026, 5, 30), 34.22, 0.93, 33.29, 84.31, false);
+        checkPeriod(interestSchedule, 4, LocalDate.of(2026, 5, 30), LocalDate.of(2026, 6, 30), 34.22, 0.67, 33.55, 50.76, false);
+        checkPeriod(interestSchedule, 5, LocalDate.of(2026, 6, 30), LocalDate.of(2026, 7, 30), 34.22, 0.40, 33.82, 16.94, false);
+        checkPeriod(interestSchedule, 6, LocalDate.of(2026, 7, 30), LocalDate.of(2026, 8, 30), 17.07, 0.13, 16.94, 0.00, false);
+    }
+
+    @Test
+    public void test_fullTermTranche_31stAnchor_extraAfterFeb28_restores31stDue() {
+        // Extras via generateAdditionalRepaymentPeriodDueDates(seed.plusMonths): Feb 28 → Mar 31, not Mar 28.
+        final List<LoanScheduleModelRepaymentPeriod> expectedRepaymentPeriods = new ArrayList<>();
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2026, 8, 31), LocalDate.of(2026, 9, 30)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2026, 9, 30), LocalDate.of(2026, 10, 31)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2026, 10, 31), LocalDate.of(2026, 11, 30)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2026, 11, 30), LocalDate.of(2026, 12, 31)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2026, 12, 31), LocalDate.of(2027, 1, 31)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2027, 1, 31), LocalDate.of(2027, 2, 28)));
+
+        final BigDecimal interestRate = BigDecimal.ZERO;
+        Mockito.when(loanProductRelatedDetail.getAnnualNominalInterestRate()).thenReturn(interestRate);
+        Mockito.when(loanProductRelatedDetail.getDaysInYearType()).thenReturn(DaysInYearType.DAYS_360.getValue());
+        Mockito.when(loanProductRelatedDetail.getDaysInMonthType()).thenReturn(DaysInMonthType.DAYS_30.getValue());
+        Mockito.when(loanProductRelatedDetail.getRepaymentPeriodFrequencyType()).thenReturn(PeriodFrequencyType.MONTHS);
+        Mockito.when(loanProductRelatedDetail.getRepayEvery()).thenReturn(1);
+        Mockito.when(loanProductRelatedDetail.getCurrencyData()).thenReturn(currency);
+        Mockito.when(loanProductRelatedDetail.getNumberOfRepayments()).thenReturn(6);
+        Mockito.when(loanProductRelatedDetail.isAllowFullTermForTranche()).thenReturn(true);
+
+        final ProgressiveLoanInterestScheduleModel interestSchedule = emiCalculator
+                .generatePeriodInterestScheduleModel(expectedRepaymentPeriods, loanProductRelatedDetail, null, mc);
+
+        emiCalculator.addDisbursement(interestSchedule, LocalDate.of(2026, 8, 31), toMoney(300.0));
+        emiCalculator.addDisbursement(interestSchedule, LocalDate.of(2026, 10, 10), toMoney(300.0));
+
+        Assertions.assertEquals(7, interestSchedule.repaymentPeriods().size());
+        checkPeriod(interestSchedule, 0, LocalDate.of(2026, 8, 31), LocalDate.of(2026, 9, 30), 50.00, 0.00, 50.00, 250.00, false);
+        checkPeriod(interestSchedule, 1, LocalDate.of(2026, 9, 30), LocalDate.of(2026, 10, 31), 100.00, 0.00, 100.00, 450.00, false);
+        checkPeriod(interestSchedule, 2, LocalDate.of(2026, 10, 31), LocalDate.of(2026, 11, 30), 100.00, 0.00, 100.00, 350.00, false);
+        checkPeriod(interestSchedule, 3, LocalDate.of(2026, 11, 30), LocalDate.of(2026, 12, 31), 100.00, 0.00, 100.00, 250.00, false);
+        checkPeriod(interestSchedule, 4, LocalDate.of(2026, 12, 31), LocalDate.of(2027, 1, 31), 100.00, 0.00, 100.00, 150.00, false);
+        checkPeriod(interestSchedule, 5, LocalDate.of(2027, 1, 31), LocalDate.of(2027, 2, 28), 100.00, 0.00, 100.00, 50.00, false);
+        checkPeriod(interestSchedule, 6, LocalDate.of(2027, 2, 28), LocalDate.of(2027, 3, 31), 50.00, 0.00, 50.00, 0.00, false);
+    }
+
+    @Test
+    public void test_fullTermTranche_repaymentsStartingFromDate_28FebPattern_mergesNotDuplicates() {
+        // Submitted/disbursed 31 Jan but first repayment 28 Feb → subsequent dues on 28th (RSFD seed).
+        final List<LoanScheduleModelRepaymentPeriod> expectedRepaymentPeriods = new ArrayList<>();
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2026, 1, 31), LocalDate.of(2026, 2, 28)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2026, 2, 28), LocalDate.of(2026, 3, 28)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2026, 3, 28), LocalDate.of(2026, 4, 28)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2026, 4, 28), LocalDate.of(2026, 5, 28)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2026, 5, 28), LocalDate.of(2026, 6, 28)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2026, 6, 28), LocalDate.of(2026, 7, 28)));
+
+        final BigDecimal interestRate = BigDecimal.valueOf(9.4822);
+        Mockito.when(loanProductRelatedDetail.getAnnualNominalInterestRate()).thenReturn(interestRate);
+        Mockito.when(loanProductRelatedDetail.getDaysInYearType()).thenReturn(DaysInYearType.DAYS_360.getValue());
+        Mockito.when(loanProductRelatedDetail.getDaysInMonthType()).thenReturn(DaysInMonthType.DAYS_30.getValue());
+        Mockito.when(loanProductRelatedDetail.getRepaymentPeriodFrequencyType()).thenReturn(PeriodFrequencyType.MONTHS);
+        Mockito.when(loanProductRelatedDetail.getRepayEvery()).thenReturn(1);
+        Mockito.when(loanProductRelatedDetail.getCurrencyData()).thenReturn(currency);
+        Mockito.when(loanProductRelatedDetail.getNumberOfRepayments()).thenReturn(6);
+        Mockito.when(loanProductRelatedDetail.isAllowFullTermForTranche()).thenReturn(true);
+
+        final ProgressiveLoanInterestScheduleModel interestSchedule = emiCalculator
+                .generatePeriodInterestScheduleModel(expectedRepaymentPeriods, loanProductRelatedDetail, null, mc);
+
+        emiCalculator.addDisbursement(interestSchedule, LocalDate.of(2026, 1, 31), toMoney(100.0));
+        // Mid-period after Mar 28 (firstOverlapIndex=2) → full term needs 6 periods from there → size 8
+        emiCalculator.addDisbursement(interestSchedule, LocalDate.of(2026, 4, 10), toMoney(100.0));
+
+        Assertions.assertEquals(8, interestSchedule.repaymentPeriods().size());
+        checkPeriod(interestSchedule, 0, LocalDate.of(2026, 1, 31), LocalDate.of(2026, 2, 28), 17.13, 0.79, 16.34, 83.66, false);
+        checkPeriod(interestSchedule, 1, LocalDate.of(2026, 2, 28), LocalDate.of(2026, 3, 28), 17.13, 0.66, 16.47, 67.19, false);
+        checkPeriod(interestSchedule, 2, LocalDate.of(2026, 3, 28), LocalDate.of(2026, 4, 28), 34.20, 0.99, 33.21, 133.98, false);
+        checkPeriod(interestSchedule, 3, LocalDate.of(2026, 4, 28), LocalDate.of(2026, 5, 28), 34.20, 1.06, 33.14, 100.84, false);
+        checkPeriod(interestSchedule, 4, LocalDate.of(2026, 5, 28), LocalDate.of(2026, 6, 28), 34.20, 0.80, 33.40, 67.44, false);
+        checkPeriod(interestSchedule, 5, LocalDate.of(2026, 6, 28), LocalDate.of(2026, 7, 28), 34.20, 0.53, 33.67, 33.77, false);
+        checkPeriod(interestSchedule, 6, LocalDate.of(2026, 7, 28), LocalDate.of(2026, 8, 28), 17.07, 0.27, 16.80, 16.97, false);
+        checkPeriod(interestSchedule, 7, LocalDate.of(2026, 8, 28), LocalDate.of(2026, 9, 28), 17.10, 0.13, 16.97, 0.00, false);
+    }
+
+    @Test
+    public void test_fullTermTranche_submitted15th_firstRepayment31st_lateTrancheKeeps31stPattern() {
+        final List<LoanScheduleModelRepaymentPeriod> expectedRepaymentPeriods = new ArrayList<>();
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2026, 1, 15), LocalDate.of(2026, 1, 31)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2026, 1, 31), LocalDate.of(2026, 2, 28)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2026, 2, 28), LocalDate.of(2026, 3, 31)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2026, 3, 31), LocalDate.of(2026, 4, 30)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2026, 4, 30), LocalDate.of(2026, 5, 31)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2026, 5, 31), LocalDate.of(2026, 6, 30)));
+
+        final BigDecimal interestRate = BigDecimal.valueOf(9.4822);
+        Mockito.when(loanProductRelatedDetail.getAnnualNominalInterestRate()).thenReturn(interestRate);
+        Mockito.when(loanProductRelatedDetail.getDaysInYearType()).thenReturn(DaysInYearType.DAYS_360.getValue());
+        Mockito.when(loanProductRelatedDetail.getDaysInMonthType()).thenReturn(DaysInMonthType.DAYS_30.getValue());
+        Mockito.when(loanProductRelatedDetail.getRepaymentPeriodFrequencyType()).thenReturn(PeriodFrequencyType.MONTHS);
+        Mockito.when(loanProductRelatedDetail.getRepayEvery()).thenReturn(1);
+        Mockito.when(loanProductRelatedDetail.getCurrencyData()).thenReturn(currency);
+        Mockito.when(loanProductRelatedDetail.getNumberOfRepayments()).thenReturn(6);
+        Mockito.when(loanProductRelatedDetail.isAllowFullTermForTranche()).thenReturn(true);
+
+        final ProgressiveLoanInterestScheduleModel interestSchedule = emiCalculator
+                .generatePeriodInterestScheduleModel(expectedRepaymentPeriods, loanProductRelatedDetail, null, mc);
+
+        emiCalculator.addDisbursement(interestSchedule, LocalDate.of(2026, 1, 15), toMoney(100.0));
+        // Mid Mar period (index 2) → append 2 extras beyond Jun 30
+        emiCalculator.addDisbursement(interestSchedule, LocalDate.of(2026, 3, 15), toMoney(100.0));
+
+        Assertions.assertEquals(8, interestSchedule.repaymentPeriods().size());
+        checkPeriod(interestSchedule, 0, LocalDate.of(2026, 1, 15), LocalDate.of(2026, 1, 31), 17.08, 0.41, 16.67, 83.33, false);
+        checkPeriod(interestSchedule, 1, LocalDate.of(2026, 1, 31), LocalDate.of(2026, 2, 28), 17.08, 0.66, 16.42, 66.91, false);
+        checkPeriod(interestSchedule, 2, LocalDate.of(2026, 2, 28), LocalDate.of(2026, 3, 31), 34.16, 1.03, 33.13, 133.78, false);
+        checkPeriod(interestSchedule, 3, LocalDate.of(2026, 3, 31), LocalDate.of(2026, 4, 30), 34.16, 1.06, 33.10, 100.68, false);
+        checkPeriod(interestSchedule, 4, LocalDate.of(2026, 4, 30), LocalDate.of(2026, 5, 31), 34.16, 0.82, 33.34, 67.34, false);
+        checkPeriod(interestSchedule, 5, LocalDate.of(2026, 5, 31), LocalDate.of(2026, 6, 30), 34.14, 0.53, 33.61, 33.73, false);
+        // Extras from 31st seed (not getStartDate 15th): Jun 30 → Jul 31 → Aug 31
+        checkPeriod(interestSchedule, 6, LocalDate.of(2026, 6, 30), LocalDate.of(2026, 7, 31), 17.08, 0.28, 16.80, 16.93, false);
+        checkPeriod(interestSchedule, 7, LocalDate.of(2026, 7, 31), LocalDate.of(2026, 8, 31), 17.06, 0.13, 16.93, 0.00, false);
+    }
+
+    @Test
+    public void test_fullTermTranche_afterReAge_31stTo28th_mergesIntoReAgedPeriods() {
+        // Original schedule on 31st pattern; re-age onto 28th; late full-term tranche must merge by position.
+        final List<LoanScheduleModelRepaymentPeriod> expectedRepaymentPeriods = new ArrayList<>();
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2026, 1, 31), LocalDate.of(2026, 2, 28)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2026, 2, 28), LocalDate.of(2026, 3, 31)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2026, 3, 31), LocalDate.of(2026, 4, 30)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2026, 4, 30), LocalDate.of(2026, 5, 31)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2026, 5, 31), LocalDate.of(2026, 6, 30)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2026, 6, 30), LocalDate.of(2026, 7, 31)));
+
+        final BigDecimal interestRate = BigDecimal.valueOf(9.4822);
+        Mockito.when(loanProductRelatedDetail.getAnnualNominalInterestRate()).thenReturn(interestRate);
+        Mockito.when(loanProductRelatedDetail.getDaysInYearType()).thenReturn(DaysInYearType.DAYS_360.getValue());
+        Mockito.when(loanProductRelatedDetail.getDaysInMonthType()).thenReturn(DaysInMonthType.DAYS_30.getValue());
+        Mockito.when(loanProductRelatedDetail.getRepaymentPeriodFrequencyType()).thenReturn(PeriodFrequencyType.MONTHS);
+        Mockito.when(loanProductRelatedDetail.getRepayEvery()).thenReturn(1);
+        Mockito.when(loanProductRelatedDetail.getCurrencyData()).thenReturn(currency);
+        Mockito.when(loanProductRelatedDetail.getNumberOfRepayments()).thenReturn(6);
+        Mockito.when(loanProductRelatedDetail.isAllowFullTermForTranche()).thenReturn(true);
+
+        final ProgressiveLoanInterestScheduleModel interestSchedule = emiCalculator
+                .generatePeriodInterestScheduleModel(expectedRepaymentPeriods, loanProductRelatedDetail, null, mc);
+
+        emiCalculator.addDisbursement(interestSchedule, LocalDate.of(2026, 1, 31), toMoney(100.0));
+
+        final LocalDate reAgingStartDate = LocalDate.of(2026, 2, 28);
+        final LocalDate transactionDate = LocalDate.of(2026, 2, 28);
+        final LoanReAgeParameterData reAgeParameter = LoanReAgeParameterData.of(PeriodFrequencyType.MONTHS, 1, reAgingStartDate, 6,
+                LoanReAgeInterestHandlingType.EQUAL_AMORTIZATION_FULL_INTEREST);
+        emiCalculator.reAgeEqualAmortization(interestSchedule, transactionDate, reAgeParameter, Money.zero(currency),
+                new EqualAmortizationValues(Money.zero(currency), 6, Money.zero(currency), Money.zero(currency)), notInModel(0.0, 0.0));
+
+        // Late mid-period 2nd disbursement on re-aged 28th schedule
+        emiCalculator.addDisbursement(interestSchedule, LocalDate.of(2026, 4, 5), toMoney(100.0));
+
+        Assertions.assertEquals(9, interestSchedule.repaymentPeriods().size());
+        checkPeriod(interestSchedule, 0, LocalDate.of(2026, 1, 31), LocalDate.of(2026, 2, 28), 0.00, 0.00, 0.00, 100.00, true);
+        checkPeriod(interestSchedule, 1, LocalDate.of(2026, 2, 28), LocalDate.of(2026, 2, 28), 17.13, 0.46, 16.67, 83.33, false);
+        checkPeriod(interestSchedule, 2, LocalDate.of(2026, 2, 28), LocalDate.of(2026, 3, 28), 17.13, 0.46, 16.67, 66.66, false);
+        checkPeriod(interestSchedule, 3, LocalDate.of(2026, 3, 28), LocalDate.of(2026, 4, 28), 34.23, 0.46, 33.77, 132.89, false);
+        checkPeriod(interestSchedule, 4, LocalDate.of(2026, 4, 28), LocalDate.of(2026, 5, 28), 34.23, 0.46, 33.77, 99.12, false);
+        checkPeriod(interestSchedule, 5, LocalDate.of(2026, 5, 28), LocalDate.of(2026, 6, 28), 34.23, 0.46, 33.77, 65.35, false);
+        checkPeriod(interestSchedule, 6, LocalDate.of(2026, 6, 28), LocalDate.of(2026, 7, 28), 34.23, 0.48, 33.75, 31.60, false);
+        checkPeriod(interestSchedule, 7, LocalDate.of(2026, 7, 28), LocalDate.of(2026, 8, 28), 17.10, 0.00, 17.10, 14.50, false);
+        checkPeriod(interestSchedule, 8, LocalDate.of(2026, 8, 28), LocalDate.of(2026, 9, 28), 14.50, 0.00, 14.50, 0.00, false);
+    }
+
+    @Test
+    public void test_fullTermTranche_afterReAge_15thTo31st_mergesInto31stDuePattern() {
+        // Original schedule on 15th pattern; re-age onto 31st; late full-term tranche must merge by position.
+        final List<LoanScheduleModelRepaymentPeriod> expectedRepaymentPeriods = new ArrayList<>();
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2026, 1, 15), LocalDate.of(2026, 2, 15)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2026, 2, 15), LocalDate.of(2026, 3, 15)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2026, 3, 15), LocalDate.of(2026, 4, 15)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2026, 4, 15), LocalDate.of(2026, 5, 15)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2026, 5, 15), LocalDate.of(2026, 6, 15)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2026, 6, 15), LocalDate.of(2026, 7, 15)));
+
+        final BigDecimal interestRate = BigDecimal.valueOf(9.4822);
+        Mockito.when(loanProductRelatedDetail.getAnnualNominalInterestRate()).thenReturn(interestRate);
+        Mockito.when(loanProductRelatedDetail.getDaysInYearType()).thenReturn(DaysInYearType.DAYS_360.getValue());
+        Mockito.when(loanProductRelatedDetail.getDaysInMonthType()).thenReturn(DaysInMonthType.DAYS_30.getValue());
+        Mockito.when(loanProductRelatedDetail.getRepaymentPeriodFrequencyType()).thenReturn(PeriodFrequencyType.MONTHS);
+        Mockito.when(loanProductRelatedDetail.getRepayEvery()).thenReturn(1);
+        Mockito.when(loanProductRelatedDetail.getCurrencyData()).thenReturn(currency);
+        Mockito.when(loanProductRelatedDetail.getNumberOfRepayments()).thenReturn(6);
+        Mockito.when(loanProductRelatedDetail.isAllowFullTermForTranche()).thenReturn(true);
+
+        final ProgressiveLoanInterestScheduleModel interestSchedule = emiCalculator
+                .generatePeriodInterestScheduleModel(expectedRepaymentPeriods, loanProductRelatedDetail, null, mc);
+
+        emiCalculator.addDisbursement(interestSchedule, LocalDate.of(2026, 1, 15), toMoney(100.0));
+
+        final LocalDate reAgingStartDate = LocalDate.of(2026, 1, 31);
+        final LocalDate transactionDate = LocalDate.of(2026, 1, 31);
+        final LoanReAgeParameterData reageParameter = LoanReAgeParameterData.of(PeriodFrequencyType.MONTHS, 1, reAgingStartDate, 6,
+                LoanReAgeInterestHandlingType.EQUAL_AMORTIZATION_FULL_INTEREST);
+        emiCalculator.reAgeEqualAmortization(interestSchedule, transactionDate, reageParameter, Money.zero(currency),
+                new EqualAmortizationValues(Money.zero(currency), 6, Money.zero(currency), Money.zero(currency)), notInModel(0.0, 0.0));
+
+        Assertions.assertEquals(7, interestSchedule.repaymentPeriods().size());
+        checkPeriod(interestSchedule, 0, LocalDate.of(2026, 1, 15), LocalDate.of(2026, 1, 31), 0.00, 0.00, 0.00, 100.00, true);
+        checkPeriod(interestSchedule, 1, LocalDate.of(2026, 1, 31), LocalDate.of(2026, 1, 31), 17.13, 0.46, 16.67, 83.33, false);
+        checkPeriod(interestSchedule, 2, LocalDate.of(2026, 1, 31), LocalDate.of(2026, 2, 28), 17.13, 0.46, 16.67, 66.66, false);
+        checkPeriod(interestSchedule, 3, LocalDate.of(2026, 2, 28), LocalDate.of(2026, 3, 31), 17.13, 0.46, 16.67, 49.99, false);
+        checkPeriod(interestSchedule, 4, LocalDate.of(2026, 3, 31), LocalDate.of(2026, 4, 30), 17.13, 0.46, 16.67, 33.32, false);
+        checkPeriod(interestSchedule, 5, LocalDate.of(2026, 4, 30), LocalDate.of(2026, 5, 31), 17.13, 0.46, 16.67, 16.65, false);
+        checkPeriod(interestSchedule, 6, LocalDate.of(2026, 5, 31), LocalDate.of(2026, 6, 30), 17.13, 0.48, 16.65, 0.00, false);
+
+        emiCalculator.addDisbursement(interestSchedule, LocalDate.of(2026, 3, 10), toMoney(100.0));
+
+        Assertions.assertEquals(9, interestSchedule.repaymentPeriods().size());
+        checkPeriod(interestSchedule, 0, LocalDate.of(2026, 1, 15), LocalDate.of(2026, 1, 31), 0.00, 0.00, 0.00, 100.00, true);
+        checkPeriod(interestSchedule, 1, LocalDate.of(2026, 1, 31), LocalDate.of(2026, 1, 31), 17.13, 0.46, 16.67, 83.33, false);
+        checkPeriod(interestSchedule, 2, LocalDate.of(2026, 1, 31), LocalDate.of(2026, 2, 28), 17.13, 0.46, 16.67, 66.66, false);
+        checkPeriod(interestSchedule, 3, LocalDate.of(2026, 2, 28), LocalDate.of(2026, 3, 31), 34.23, 0.46, 33.77, 132.89, false);
+        checkPeriod(interestSchedule, 4, LocalDate.of(2026, 3, 31), LocalDate.of(2026, 4, 30), 34.23, 0.46, 33.77, 99.12, false);
+        checkPeriod(interestSchedule, 5, LocalDate.of(2026, 4, 30), LocalDate.of(2026, 5, 31), 34.23, 0.46, 33.77, 65.35, false);
+        checkPeriod(interestSchedule, 6, LocalDate.of(2026, 5, 31), LocalDate.of(2026, 6, 30), 34.23, 0.48, 33.75, 31.60, false);
+        // Extras restore 31st seed after Jun 30
+        checkPeriod(interestSchedule, 7, LocalDate.of(2026, 6, 30), LocalDate.of(2026, 7, 31), 17.10, 0.00, 17.10, 14.50, false);
+        checkPeriod(interestSchedule, 8, LocalDate.of(2026, 7, 31), LocalDate.of(2026, 8, 31), 14.50, 0.00, 14.50, 0.00, false);
+    }
+
+    @Test
+    public void test_fullTermTranche_firstRepayment31st_lastPeriodFrom30th_extrasKeep31stDueDay() {
+        // Last period starts on a month-end-shortened 30th: extras must still fall on the 31st (not seeded from Jun
+        // 30).
+        final List<LoanScheduleModelRepaymentPeriod> expectedRepaymentPeriods = new ArrayList<>();
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2026, 1, 15), LocalDate.of(2026, 1, 31)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2026, 1, 31), LocalDate.of(2026, 2, 28)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2026, 2, 28), LocalDate.of(2026, 3, 31)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2026, 3, 31), LocalDate.of(2026, 4, 30)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2026, 4, 30), LocalDate.of(2026, 5, 31)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2026, 5, 31), LocalDate.of(2026, 6, 30)));
+        expectedRepaymentPeriods.add(periodData(LocalDate.of(2026, 6, 30), LocalDate.of(2026, 7, 31)));
+
+        Mockito.when(loanProductRelatedDetail.getAnnualNominalInterestRate()).thenReturn(BigDecimal.valueOf(9.4822));
+        Mockito.when(loanProductRelatedDetail.getDaysInYearType()).thenReturn(DaysInYearType.DAYS_360.getValue());
+        Mockito.when(loanProductRelatedDetail.getDaysInMonthType()).thenReturn(DaysInMonthType.DAYS_30.getValue());
+        Mockito.when(loanProductRelatedDetail.getRepaymentPeriodFrequencyType()).thenReturn(PeriodFrequencyType.MONTHS);
+        Mockito.when(loanProductRelatedDetail.getRepayEvery()).thenReturn(1);
+        Mockito.when(loanProductRelatedDetail.getCurrencyData()).thenReturn(currency);
+        Mockito.when(loanProductRelatedDetail.getNumberOfRepayments()).thenReturn(7);
+        Mockito.when(loanProductRelatedDetail.isAllowFullTermForTranche()).thenReturn(true);
+
+        final ProgressiveLoanInterestScheduleModel interestSchedule = emiCalculator
+                .generatePeriodInterestScheduleModel(expectedRepaymentPeriods, loanProductRelatedDetail, null, mc);
+
+        emiCalculator.addDisbursement(interestSchedule, LocalDate.of(2026, 1, 15), toMoney(100.0));
+        // Mid Apr period (index 3) → full term needs 7 periods from there → 3 extras beyond Jul 31
+        emiCalculator.addDisbursement(interestSchedule, LocalDate.of(2026, 4, 10), toMoney(100.0));
+
+        final List<RepaymentPeriod> periods = interestSchedule.repaymentPeriods();
+        Assertions.assertEquals(10, periods.size());
+        checkPeriodDates(periods.get(7), LocalDate.of(2026, 7, 31), LocalDate.of(2026, 8, 31));
+        checkPeriodDates(periods.get(8), LocalDate.of(2026, 8, 31), LocalDate.of(2026, 9, 30));
+        checkPeriodDates(periods.get(9), LocalDate.of(2026, 9, 30), LocalDate.of(2026, 10, 31));
+        Assertions.assertEquals(0.0, toDouble(periods.getLast().getOutstandingLoanBalance()));
+    }
+
+    private static void checkPeriodDates(final RepaymentPeriod repaymentPeriod, final LocalDate fromDate, final LocalDate dueDate) {
+        Assertions.assertEquals(fromDate, repaymentPeriod.getFromDate());
+        Assertions.assertEquals(dueDate, repaymentPeriod.getDueDate());
+    }
+
 }

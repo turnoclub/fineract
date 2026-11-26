@@ -212,6 +212,10 @@ public class LoanTransaction extends AbstractAuditableWithUTCDateTimeCustom<Long
         return new LoanTransaction(loan, loan.getOffice(), LoanTransactionType.INTEREST_REFUND, paymentDetail, amount, date, externalId);
     }
 
+    public static LoanTransaction feeRefund(final Loan loan, final BigDecimal amount, final LocalDate date, final ExternalId externalId) {
+        return new LoanTransaction(loan, loan.getOffice(), LoanTransactionType.FEE_REFUND, null, amount, date, externalId);
+    }
+
     public static LoanTransaction chargeAdjustment(final Loan loan, final BigDecimal amount, final LocalDate transactionDate,
             final ExternalId externalId, PaymentDetail paymentDetail) {
         return new LoanTransaction(loan, loan.getOffice(), LoanTransactionType.CHARGE_ADJUSTMENT, paymentDetail, amount, transactionDate,
@@ -469,8 +473,12 @@ public class LoanTransaction extends AbstractAuditableWithUTCDateTimeCustom<Long
         return createTerminalTransaction(loan, chargeOffDate, LoanTransactionType.CHARGE_OFF, externalId);
     }
 
-    public static LoanTransaction contractTermination(final Loan loan, final LocalDate transactionDate, final ExternalId externalId) {
-        return createTerminalTransaction(loan, transactionDate, LoanTransactionType.CONTRACT_TERMINATION, externalId);
+    public static LoanTransaction earlyTermination(final Loan loan, final LocalDate transactionDate,
+            final LoanTransactionType transactionType, final ExternalId externalId) {
+        if (!transactionType.isContractTermination() && !transactionType.isLoanWithdrawal()) {
+            throw new IllegalArgumentException("Not an early termination transaction type: " + transactionType);
+        }
+        return createTerminalTransaction(loan, transactionDate, transactionType, externalId);
     }
 
     private static LoanTransaction createTerminalTransaction(final Loan loan, final LocalDate transactionDate,
@@ -651,7 +659,7 @@ public class LoanTransaction extends AbstractAuditableWithUTCDateTimeCustom<Long
 
     public boolean isRepaymentLikeType() {
         return isRepayment() || isMerchantIssuedRefund() || isPayoutRefund() || isGoodwillCredit() || isChargeRefund()
-                || isChargeAdjustment() || isDownPayment() || isInterestPaymentWaiver() || isInterestRefund()
+                || isChargeAdjustment() || isDownPayment() || isInterestPaymentWaiver() || isInterestRefund() || isFeeRefund()
                 || isCapitalizedIncomeAdjustment();
     }
 
@@ -748,6 +756,14 @@ public class LoanTransaction extends AbstractAuditableWithUTCDateTimeCustom<Long
         return LoanTransactionType.CONTRACT_TERMINATION.equals(getTypeOf()) && isNotReversed();
     }
 
+    public boolean isLoanWithdrawal() {
+        return LoanTransactionType.LOAN_WITHDRAWAL.equals(getTypeOf()) && isNotReversed();
+    }
+
+    public boolean isEarlyTermination() {
+        return isContractTermination() || isLoanWithdrawal();
+    }
+
     public boolean isWaiver() {
         return isInterestWaiver() || isChargesWaiver();
     }
@@ -769,7 +785,7 @@ public class LoanTransaction extends AbstractAuditableWithUTCDateTimeCustom<Long
     }
 
     public boolean isEditable() {
-        return !(isChargeback() || isGoodwillCredit() || isPayoutRefund() || isMerchantIssuedRefund());
+        return !isChargeback();
     }
 
     public boolean isPenaltyPayment() {
@@ -843,6 +859,11 @@ public class LoanTransaction extends AbstractAuditableWithUTCDateTimeCustom<Long
         return isAccrual() || isAccrualAdjustment() || isAccrualActivity();
     }
 
+    public boolean isAmortizationRelated() {
+        return isCapitalizedIncomeAmortization() || isCapitalizedIncomeAmortizationAdjustment() || isBuyDownFeeAmortization()
+                || isBuyDownFeeAmortizationAdjustment();
+    }
+
     public boolean isWaiveCharge() {
         return getTypeOf().isWaiveCharges();
     }
@@ -862,7 +883,7 @@ public class LoanTransaction extends AbstractAuditableWithUTCDateTimeCustom<Long
                 || type == LoanTransactionType.CAPITALIZED_INCOME_AMORTIZATION || type == LoanTransactionType.CONTRACT_TERMINATION
                 || type == LoanTransactionType.CAPITALIZED_INCOME_AMORTIZATION_ADJUSTMENT || type == LoanTransactionType.BUY_DOWN_FEE
                 || type == LoanTransactionType.BUY_DOWN_FEE_ADJUSTMENT || type == LoanTransactionType.BUY_DOWN_FEE_AMORTIZATION
-                || type == LoanTransactionType.BUY_DOWN_FEE_AMORTIZATION_ADJUSTMENT);
+                || type == LoanTransactionType.BUY_DOWN_FEE_AMORTIZATION_ADJUSTMENT || type == LoanTransactionType.LOAN_WITHDRAWAL);
     }
 
     public void updateOutstandingLoanBalance(BigDecimal outstandingLoanBalance) {
@@ -870,7 +891,6 @@ public class LoanTransaction extends AbstractAuditableWithUTCDateTimeCustom<Long
     }
 
     public boolean isNotRefundForActiveLoan() {
-        // TODO Auto-generated method stub
         return !isRefundForActiveLoan();
     }
 
@@ -965,7 +985,8 @@ public class LoanTransaction extends AbstractAuditableWithUTCDateTimeCustom<Long
     }
 
     public Boolean isAllowTypeTransactionAtTheTimeOfLastUndo() {
-        return isNotReversed() && (isDisbursement() || isAccrualActivity() || isRepaymentAtDisbursement() || isRepayment());
+        return isNotReversed()
+                && (isDisbursement() || isAccrualActivity() || isRepaymentAtDisbursement() || isRepayment() || isDownPayment());
     }
 
     public Money getOutstandingLoanBalanceMoney(final MonetaryCurrency currency) {
@@ -1014,6 +1035,10 @@ public class LoanTransaction extends AbstractAuditableWithUTCDateTimeCustom<Long
 
     public boolean isInterestRefund() {
         return getTypeOf().isInterestRefund();
+    }
+
+    public boolean isFeeRefund() {
+        return getTypeOf().isFeeRefund();
     }
 
     public void updateAmount(BigDecimal bigDecimal) {

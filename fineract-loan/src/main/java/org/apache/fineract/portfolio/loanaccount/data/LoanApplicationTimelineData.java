@@ -19,7 +19,6 @@
 package org.apache.fineract.portfolio.loanaccount.data;
 
 import java.time.LocalDate;
-import java.util.List;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -72,10 +71,7 @@ public class LoanApplicationTimelineData {
     private String chargedOffByFirstname;
     private String chargedOffByLastname;
 
-    /**
-     * Full list of disbursement details. Used by Working Capital Loan; for standard Loan this is null.
-     */
-    private List<?> disbursementDetails;
+    private LocalDate overpaidOnDate;
 
     public LocalDate getDisbursementDate() {
         LocalDate disbursementDate = this.expectedDisbursementDate;

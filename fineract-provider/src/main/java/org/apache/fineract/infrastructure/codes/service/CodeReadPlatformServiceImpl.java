@@ -18,46 +18,30 @@
  */
 package org.apache.fineract.infrastructure.codes.service;
 
-import java.sql.ResultSet;
-import java.sql.SQLException;
+import static org.apache.fineract.query.QMCode.mCode;
+
+import com.querydsl.core.Tuple;
+import com.querydsl.sql.SQLQueryFactory;
 import java.util.Collection;
 import org.apache.fineract.infrastructure.codes.data.CodeData;
 import org.apache.fineract.infrastructure.codes.exception.CodeNotFoundException;
 import org.apache.fineract.infrastructure.security.service.PlatformSecurityContext;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.cache.annotation.Cacheable;
-import org.springframework.dao.EmptyResultDataAccessException;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 @Service
+@Transactional(readOnly = true)
 public class CodeReadPlatformServiceImpl implements CodeReadPlatformService {
 
-    private final JdbcTemplate jdbcTemplate;
     private final PlatformSecurityContext context;
+    private final SQLQueryFactory queryFactory;
 
     @Autowired
-    public CodeReadPlatformServiceImpl(final PlatformSecurityContext context, final JdbcTemplate jdbcTemplate) {
+    public CodeReadPlatformServiceImpl(final PlatformSecurityContext context, final SQLQueryFactory queryFactory) {
         this.context = context;
-        this.jdbcTemplate = jdbcTemplate;
-    }
-
-    private static final class CodeMapper implements RowMapper<CodeData> {
-
-        public String schema() {
-            return " c.id as id, c.code_name as code_name, c.is_system_defined as systemDefined from m_code c ";
-        }
-
-        @Override
-        public CodeData mapRow(final ResultSet rs, @SuppressWarnings("unused") final int rowNum) throws SQLException {
-
-            final Long id = rs.getLong("id");
-            final String code_name = rs.getString("code_name");
-            final boolean systemDefined = rs.getBoolean("systemDefined");
-
-            return CodeData.instance(id, code_name, systemDefined);
-        }
+        this.queryFactory = queryFactory;
     }
 
     @Override
@@ -65,37 +49,44 @@ public class CodeReadPlatformServiceImpl implements CodeReadPlatformService {
     public Collection<CodeData> retrieveAllCodes() {
         this.context.authenticatedUser();
 
-        final CodeMapper rm = new CodeMapper();
-        final String sql = "select " + rm.schema() + " order by c.code_name";
-
-        return this.jdbcTemplate.query(sql, rm); // NOSONAR
+        return this.queryFactory.select(mCode.id, mCode.codeName, mCode.isSystemDefined) //
+                .from(mCode) //
+                .orderBy(mCode.codeName.asc()) //
+                .fetch() //
+                .stream() //
+                .map(row -> CodeData.instance(row.get(mCode.id).longValue(), row.get(mCode.codeName),
+                        Boolean.TRUE.equals(row.get(mCode.isSystemDefined)))) //
+                .toList();
     }
 
     @Override
     public CodeData retrieveCode(final Long codeId) {
-        try {
-            this.context.authenticatedUser();
+        this.context.authenticatedUser();
 
-            final CodeMapper rm = new CodeMapper();
-            final String sql = "select " + rm.schema() + " where c.id = ?";
+        final Tuple row = this.queryFactory.select(mCode.id, mCode.codeName, mCode.isSystemDefined) //
+                .from(mCode) //
+                .where(mCode.id.eq(codeId.intValue())) //
+                .fetchOne();
 
-            return this.jdbcTemplate.queryForObject(sql, rm, new Object[] { codeId }); // NOSONAR
-        } catch (final EmptyResultDataAccessException e) {
-            throw new CodeNotFoundException(codeId, e);
+        if (row == null) {
+            throw new CodeNotFoundException(codeId);
         }
+
+        return CodeData.instance(row.get(mCode.id).longValue(), row.get(mCode.codeName),
+                Boolean.TRUE.equals(row.get(mCode.isSystemDefined)));
     }
 
     @Override
     public CodeData retrieveCode(final String codeName) {
-        try {
-            this.context.authenticatedUser();
-
-            final CodeMapper rm = new CodeMapper();
-            final String sql = "select " + rm.schema() + " where c.code_name = ?";
-
-            return this.jdbcTemplate.queryForObject(sql, rm, new Object[] { codeName }); // NOSONAR
-        } catch (final EmptyResultDataAccessException e) {
-            throw new CodeNotFoundException(codeName, e);
+        this.context.authenticatedUser();
+        final Tuple row = this.queryFactory.select(mCode.id, mCode.codeName, mCode.isSystemDefined)//
+                .from(mCode)//
+                .where(mCode.codeName.eq(codeName))//
+                .fetchOne();
+        if (row == null) {
+            throw new CodeNotFoundException(codeName);
         }
+        return CodeData.instance(row.get(mCode.id).longValue(), row.get(mCode.codeName),
+                Boolean.TRUE.equals(row.get(mCode.isSystemDefined)));
     }
 }

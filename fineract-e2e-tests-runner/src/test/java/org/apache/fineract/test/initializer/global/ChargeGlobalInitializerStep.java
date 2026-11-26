@@ -27,9 +27,9 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.fineract.client.feign.FineractFeignClient;
 import org.apache.fineract.client.feign.util.CallFailedRuntimeException;
+import org.apache.fineract.client.models.ChargeCreateRequest;
+import org.apache.fineract.client.models.ChargeCreateResponse;
 import org.apache.fineract.client.models.ChargeData;
-import org.apache.fineract.client.models.ChargeRequest;
-import org.apache.fineract.client.models.PostChargesResponse;
 import org.apache.fineract.test.data.ChargeCalculationType;
 import org.apache.fineract.test.data.ChargePaymentMode;
 import org.apache.fineract.test.data.ChargeProductAppliesTo;
@@ -93,6 +93,14 @@ public class ChargeGlobalInitializerStep implements FineractGlobalInitializerSte
                         createChargeIfNotExists(charges, CHARGE_APPLIES_TO_LOAN, ChargeProductType.LOAN_PERCENTAGE_PROCESSING_FEE.getName(),
                                 CHARGE_TIME_TYPE_SPECIFIED_DUE_DATE, CHARGE_CALCULATION_TYPE_PERCENTAGE_LOAN_AMOUNT_PLUS_INTEREST,
                                 CHARGE_AMOUNT_PERCENTAGE, true, false)),
+                () -> TestContext.INSTANCE.set(TestContextKey.CHARGE_FOR_LOAN_PERCENT_AMOUNT_DUE_DATE_CREATE_RESPONSE,
+                        createChargeIfNotExists(charges, CHARGE_APPLIES_TO_LOAN,
+                                ChargeProductType.LOAN_PERCENTAGE_AMOUNT_DUE_DATE_FEE.getName(), CHARGE_TIME_TYPE_SPECIFIED_DUE_DATE,
+                                CHARGE_CALCULATION_TYPE_PERCENTAGE_AMOUNT, CHARGE_AMOUNT_PERCENTAGE, true, false)),
+                () -> TestContext.INSTANCE.set(TestContextKey.CHARGE_FOR_LOAN_PERCENT_INTEREST_DUE_DATE_CREATE_RESPONSE,
+                        createChargeIfNotExists(charges, CHARGE_APPLIES_TO_LOAN,
+                                ChargeProductType.LOAN_PERCENTAGE_INTEREST_DUE_DATE_FEE.getName(), CHARGE_TIME_TYPE_SPECIFIED_DUE_DATE,
+                                CHARGE_CALCULATION_TYPE_PERCENTAGE_INTEREST, CHARGE_AMOUNT_PERCENTAGE, true, false)),
                 () -> TestContext.INSTANCE.set(TestContextKey.CHARGE_FOR_LOAN_FIXED_LATE_CREATE_RESPONSE,
                         createChargeIfNotExists(charges, CHARGE_APPLIES_TO_LOAN, ChargeProductType.LOAN_FIXED_LATE_FEE.getName(),
                                 CHARGE_TIME_TYPE_OVERDUE_FEES, CHARGE_CALCULATION_TYPE_FLAT, CHARGE_AMOUNT_FLAT, true, true)),
@@ -170,9 +178,10 @@ public class ChargeGlobalInitializerStep implements FineractGlobalInitializerSte
         ParallelExecutionHelper.runInParallel(items);
     }
 
-    private PostChargesResponse createChargeIfNotExists(List<ChargeData> existingCharges, Enum<ChargeProductAppliesTo> appliesTo,
+    private ChargeCreateResponse createChargeIfNotExists(List<ChargeData> existingCharges, Enum<ChargeProductAppliesTo> appliesTo,
             String name, Integer chargeTimeType, Integer chargeCalculationType, Double amount, Boolean isActive, Boolean isPenalty) {
-        ChargeRequest request = defaultChargesRequest(appliesTo, name, chargeTimeType, chargeCalculationType, amount, isActive, isPenalty);
+        ChargeCreateRequest request = defaultChargesRequest(appliesTo, name, chargeTimeType, chargeCalculationType, amount, isActive,
+                isPenalty);
 
         try {
             return ok(() -> fineractClient.charges().createCharge(request, Map.of()));
@@ -181,7 +190,7 @@ public class ChargeGlobalInitializerStep implements FineractGlobalInitializerSte
                 log.debug("Charge '{}' already exists, retrieving existing charge", name);
                 ChargeData existing = existingCharges.stream().filter(c -> name.equals(c.getName())).findFirst().orElse(null);
                 if (existing != null) {
-                    PostChargesResponse response = new PostChargesResponse();
+                    ChargeCreateResponse response = new ChargeCreateResponse();
                     response.setResourceId(existing.getId());
                     return response;
                 }
@@ -190,9 +199,9 @@ public class ChargeGlobalInitializerStep implements FineractGlobalInitializerSte
         }
     }
 
-    public static ChargeRequest defaultChargesRequest(Enum<ChargeProductAppliesTo> appliesTo, String name, Integer chargeTimeType,
+    public static ChargeCreateRequest defaultChargesRequest(Enum<ChargeProductAppliesTo> appliesTo, String name, Integer chargeTimeType,
             Integer chargeCalculationType, Double amount, Boolean isActive, Boolean isPenalty) {
-        ChargeRequest request = new ChargeRequest();
+        ChargeCreateRequest request = new ChargeCreateRequest();
         Integer chargeAppliesTo;
 
         if (appliesTo.equals(ChargeProductAppliesTo.CLIENT)) {

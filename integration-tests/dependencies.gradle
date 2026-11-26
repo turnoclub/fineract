@@ -20,8 +20,8 @@ dependencies {
     // testCompile dependencies are ONLY used in src/test, not src/main.
     // Do NOT repeat dependencies which are ALREADY in implementation or runtimeOnly!
     //
-    tomcat 'org.apache.tomcat:tomcat:10.1.55@zip'
-    def providerMainOutput = project(':fineract-provider').extensions.getByType(SourceSetContainer).named('main').get().output
+    def providerMainOutput = rootProject.project(':fineract-provider')
+            .extensions.getByType(SourceSetContainer).named('main').get().output
     testImplementation( providerMainOutput,
             project(path: ':fineract-core', configuration: 'runtimeElements'),
             project(path: ':fineract-accounting', configuration: 'runtimeElements'),
@@ -36,9 +36,6 @@ dependencies {
             project(path: ':fineract-progressive-loan', configuration: 'runtimeElements')
             )
 
-    // Retrofit client for existing tests
-    testImplementation project(path: ':fineract-client', configuration: 'runtimeElements')
-
     // Feign client - exclude fineract-client module to avoid Retrofit/Feign model conflicts
     // Both generated and hand-written Feign services are available in feign.services package
     testImplementation(project(path: ':fineract-client-feign', configuration: 'runtimeElements')) {
@@ -49,13 +46,6 @@ dependencies {
         exclude group: 'javax.servlet', module: 'javax.servlet-api'
         exclude group: 'javax.validation'
     }
-    testImplementation ('io.rest-assured:rest-assured') {
-        exclude group: 'commons-logging'
-        exclude group: 'org.apache.sling'
-        exclude group: 'com.sun.xml.bind'
-    }
-    testImplementation 'org.apache.groovy:groovy-xml'
-    testImplementation 'org.apache.groovy:groovy-json'
     testImplementation 'org.awaitility:awaitility'
 
     testCompileOnly 'com.github.spotbugs:spotbugs-annotations'

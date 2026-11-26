@@ -20,10 +20,31 @@ package org.apache.fineract.portfolio.workingcapitalloan.service;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.OffsetDateTime;
+import java.util.List;
+import org.apache.fineract.portfolio.workingcapitalloan.calc.ProjectedAmortizationScheduleModel;
 import org.apache.fineract.portfolio.workingcapitalloan.data.ProjectedAmortizationScheduleGenerateRequest;
 import org.apache.fineract.portfolio.workingcapitalloan.domain.WorkingCapitalLoan;
 
 public interface WorkingCapitalLoanAmortizationScheduleWriteService {
+
+    /**
+     * A principal repayment applied to the amortization schedule on a given date. {@code createdDate} and
+     * {@code transactionId} are the source transaction's audit creation timestamp and id; together they order this
+     * payment against the <em>rate changes</em> it is replayed alongside, which is the only same-date ordering that can
+     * change the resulting schedule. Creation time is the tie-break here because it is the sole key a payment and a
+     * rate change share - a rate change has no submitted-on date - and not because it is the loan module's rule: that
+     * one ranks submitted-on date ahead of creation time, and the allocation replay follows it. The two cannot disagree
+     * on an outcome, because the model aggregates payments by date before projecting, so the relative order of two
+     * payments sharing a date is immaterial. Both are {@code null} when the payment is reconstructed from the schedule
+     * model rather than from a transaction.
+     */
+    record PrincipalPayment(LocalDate date, BigDecimal amount, OffsetDateTime createdDate, Long transactionId) {
+    }
+
+    /** Principal re-injected on a given date by an over-refunding credit balance refund. */
+    record PrincipalAdjustment(LocalDate date, BigDecimal amount) {
+    }
 
     void generateAndSaveAmortizationSchedule(Long loanId, ProjectedAmortizationScheduleGenerateRequest request);
 
@@ -31,17 +52,70 @@ public interface WorkingCapitalLoanAmortizationScheduleWriteService {
 
     void generateAndSaveAmortizationScheduleOnApproval(WorkingCapitalLoan loan);
 
+    /**
+     * Drops the approval-time projection when the approval is undone. A submitted loan carries no projection
+     * (submission and modification never write one), so the loan is left exactly as a never approved one rather than
+     * with a projection nobody keeps in sync with later modifications.
+     */
+    void deleteAmortizationScheduleOnUndoApproval(WorkingCapitalLoan loan);
+
+    /** As on approval, but keeping the repayment frequency the existing schedule was dated with. */
     void regenerateAmortizationScheduleOnUndoDisbursal(WorkingCapitalLoan loan);
+
+    /**
+     * Puts the repayment frequency the existing schedule was dated with back on the loan, so approving it again dates
+     * the schedule the same way. A schedule stored before the frequency was honoured was daily, whatever the loan
+     * records.
+     */
+    void restoreScheduledFrequencyOnUndoApproval(WorkingCapitalLoan loan);
 
     void applyRepayment(WorkingCapitalLoan loan, LocalDate transactionDate, BigDecimal repaymentAmount);
 
-    BigDecimal getWorkingCapitalLoanDiscountAmount(WorkingCapitalLoan loan);
+    void applyRepaymentUndo(WorkingCapitalLoan loan, LocalDate transactionDate, BigDecimal repaymentAmount);
 
-    void regenerateAmortizationScheduleOnRateChange(WorkingCapitalLoan loan, BigDecimal newRate);
+    /**
+     * Moves the schedule's notion of today forward to {@code businessDate}, so instalment dates that have passed with
+     * no payment against them report a nil payment instead of nothing at all. The expected projection is left alone —
+     * only a real payment restates that. Does nothing when the loan has no schedule, or when nothing has elapsed since
+     * it was last calculated.
+     */
+    void acknowledgeElapsedPeriods(WorkingCapitalLoan loan, LocalDate businessDate);
+
+    /**
+     * Rebuilds the schedule after a rate change has been persisted. The new rate is not passed in: the schedule is
+     * reconstructed by replaying every non-reversed rate change in effective-date order, so it is read back from the
+     * loan's rate-change history along with the ones already there.
+     */
+    ProjectedAmortizationScheduleModel regenerateAmortizationScheduleOnRateChange(WorkingCapitalLoan loan);
+
+    /**
+     * Rebuilds the stored model from the loan's own record of what happened - its transactions, the principal each of
+     * them was allocated, and the rate changes booked against it - and saves the result.
+     *
+     * <p>
+     * For a model persisted by an earlier version of the calculation. Such a model still parses, so nothing fails: the
+     * fields the current shape no longer knows are dropped, and the schedule is quietly missing whatever they carried
+     * until something writes it back that way for good.
+     *
+     * <p>
+     * Nothing but its repayment frequency is read out of the model being replaced, which is what makes this safe for a
+     * version bump of any size: the model is suspect by definition here, so a rebuild that consulted it would inherit
+     * whatever the older shape had lost. Every other input comes from a table the model does not own. The frequency is
+     * the exception because the loan's own may never have dated the schedule: a model stored without one was daily.
+     */
+    void rebuildScheduleModelFromRecordedHistory(WorkingCapitalLoan loan);
 
     /**
      * After a discount fee adjustment: regenerates the projected schedule with the new loan-level discount (as on
      * disbursement generation) and re-applies recorded actual repayments only.
      */
-    void applyDiscountFeeAdjustment(WorkingCapitalLoan loan, LocalDate adjustmentTransactionDate);
+    void applyDiscountFeeAdjustment(WorkingCapitalLoan loan);
+
+    /**
+     * Rebuilds the projected schedule from scratch (as on disbursement) and re-applies the given principal payments in
+     * chronological order, then the given principal adjustments. Used by transaction reprocessing, where re-allocation
+     * can change the principal portion recorded on each transaction date.
+     */
+    void rebuildScheduleFromPrincipalPayments(WorkingCapitalLoan loan, List<PrincipalPayment> principalPayments,
+            List<PrincipalAdjustment> principalAdjustments);
 }

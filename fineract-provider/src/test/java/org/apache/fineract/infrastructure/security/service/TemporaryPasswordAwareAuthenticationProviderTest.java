@@ -28,6 +28,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 class TemporaryPasswordAwareAuthenticationProviderTest {
@@ -38,7 +39,8 @@ class TemporaryPasswordAwareAuthenticationProviderTest {
     @BeforeEach
     void setUp() {
         passwordEncoder = mock(PasswordEncoder.class);
-        subject = new TemporaryPasswordAwareAuthenticationProvider();
+        UserDetailsService userDetailsService = mock(UserDetailsService.class);
+        subject = new TemporaryPasswordAwareAuthenticationProvider(userDetailsService);
         subject.setPasswordEncoder(passwordEncoder);
     }
 
@@ -47,7 +49,8 @@ class TemporaryPasswordAwareAuthenticationProviderTest {
         AppUser user = mockEnabledUser();
         when(user.getPassword()).thenReturn("{bcrypt}main");
         when(passwordEncoder.matches("secret", "{bcrypt}main")).thenReturn(true);
-        subject.setUserDetailsService(username -> user);
+        subject = new TemporaryPasswordAwareAuthenticationProvider(username -> user);
+        subject.setPasswordEncoder(passwordEncoder);
 
         subject.authenticate(UsernamePasswordAuthenticationToken.unauthenticated("demo", "secret"));
     }
@@ -60,7 +63,8 @@ class TemporaryPasswordAwareAuthenticationProviderTest {
         when(user.getTemporaryPassword()).thenReturn("{bcrypt}temp");
         when(passwordEncoder.matches("temporary-secret", "{bcrypt}main")).thenReturn(false);
         when(passwordEncoder.matches("temporary-secret", "{bcrypt}temp")).thenReturn(true);
-        subject.setUserDetailsService(username -> user);
+        subject = new TemporaryPasswordAwareAuthenticationProvider(username -> user);
+        subject.setPasswordEncoder(passwordEncoder);
 
         subject.authenticate(UsernamePasswordAuthenticationToken.unauthenticated("demo", "temporary-secret"));
     }
@@ -71,7 +75,8 @@ class TemporaryPasswordAwareAuthenticationProviderTest {
         when(user.getPassword()).thenReturn("{bcrypt}main");
         when(user.hasValidTemporaryPassword()).thenReturn(false);
         when(passwordEncoder.matches("temporary-secret", "{bcrypt}main")).thenReturn(false);
-        subject.setUserDetailsService(username -> user);
+        subject = new TemporaryPasswordAwareAuthenticationProvider(username -> user);
+        subject.setPasswordEncoder(passwordEncoder);
 
         assertThrows(BadCredentialsException.class,
                 () -> subject.authenticate(UsernamePasswordAuthenticationToken.unauthenticated("demo", "temporary-secret")));

@@ -18,33 +18,28 @@
  */
 package org.apache.fineract.integrationtests;
 
-import static org.apache.fineract.integrationtests.BaseLoanIntegrationTest.InterestRateFrequencyType.MONTHS;
-import static org.apache.fineract.integrationtests.BaseLoanIntegrationTest.InterestRateFrequencyType.WHOLE_TERM;
-import static org.apache.fineract.integrationtests.BaseLoanIntegrationTest.InterestRateFrequencyType.YEARS;
-import static org.apache.fineract.integrationtests.BaseLoanIntegrationTest.RepaymentFrequencyType.DAYS;
+import static org.apache.fineract.integrationtests.client.feign.modules.LoanTestData.InterestRateFrequencyType.MONTHS;
+import static org.apache.fineract.integrationtests.client.feign.modules.LoanTestData.InterestRateFrequencyType.WHOLE_TERM;
+import static org.apache.fineract.integrationtests.client.feign.modules.LoanTestData.InterestRateFrequencyType.YEARS;
+import static org.apache.fineract.integrationtests.client.feign.modules.LoanTestData.LOCALE;
+import static org.apache.fineract.integrationtests.client.feign.modules.LoanTestData.RepaymentFrequencyType.DAYS;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import io.restassured.builder.RequestSpecBuilder;
-import io.restassured.builder.ResponseSpecBuilder;
-import io.restassured.http.ContentType;
-import io.restassured.specification.RequestSpecification;
-import io.restassured.specification.ResponseSpecification;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import org.apache.commons.lang3.tuple.Pair;
+import org.apache.fineract.client.feign.util.CallFailedRuntimeException;
 import org.apache.fineract.client.models.AdvancedPaymentData;
-import org.apache.fineract.client.models.BusinessDateUpdateRequest;
 import org.apache.fineract.client.models.CreditAllocationData;
 import org.apache.fineract.client.models.CreditAllocationOrder;
 import org.apache.fineract.client.models.GetLoanProductsProductIdResponse;
@@ -72,26 +67,27 @@ import org.apache.fineract.client.models.PostLoansResponse;
 import org.apache.fineract.client.models.PostUpdateRescheduleLoansRequest;
 import org.apache.fineract.client.models.PutGlobalConfigurationsRequest;
 import org.apache.fineract.client.models.PutLoansLoanIdRequest;
-import org.apache.fineract.client.util.CallFailedRuntimeException;
 import org.apache.fineract.infrastructure.configuration.api.GlobalConfigurationConstants;
-import org.apache.fineract.integrationtests.common.BusinessDateHelper;
-import org.apache.fineract.integrationtests.common.BusinessStepHelper;
-import org.apache.fineract.integrationtests.common.ClientHelper;
+import org.apache.fineract.integrationtests.client.feign.FeignLoanTestBase;
+import org.apache.fineract.integrationtests.client.feign.helpers.FeignBusinessStepHelper;
+import org.apache.fineract.integrationtests.client.feign.helpers.FeignDelinquencyHelper;
+import org.apache.fineract.integrationtests.client.feign.helpers.FeignTransactionHelper;
+import org.apache.fineract.integrationtests.client.feign.helpers.FeignUserHelper;
+import org.apache.fineract.integrationtests.client.feign.modules.ClientRequestBuilders;
+import org.apache.fineract.integrationtests.client.feign.modules.LoanRequestBuilders;
+import org.apache.fineract.integrationtests.client.feign.modules.LoanTestData.DaysInMonthType;
+import org.apache.fineract.integrationtests.client.feign.modules.LoanTestData.DaysInYearType;
+import org.apache.fineract.integrationtests.client.feign.modules.LoanTestData.InterestCalculationPeriodType;
+import org.apache.fineract.integrationtests.client.feign.modules.LoanTestData.InterestType;
+import org.apache.fineract.integrationtests.client.feign.modules.LoanTestData.RepaymentFrequencyType;
 import org.apache.fineract.integrationtests.common.CommonConstants;
+import org.apache.fineract.integrationtests.common.FineractFeignClientHelper;
 import org.apache.fineract.integrationtests.common.LoanRescheduleRequestHelper;
 import org.apache.fineract.integrationtests.common.Utils;
 import org.apache.fineract.integrationtests.common.accounting.Account;
-import org.apache.fineract.integrationtests.common.accounting.AccountHelper;
 import org.apache.fineract.integrationtests.common.accounting.PeriodicAccrualAccountingHelper;
-import org.apache.fineract.integrationtests.common.charges.ChargesHelper;
 import org.apache.fineract.integrationtests.common.loans.CobHelper;
 import org.apache.fineract.integrationtests.common.loans.LoanProductTestBuilder;
-import org.apache.fineract.integrationtests.common.loans.LoanTransactionHelper;
-import org.apache.fineract.integrationtests.common.organisation.StaffHelper;
-import org.apache.fineract.integrationtests.common.products.DelinquencyBucketsHelper;
-import org.apache.fineract.integrationtests.common.system.CodeHelper;
-import org.apache.fineract.integrationtests.useradministration.roles.RolesHelper;
-import org.apache.fineract.integrationtests.useradministration.users.UserHelper;
 import org.apache.fineract.portfolio.loanaccount.domain.transactionprocessor.impl.AdvancedPaymentScheduleTransactionProcessor;
 import org.apache.fineract.portfolio.loanaccount.domain.transactionprocessor.impl.EarlyPaymentLoanRepaymentScheduleTransactionProcessor;
 import org.apache.fineract.portfolio.loanaccount.domain.transactionprocessor.impl.FineractStyleLoanRepaymentScheduleTransactionProcessor;
@@ -105,32 +101,17 @@ import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoanIntegrationTest {
+public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends FeignLoanTestBase {
 
     private static final Logger LOG = LoggerFactory.getLogger(AdvancedPaymentAllocationLoanRepaymentScheduleTest.class);
-    private static final String DATETIME_PATTERN = "dd MMMM yyyy";
-    private static ResponseSpecification responseSpec;
-    private static RequestSpecification requestSpec;
-    private static BusinessDateHelper businessDateHelper;
-    private static LoanTransactionHelper loanTransactionHelper;
-    private static AccountHelper accountHelper;
-    private static Integer commonLoanProductId;
+
+    private static Long commonLoanProductId;
     private static PostClientsResponse client;
-    private static LoanRescheduleRequestHelper loanRescheduleRequestHelper;
+
+    private final FeignDelinquencyHelper delinquencyHelper = new FeignDelinquencyHelper(FineractFeignClientHelper.getFineractFeignClient());
 
     @BeforeAll
     public static void setup() {
-        Utils.initializeRESTAssured();
-        requestSpec = new RequestSpecBuilder().setContentType(ContentType.JSON).build();
-        requestSpec.header("Authorization", "Basic " + Utils.loginIntoServerAndGetBase64EncodedAuthenticationKey());
-        requestSpec.header("Fineract-Platform-TenantId", "default");
-        responseSpec = new ResponseSpecBuilder().expectStatusCode(200).build();
-        loanTransactionHelper = new LoanTransactionHelper(requestSpec, responseSpec);
-        businessDateHelper = new BusinessDateHelper();
-        accountHelper = new AccountHelper(requestSpec, responseSpec);
-        ClientHelper clientHelper = new ClientHelper(requestSpec, responseSpec);
-        loanRescheduleRequestHelper = new LoanRescheduleRequestHelper(requestSpec, responseSpec);
-
         final Account assetAccount = accountHelper.createAssetAccount();
         final Account incomeAccount = accountHelper.createIncomeAccount();
         final Account expenseAccount = accountHelper.createExpenseAccount();
@@ -138,11 +119,26 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
 
         commonLoanProductId = createLoanProduct("500", "15", "4", true, "25", true, LoanScheduleType.PROGRESSIVE,
                 LoanScheduleProcessingType.HORIZONTAL, assetAccount, incomeAccount, expenseAccount, overpaymentAccount);
-        client = clientHelper.createClient(ClientHelper.defaultClientCreationRequest());
+        client = clientHelper.createClient(ClientRequestBuilders.defaultClient());
         // setup COB Business Steps to prevent test failing due other integration test configurations
-        new BusinessStepHelper().updateSteps("LOAN_CLOSE_OF_BUSINESS", "APPLY_CHARGE_TO_OVERDUE_LOANS", "LOAN_DELINQUENCY_CLASSIFICATION",
-                "CHECK_LOAN_REPAYMENT_DUE", "CHECK_LOAN_REPAYMENT_OVERDUE", "UPDATE_LOAN_ARREARS_AGING", "ADD_PERIODIC_ACCRUAL_ENTRIES",
+        new FeignBusinessStepHelper(FineractFeignClientHelper.getFineractFeignClient()).updateSteps("LOAN_CLOSE_OF_BUSINESS",
+                "APPLY_CHARGE_TO_OVERDUE_LOANS", "LOAN_DELINQUENCY_CLASSIFICATION", "CHECK_LOAN_REPAYMENT_DUE",
+                "CHECK_LOAN_REPAYMENT_OVERDUE", "UPDATE_LOAN_ARREARS_AGING", "ADD_PERIODIC_ACCRUAL_ENTRIES",
                 "EXTERNAL_ASSET_OWNER_TRANSFER", "CHECK_DUE_INSTALLMENTS", "ACCRUAL_ACTIVITY_POSTING", "LOAN_INTEREST_RECALCULATION");
+    }
+
+    /** Prepayment amounts as of the given date; the loan template exposes them per portion. */
+    private static GetLoansLoanIdTransactionsTemplateResponse getPrepayAmount(Long loanId, LocalDate date) {
+        return transactionHelper.getPrepaymentAmount(loanId, dateTimeFormatter.format(date), DATETIME_PATTERN);
+    }
+
+    private static Long addSpecifiedDueDateCharge(Long loanId, Long chargeId, String dueDate, double amount) {
+        return loanHelper.addSpecifiedDueDateCharge(loanId, chargeId, amount, dueDate).getResourceId();
+    }
+
+    private static void applyLoanExpectingError(PostLoansRequest request, int expectedHttpStatus) {
+        CallFailedRuntimeException exception = assertThrows(CallFailedRuntimeException.class, () -> loanHelper.applyForLoan(request));
+        assertEquals(expectedHttpStatus, exception.getStatus());
     }
 
     // UC1: Simple payments
@@ -158,15 +154,13 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             final PostLoansResponse loanResponse = applyForLoanApplication(client.getClientId(), commonLoanProductId,
                     BigDecimal.valueOf(500.0), 45, 15, 3, BigDecimal.ZERO, "01 January 2023", "01 January 2023");
 
-            loanTransactionHelper.approveLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(500)).dateFormat(DATETIME_PATTERN)
-                            .approvedOnDate("01 January 2023").locale("en"));
+            loanHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(500))
+                    .dateFormat(DATETIME_PATTERN).approvedOnDate("01 January 2023").locale("en"));
 
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().actualDisbursementDate("01 January 2023").dateFormat(DATETIME_PATTERN)
-                            .transactionAmount(BigDecimal.valueOf(500.00)).locale("en"));
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate("01 January 2023")
+                    .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(500.00)).locale("en"));
 
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 375.0, 125.0, 375.0, 125.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 0.0, 125.0, 0.0, 0.0);
@@ -175,10 +169,10 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateLoanTransaction(loanDetails, 1, 125.0, 125.0, 0.0, 375.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("16 January 2023").locale("en").transactionAmount(125.0));
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 250.0, 250.0, 250.0, 250.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 125.0, 0.0, 0.0, 0.0);
@@ -187,10 +181,10 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateLoanTransaction(loanDetails, 2, 125.0, 125.0, 0.0, 250.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("31 January 2023").locale("en").transactionAmount(125.0));
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 125.0, 375.0, 125.0, 375.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 125.0, 0.0, 0.0, 0.0);
@@ -199,10 +193,10 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateLoanTransaction(loanDetails, 3, 125.0, 125.0, 0.0, 125.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("15 February 2023").locale("en").transactionAmount(125.0));
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 0.0, 500.0, 0.0, 500.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 125.0, 0.0, 0.0, 0.0);
@@ -226,15 +220,13 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             final PostLoansResponse loanResponse = applyForLoanApplication(client.getClientId(), commonLoanProductId,
                     BigDecimal.valueOf(500.0), 45, 15, 3, BigDecimal.ZERO, "01 January 2023", "01 January 2023");
 
-            loanTransactionHelper.approveLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(500)).dateFormat(DATETIME_PATTERN)
-                            .approvedOnDate("01 January 2023").locale("en"));
+            loanHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(500))
+                    .dateFormat(DATETIME_PATTERN).approvedOnDate("01 January 2023").locale("en"));
 
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().actualDisbursementDate("01 January 2023").dateFormat(DATETIME_PATTERN)
-                            .transactionAmount(BigDecimal.valueOf(500.00)).locale("en"));
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate("01 January 2023")
+                    .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(500.00)).locale("en"));
 
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 375.0, 125.0, 375.0, 125.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 0.0, 125.0, 0.0, 0.0);
@@ -243,10 +235,10 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateLoanTransaction(loanDetails, 1, 125.0, 125.0, 0.0, 375.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("16 January 2023").locale("en").transactionAmount(150.0));
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 225.0, 275.0, 225.0, 275.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 125.0, 0.0, 0.0, 0.0);
@@ -255,10 +247,10 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateLoanTransaction(loanDetails, 2, 150.0, 150.0, 0.0, 225.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("31 January 2023").locale("en").transactionAmount(125.0));
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 100.0, 400.0, 100.0, 400.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 125.0, 0.0, 0.0, 0.0);
@@ -267,10 +259,10 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateLoanTransaction(loanDetails, 3, 125.0, 125.0, 0.0, 100.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("15 February 2023").locale("en").transactionAmount(125.0));
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 0.0, 500.0, 0.0, 500.0, 25.0);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 125.0, 0.0, 0.0, 0.0);
@@ -280,7 +272,7 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             assertTrue(loanDetails.getStatus().getOverpaid());
 
             // Loan Repayment (after) Overpaid
-            GetLoansLoanIdTransactionsTemplateResponse transactionAfter = loanTransactionHelper
+            GetLoansLoanIdTransactionsTemplateResponse transactionAfter = transactionHelper
                     .retrieveTransactionTemplate(loanResponse.getLoanId(), "repayment", DATETIME_PATTERN, "15 February 2023", LOCALE);
             assertNotNull(transactionAfter);
         });
@@ -298,15 +290,13 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             final PostLoansResponse loanResponse = applyForLoanApplication(client.getClientId(), commonLoanProductId,
                     BigDecimal.valueOf(500.0), 45, 15, 3, BigDecimal.ZERO, "01 January 2023", "01 January 2023");
 
-            loanTransactionHelper.approveLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(500)).dateFormat(DATETIME_PATTERN)
-                            .approvedOnDate("01 January 2023").locale("en"));
+            loanHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(500))
+                    .dateFormat(DATETIME_PATTERN).approvedOnDate("01 January 2023").locale("en"));
 
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().actualDisbursementDate("01 January 2023").dateFormat(DATETIME_PATTERN)
-                            .transactionAmount(BigDecimal.valueOf(500.00)).locale("en"));
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate("01 January 2023")
+                    .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(500.00)).locale("en"));
 
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 375.0, 125.0, 375.0, 125.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 0.0, 125.0, 0.0, 0.0);
@@ -315,10 +305,10 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateLoanTransaction(loanDetails, 1, 125.0, 125.0, 0.0, 375.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makeGoodwillCredit(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeGoodwillCredit(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("16 January 2023").locale("en").transactionAmount(150.0));
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 225.0, 275.0, 225.0, 275.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 125.0, 0.0, 0.0, 0.0);
@@ -327,10 +317,10 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateLoanTransaction(loanDetails, 2, 150.0, 150.0, 0.0, 225.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("31 January 2023").locale("en").transactionAmount(125.0));
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 100.0, 400.0, 100.0, 400.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 125.0, 0.0, 0.0, 0.0);
@@ -339,10 +329,10 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateLoanTransaction(loanDetails, 3, 125.0, 125.0, 0.0, 100.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("15 February 2023").locale("en").transactionAmount(125.0));
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 0.0, 500.0, 0.0, 500.0, 25.0);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 125.0, 0.0, 0.0, 0.0);
@@ -352,7 +342,7 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             assertTrue(loanDetails.getStatus().getOverpaid());
 
             // Loan Repayment (after) Overpaid
-            GetLoansLoanIdTransactionsTemplateResponse transactionAfter = loanTransactionHelper
+            GetLoansLoanIdTransactionsTemplateResponse transactionAfter = transactionHelper
                     .retrieveTransactionTemplate(loanResponse.getLoanId(), "repayment", DATETIME_PATTERN, "15 February 2023", LOCALE);
             assertNotNull(transactionAfter);
         });
@@ -371,19 +361,17 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             final PostLoansResponse loanResponse = applyForLoanApplication(client.getClientId(), commonLoanProductId,
                     BigDecimal.valueOf(500.0), 45, 15, 3, BigDecimal.ZERO, "01 January 2023", "01 January 2023");
 
-            loanTransactionHelper.approveLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(500)).dateFormat(DATETIME_PATTERN)
-                            .approvedOnDate("01 January 2023").locale("en"));
+            loanHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(500))
+                    .dateFormat(DATETIME_PATTERN).approvedOnDate("01 January 2023").locale("en"));
 
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().actualDisbursementDate("01 January 2023").dateFormat(DATETIME_PATTERN)
-                            .transactionAmount(BigDecimal.valueOf(500.00)).locale("en"));
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate("01 January 2023")
+                    .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(500.00)).locale("en"));
 
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
-            loanTransactionHelper.reverseLoanTransaction(loanResponse.getLoanId(), loanDetails.getTransactions().get(1).getId(),
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
+            transactionHelper.reverseLoanTransaction(loanResponse.getLoanId(), loanDetails.getTransactions().get(1).getId(),
                     new PostLoansLoanIdTransactionsTransactionIdRequest().dateFormat(DATETIME_PATTERN).transactionDate("01 January 2023")
                             .transactionAmount(0.0).locale("en"));
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 500.0, 0.0, 500.0, 0.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 0.0, 125.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 0.0, 125.0, 0.0, 0.0);
@@ -391,14 +379,14 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateRepaymentPeriod(loanDetails, 4, 125.0, 0.0, 125.0, 0.0, 0.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("16 January 2023").locale("en").transactionAmount(125.0));
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
-            loanTransactionHelper.reverseLoanTransaction(loanResponse.getLoanId(), loanDetails.getTransactions().get(2).getId(),
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
+            transactionHelper.reverseLoanTransaction(loanResponse.getLoanId(), loanDetails.getTransactions().get(2).getId(),
                     new PostLoansLoanIdTransactionsTransactionIdRequest().dateFormat(DATETIME_PATTERN).transactionDate("16 January 2023")
                             .transactionAmount(0.0).locale("en"));
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 500.0, 0.0, 500.0, 0.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 0.0, 125.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 0.0, 125.0, 0.0, 0.0);
@@ -407,10 +395,10 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
 
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("20 January 2023").locale("en").transactionAmount(100.0));
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 400.0, 100.0, 400.0, 100.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 100.0, 25.0, 0.0, 100.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 0.0, 125.0, 0.0, 0.0);
@@ -419,10 +407,10 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateLoanTransaction(loanDetails, 3, 100.0, 100.0, 0.0, 400.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("31 January 2023").locale("en").transactionAmount(40.0));
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 360.0, 140.0, 360.0, 140.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 125.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 15.0, 110.0, 0.0, 15.0);
@@ -431,10 +419,10 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateLoanTransaction(loanDetails, 4, 40.0, 40.0, 0.0, 360.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("15 February 2023").locale("en").transactionAmount(360.0));
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 0.0, 500.0, 0.0, 500.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 125.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 125.0, 0.0, 0.0, 125.0);
@@ -442,6 +430,59 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateRepaymentPeriod(loanDetails, 4, 125.0, 125.0, 0.0, 0.0, 0.0);
             validateLoanTransaction(loanDetails, 5, 360.0, 360.0, 0.0, 0.0);
             assertTrue(loanDetails.getStatus().getClosedObligationsMet());
+        });
+    }
+
+    // UC4b: Repayment template returns next unpaid installment amount after partial repayment
+    // ADVANCED_PAYMENT_ALLOCATION_STRATEGY
+    // 1. Disburse the loan (500, 3 installments of 125 + 1 down payment of 125)
+    // 2. First installment (down payment) is auto-paid on disbursement
+    // 3. Make a repayment that fully pays installment 2
+    // 4. Assert repayment template points to installment 3 (next unpaid), not installment 2 (already paid)
+    @Test
+    public void repaymentTemplateReturnsNextUnpaidInstallmentAmount() {
+        runAt("15 February 2023", () -> {
+            final PostLoansResponse loanResponse = applyForLoanApplication(client.getClientId(), commonLoanProductId,
+                    BigDecimal.valueOf(500.0), 45, 15, 3, BigDecimal.ZERO, "01 January 2023", "01 January 2023");
+
+            loanHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(500))
+                    .dateFormat(DATETIME_PATTERN).approvedOnDate("01 January 2023").locale("en"));
+
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate("01 January 2023")
+                    .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(500.00)).locale("en"));
+
+            // Verify initial state: down payment (installment 1) already paid, remaining 3 installments outstanding
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
+            validateLoanSummaryBalances(loanDetails, 375.0, 125.0, 375.0, 125.0, null);
+            validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 0.0);
+            validateRepaymentPeriod(loanDetails, 2, 125.0, 0.0, 125.0, 0.0, 0.0);
+            validateRepaymentPeriod(loanDetails, 3, 125.0, 0.0, 125.0, 0.0, 0.0);
+            validateRepaymentPeriod(loanDetails, 4, 125.0, 0.0, 125.0, 0.0, 0.0);
+            assertTrue(loanDetails.getStatus().getActive());
+
+            // Fully pay installment 2
+            transactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+                    .dateFormat(DATETIME_PATTERN).transactionDate("16 January 2023").locale("en").transactionAmount(125.0));
+
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
+            validateLoanSummaryBalances(loanDetails, 250.0, 250.0, 250.0, 250.0, null);
+            validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 0.0);
+            validateRepaymentPeriod(loanDetails, 2, 125.0, 125.0, 0.0, 0.0, 0.0);
+            validateRepaymentPeriod(loanDetails, 3, 125.0, 0.0, 125.0, 0.0, 0.0);
+            validateRepaymentPeriod(loanDetails, 4, 125.0, 0.0, 125.0, 0.0, 0.0);
+            assertTrue(loanDetails.getStatus().getActive());
+
+            // Repayment template must point to installment 3 (next unpaid), not installment 2 (fully paid)
+            // Before the fix, this would return 0.0 because the query always picked the lowest installment
+            // number with outstanding balance, which after partial repayment could be a fully satisfied one
+            final GetLoansLoanIdTransactionsTemplateResponse transactionTemplate = transactionHelper
+                    .retrieveTransactionTemplate(loanResponse.getLoanId(), "repayment", DATETIME_PATTERN, "16 January 2023", LOCALE);
+            assertNotNull(transactionTemplate);
+            assertEquals(125.0, transactionTemplate.getAmount().doubleValue());
+            assertEquals(125.0, transactionTemplate.getPrincipalPortion().doubleValue());
+            assertEquals(0.0, transactionTemplate.getInterestPortion().doubleValue());
+            assertEquals(0.0, transactionTemplate.getFeeChargesPortion().doubleValue());
+            assertEquals(0.0, transactionTemplate.getPenaltyChargesPortion().doubleValue());
         });
     }
 
@@ -458,19 +499,17 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             final PostLoansResponse loanResponse = applyForLoanApplication(client.getClientId(), commonLoanProductId,
                     BigDecimal.valueOf(500.0), 45, 15, 3, BigDecimal.ZERO, "01 January 2023", "01 January 2023");
 
-            loanTransactionHelper.approveLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(500)).dateFormat(DATETIME_PATTERN)
-                            .approvedOnDate("01 January 2023").locale("en"));
+            loanHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(500))
+                    .dateFormat(DATETIME_PATTERN).approvedOnDate("01 January 2023").locale("en"));
 
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().actualDisbursementDate("01 January 2023").dateFormat(DATETIME_PATTERN)
-                            .transactionAmount(BigDecimal.valueOf(500.00)).locale("en"));
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate("01 January 2023")
+                    .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(500.00)).locale("en"));
 
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
-            loanTransactionHelper.reverseLoanTransaction(loanResponse.getLoanId(), loanDetails.getTransactions().get(1).getId(),
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
+            transactionHelper.reverseLoanTransaction(loanResponse.getLoanId(), loanDetails.getTransactions().get(1).getId(),
                     new PostLoansLoanIdTransactionsTransactionIdRequest().dateFormat(DATETIME_PATTERN).transactionDate("01 January 2023")
                             .transactionAmount(0.0).locale("en"));
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 500.0, 0.0, 500.0, 0.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 0.0, 125.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 0.0, 125.0, 0.0, 0.0);
@@ -478,10 +517,10 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateRepaymentPeriod(loanDetails, 4, 125.0, 0.0, 125.0, 0.0, 0.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makeMerchantIssuedRefund(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeMerchantIssuedRefund(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("8 January 2023").locale("en").transactionAmount(300.0));
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 200.0, 300.0, 200.0, 300.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 125.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 58.33, 66.67, 58.33, 0.0);
@@ -490,10 +529,10 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateLoanTransaction(loanDetails, 2, 300.0, 300.0, 0.0, 200.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("16 January 2023").locale("en").transactionAmount(66.67));
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 133.33, 366.67, 133.33, 366.67, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 125.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 125.0, 0.0, 58.33, 0.0);
@@ -502,10 +541,10 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateLoanTransaction(loanDetails, 3, 66.67, 66.67, 0.0, 133.33);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("31 January 2023").locale("en").transactionAmount(66.67));
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 66.66, 433.34, 66.66, 433.34, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 125.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 125.0, 0.0, 58.33, 0.0);
@@ -514,10 +553,10 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateLoanTransaction(loanDetails, 4, 66.67, 66.67, 0.0, 66.66);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("15 February 2023").locale("en").transactionAmount(66.66));
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 0.0, 500.0, 0.0, 500.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 125.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 125.0, 0.0, 58.33, 0.0);
@@ -542,15 +581,13 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             final PostLoansResponse loanResponse = applyForLoanApplication(client.getClientId(), commonLoanProductId,
                     BigDecimal.valueOf(500.0), 45, 15, 3, BigDecimal.ZERO, "01 January 2023", "01 January 2023");
 
-            loanTransactionHelper.approveLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(500)).dateFormat(DATETIME_PATTERN)
-                            .approvedOnDate("01 January 2023").locale("en"));
+            loanHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(500))
+                    .dateFormat(DATETIME_PATTERN).approvedOnDate("01 January 2023").locale("en"));
 
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().actualDisbursementDate("01 January 2023").dateFormat(DATETIME_PATTERN)
-                            .transactionAmount(BigDecimal.valueOf(500.00)).locale("en"));
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate("01 January 2023")
+                    .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(500.00)).locale("en"));
 
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
 
             validateLoanSummaryBalances(loanDetails, 375.0, 125.0, 375.0, 125.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 0.0);
@@ -560,10 +597,10 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateLoanTransaction(loanDetails, 1, 125.0, 125.0, 0.0, 375.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("16 January 2023").locale("en").transactionAmount(125.0));
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 250.0, 250.0, 250.0, 250.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 125.0, 0.0, 0.0, 0.0);
@@ -572,10 +609,10 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateLoanTransaction(loanDetails, 2, 125.0, 125.0, 0.0, 250.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makeMerchantIssuedRefund(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeMerchantIssuedRefund(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("16 January 2023").locale("en").transactionAmount(200.0));
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 50.0, 450.0, 50.0, 450.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 125.0, 0.0, 0.0, 0.0);
@@ -584,10 +621,10 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateLoanTransaction(loanDetails, 3, 200, 200.0, 0.0, 50.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("31 January 2023").locale("en").transactionAmount(25.0));
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 25.0, 475.0, 25.0, 475.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 125.0, 0.0, 0.0, 0.0);
@@ -596,10 +633,10 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateLoanTransaction(loanDetails, 4, 25.0, 25.0, 0.0, 25.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("15 February 2023").locale("en").transactionAmount(25.0));
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 0.0, 500.0, 0.0, 500.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 125.0, 0.0, 0.0, 0.0);
@@ -624,19 +661,17 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             final PostLoansResponse loanResponse = applyForLoanApplication(client.getClientId(), commonLoanProductId,
                     BigDecimal.valueOf(500.0), 45, 15, 3, BigDecimal.ZERO, "01 January 2023", "01 January 2023");
 
-            loanTransactionHelper.approveLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(500)).dateFormat(DATETIME_PATTERN)
-                            .approvedOnDate("01 January 2023").locale("en"));
+            loanHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(500))
+                    .dateFormat(DATETIME_PATTERN).approvedOnDate("01 January 2023").locale("en"));
 
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().actualDisbursementDate("01 January 2023").dateFormat(DATETIME_PATTERN)
-                            .transactionAmount(BigDecimal.valueOf(500.00)).locale("en"));
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate("01 January 2023")
+                    .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(500.00)).locale("en"));
 
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
-            loanTransactionHelper.reverseLoanTransaction(loanResponse.getLoanId(), loanDetails.getTransactions().get(1).getId(),
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
+            transactionHelper.reverseLoanTransaction(loanResponse.getLoanId(), loanDetails.getTransactions().get(1).getId(),
                     new PostLoansLoanIdTransactionsTransactionIdRequest().dateFormat(DATETIME_PATTERN).transactionDate("01 January 2023")
                             .transactionAmount(0.0).locale("en"));
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 500.0, 0.0, 500.0, 0.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 0.0, 125.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 0.0, 125.0, 0.0, 0.0);
@@ -644,14 +679,14 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateRepaymentPeriod(loanDetails, 4, 125.0, 0.0, 125.0, 0.0, 0.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("16 January 2023").locale("en").transactionAmount(125.0));
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
-            loanTransactionHelper.reverseLoanTransaction(loanResponse.getLoanId(), loanDetails.getTransactions().get(2).getId(),
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
+            transactionHelper.reverseLoanTransaction(loanResponse.getLoanId(), loanDetails.getTransactions().get(2).getId(),
                     new PostLoansLoanIdTransactionsTransactionIdRequest().dateFormat(DATETIME_PATTERN).transactionDate("16 January 2023")
                             .transactionAmount(0.0).locale("en"));
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 500.0, 0.0, 500.0, 0.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 0.0, 125.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 0.0, 125.0, 0.0, 0.0);
@@ -659,10 +694,10 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateRepaymentPeriod(loanDetails, 4, 125.0, 0.0, 125.0, 0.0, 0.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makeMerchantIssuedRefund(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeMerchantIssuedRefund(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("17 January 2023").locale("en").transactionAmount(300.0));
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 200.0, 300.0, 200.0, 300.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 125.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 125.0, 0.0, 0.0, 125.0);
@@ -671,10 +706,10 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateLoanTransaction(loanDetails, 3, 300.0, 300.0, 0.0, 200.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("31 January 2023").locale("en").transactionAmount(100.0));
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 100.0, 400.0, 100.0, 400.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 125.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 125.0, 0.0, 0.0, 125.0);
@@ -683,10 +718,10 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateLoanTransaction(loanDetails, 4, 100.0, 100.0, 0.0, 100.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("15 February 2023").locale("en").transactionAmount(100.0));
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 0.0, 500.0, 0.0, 500.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 125.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 125.0, 0.0, 0.0, 125.0);
@@ -710,15 +745,13 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             final PostLoansResponse loanResponse = applyForLoanApplication(client.getClientId(), commonLoanProductId,
                     BigDecimal.valueOf(500.0), 45, 15, 3, BigDecimal.ZERO, "01 January 2023", "01 January 2023");
 
-            loanTransactionHelper.approveLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(500)).dateFormat(DATETIME_PATTERN)
-                            .approvedOnDate("01 January 2023").locale("en"));
+            loanHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(500))
+                    .dateFormat(DATETIME_PATTERN).approvedOnDate("01 January 2023").locale("en"));
 
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().actualDisbursementDate("01 January 2023").dateFormat(DATETIME_PATTERN)
-                            .transactionAmount(BigDecimal.valueOf(500.00)).locale("en"));
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate("01 January 2023")
+                    .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(500.00)).locale("en"));
 
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 375.0, 125.0, 375.0, 125.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 0.0, 125.0, 0.0, 0.0);
@@ -727,10 +760,10 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateLoanTransaction(loanDetails, 1, 125.0, 125.0, 0.0, 375.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makePayoutRefund(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makePayoutRefund(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("05 January 2023").locale("en").transactionAmount(200.0));
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 175.0, 325.0, 175.0, 325.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 125.0, 0.0, 125.0, 0.0);
@@ -739,10 +772,10 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateLoanTransaction(loanDetails, 2, 200.0, 200.0, 0.0, 175.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("31 January 2023").locale("en").transactionAmount(50.0));
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 125.0, 375.0, 125.0, 375.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 125.0, 0.0, 125.0, 0.0);
@@ -751,10 +784,10 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateLoanTransaction(loanDetails, 3, 50.0, 50.0, 0.0, 125.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("15 February 2023").locale("en").transactionAmount(125.0));
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 0.0, 500.0, 0.0, 500.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 125.0, 0.0, 125.0, 0.0);
@@ -779,15 +812,13 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             final PostLoansResponse loanResponse = applyForLoanApplication(client.getClientId(), commonLoanProductId,
                     BigDecimal.valueOf(500.0), 45, 15, 3, BigDecimal.ZERO, "01 January 2023", "01 January 2023");
 
-            loanTransactionHelper.approveLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(500)).dateFormat(DATETIME_PATTERN)
-                            .approvedOnDate("01 January 2023").locale("en"));
+            loanHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(500))
+                    .dateFormat(DATETIME_PATTERN).approvedOnDate("01 January 2023").locale("en"));
 
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().actualDisbursementDate("01 January 2023").dateFormat(DATETIME_PATTERN)
-                            .transactionAmount(BigDecimal.valueOf(500.00)).locale("en"));
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate("01 January 2023")
+                    .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(500.00)).locale("en"));
 
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 375.0, 125.0, 375.0, 125.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 0.0, 125.0, 0.0, 0.0);
@@ -796,14 +827,14 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateLoanTransaction(loanDetails, 1, 125.0, 125.0, 0.0, 375.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("16 January 2023").locale("en").transactionAmount(125.0));
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
-            loanTransactionHelper.reverseLoanTransaction(loanResponse.getLoanId(), loanDetails.getTransactions().get(2).getId(),
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
+            transactionHelper.reverseLoanTransaction(loanResponse.getLoanId(), loanDetails.getTransactions().get(2).getId(),
                     new PostLoansLoanIdTransactionsTransactionIdRequest().dateFormat(DATETIME_PATTERN).transactionDate("16 January 2023")
                             .transactionAmount(0.0).locale("en"));
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 375.0, 125.0, 375.0, 125.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 0.0, 125.0, 0.0, 0.0);
@@ -811,10 +842,10 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateRepaymentPeriod(loanDetails, 4, 125.0, 0.0, 125.0, 0.0, 0.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makePayoutRefund(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makePayoutRefund(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("17 January 2023").locale("en").transactionAmount(200.0));
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 175.0, 325.0, 175.0, 325.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 125.0, 0.0, 0.0, 125.0);
@@ -823,10 +854,10 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateLoanTransaction(loanDetails, 3, 200.0, 200.0, 0.0, 175.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("31 January 2023").locale("en").transactionAmount(50.0));
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 125.0, 375.0, 125.0, 375.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 125.0, 0.0, 0.0, 125.0);
@@ -835,10 +866,10 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateLoanTransaction(loanDetails, 4, 50.0, 50.0, 0.0, 125.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("15 February 2023").locale("en").transactionAmount(125.0));
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 0.0, 500.0, 0.0, 500.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 125.0, 0.0, 0.0, 125.0);
@@ -862,20 +893,18 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             final PostLoansResponse loanResponse = applyForLoanApplication(client.getClientId(), commonLoanProductId,
                     BigDecimal.valueOf(500.0), 45, 15, 3, BigDecimal.ZERO, "01 January 2023", "01 January 2023");
 
-            loanTransactionHelper.approveLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(500)).dateFormat(DATETIME_PATTERN)
-                            .approvedOnDate("01 January 2023").locale("en"));
+            loanHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(500))
+                    .dateFormat(DATETIME_PATTERN).approvedOnDate("01 January 2023").locale("en"));
 
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().actualDisbursementDate("01 January 2023").dateFormat(DATETIME_PATTERN)
-                            .transactionAmount(BigDecimal.valueOf(500.00)).locale("en"));
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate("01 January 2023")
+                    .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(500.00)).locale("en"));
 
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
-            loanTransactionHelper.reverseLoanTransaction(loanResponse.getLoanId(), loanDetails.getTransactions().get(1).getId(),
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
+            transactionHelper.reverseLoanTransaction(loanResponse.getLoanId(), loanDetails.getTransactions().get(1).getId(),
                     new PostLoansLoanIdTransactionsTransactionIdRequest().dateFormat(DATETIME_PATTERN).transactionDate("01 January 2023")
                             .transactionAmount(0.0).locale("en"));
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 500.0, 0.0, 500.0, 0.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 0.0, 125.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 0.0, 125.0, 0.0, 0.0);
@@ -883,10 +912,10 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateRepaymentPeriod(loanDetails, 4, 125.0, 0.0, 125.0, 0.0, 0.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makePayoutRefund(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makePayoutRefund(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("15 January 2023").locale("en").transactionAmount(400.0));
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 100.0, 400.0, 100.0, 400.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 125.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 125.0, 0.0, 125.0, 0.0);
@@ -895,10 +924,10 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateLoanTransaction(loanDetails, 2, 400.0, 400.0, 0.0, 100.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("15 February 2023").locale("en").transactionAmount(100.0));
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 0.0, 500.0, 0.0, 500.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 125.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 125.0, 0.0, 125.0, 0.0);
@@ -922,15 +951,13 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             final PostLoansResponse loanResponse = applyForLoanApplication(client.getClientId(), commonLoanProductId,
                     BigDecimal.valueOf(500.0), 45, 15, 3, BigDecimal.ZERO, "01 January 2023", "01 January 2023");
 
-            loanTransactionHelper.approveLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(500)).dateFormat(DATETIME_PATTERN)
-                            .approvedOnDate("01 January 2023").locale("en"));
+            loanHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(500))
+                    .dateFormat(DATETIME_PATTERN).approvedOnDate("01 January 2023").locale("en"));
 
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().actualDisbursementDate("01 January 2023").dateFormat(DATETIME_PATTERN)
-                            .transactionAmount(BigDecimal.valueOf(500.00)).locale("en"));
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate("01 January 2023")
+                    .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(500.00)).locale("en"));
 
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 375.0, 125.0, 375.0, 125.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 0.0, 125.0, 0.0, 0.0);
@@ -939,10 +966,10 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateLoanTransaction(loanDetails, 1, 125.0, 125.0, 0.0, 375.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makeGoodwillCredit(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeGoodwillCredit(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("08 January 2023").locale("en").transactionAmount(200.0));
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 175.0, 325.0, 175.0, 325.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 0.0, 125.0, 0.0, 0.0);
@@ -951,10 +978,10 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateLoanTransaction(loanDetails, 2, 200.0, 200.0, 0.0, 175.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("16 January 2023").locale("en").transactionAmount(125.0));
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 50.0, 450.0, 50.0, 450.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 125.0, 0.0, 0.0, 0.0);
@@ -963,10 +990,10 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateLoanTransaction(loanDetails, 3, 125.0, 125.0, 0.0, 50.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("31 January 2023").locale("en").transactionAmount(50.0));
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 0.0, 500.0, 0.0, 500.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 125.0, 0.0, 0.0, 0.0);
@@ -991,15 +1018,13 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             final PostLoansResponse loanResponse = applyForLoanApplication(client.getClientId(), commonLoanProductId,
                     BigDecimal.valueOf(500.0), 45, 15, 3, BigDecimal.ZERO, "01 January 2023", "01 January 2023");
 
-            loanTransactionHelper.approveLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(500)).dateFormat(DATETIME_PATTERN)
-                            .approvedOnDate("01 January 2023").locale("en"));
+            loanHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(500))
+                    .dateFormat(DATETIME_PATTERN).approvedOnDate("01 January 2023").locale("en"));
 
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().actualDisbursementDate("01 January 2023").dateFormat(DATETIME_PATTERN)
-                            .transactionAmount(BigDecimal.valueOf(500.00)).locale("en"));
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate("01 January 2023")
+                    .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(500.00)).locale("en"));
 
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 375.0, 125.0, 375.0, 125.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 0.0, 125.0, 0.0, 0.0);
@@ -1008,13 +1033,13 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateLoanTransaction(loanDetails, 1, 125.0, 125.0, 0.0, 375.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("16 January 2023").locale("en").transactionAmount(125.0));
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
-            loanTransactionHelper.reverseLoanTransaction(loanResponse.getLoanId(), loanDetails.getTransactions().get(2).getId(),
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
+            transactionHelper.reverseLoanTransaction(loanResponse.getLoanId(), loanDetails.getTransactions().get(2).getId(),
                     new PostLoansLoanIdTransactionsTransactionIdRequest().dateFormat(DATETIME_PATTERN).transactionDate("16 January 2023")
                             .transactionAmount(0.0).locale("en"));
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 375.0, 125.0, 375.0, 125.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 0.0, 125.0, 0.0, 0.0);
@@ -1022,10 +1047,10 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateRepaymentPeriod(loanDetails, 4, 125.0, 0.0, 125.0, 0.0, 0.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makeGoodwillCredit(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeGoodwillCredit(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("18 January 2023").locale("en").transactionAmount(200.0));
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 175.0, 325.0, 175.0, 325.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 125.0, 0.0, 0.0, 125.0);
@@ -1034,10 +1059,10 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateLoanTransaction(loanDetails, 3, 200.0, 200.0, 0.0, 175.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("31 January 2023").locale("en").transactionAmount(125.0));
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 50.0, 450.0, 50.0, 450.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 125.0, 0.0, 0.0, 125.0);
@@ -1046,10 +1071,10 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateLoanTransaction(loanDetails, 4, 125.0, 125.0, 0.0, 50.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("15 February 2023").locale("en").transactionAmount(50.0));
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 0.0, 500.0, 0.0, 500.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 125.0, 0.0, 0.0, 125.0);
@@ -1074,20 +1099,18 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             final PostLoansResponse loanResponse = applyForLoanApplication(client.getClientId(), commonLoanProductId,
                     BigDecimal.valueOf(500.0), 45, 15, 3, BigDecimal.ZERO, "01 January 2023", "01 January 2023");
 
-            loanTransactionHelper.approveLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(500)).dateFormat(DATETIME_PATTERN)
-                            .approvedOnDate("01 January 2023").locale("en"));
+            loanHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(500))
+                    .dateFormat(DATETIME_PATTERN).approvedOnDate("01 January 2023").locale("en"));
 
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().actualDisbursementDate("01 January 2023").dateFormat(DATETIME_PATTERN)
-                            .transactionAmount(BigDecimal.valueOf(500.00)).locale("en"));
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate("01 January 2023")
+                    .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(500.00)).locale("en"));
 
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
-            loanTransactionHelper.reverseLoanTransaction(loanResponse.getLoanId(), loanDetails.getTransactions().get(1).getId(),
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
+            transactionHelper.reverseLoanTransaction(loanResponse.getLoanId(), loanDetails.getTransactions().get(1).getId(),
                     new PostLoansLoanIdTransactionsTransactionIdRequest().dateFormat(DATETIME_PATTERN).transactionDate("01 January 2023")
                             .transactionAmount(0.0).locale("en"));
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 500.0, 0.0, 500.0, 0.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 0.0, 125.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 0.0, 125.0, 0.0, 0.0);
@@ -1095,14 +1118,14 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateRepaymentPeriod(loanDetails, 4, 125.0, 0.0, 125.0, 0.0, 0.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("16 January 2023").locale("en").transactionAmount(125.0));
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
-            loanTransactionHelper.reverseLoanTransaction(loanResponse.getLoanId(), loanDetails.getTransactions().get(2).getId(),
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
+            transactionHelper.reverseLoanTransaction(loanResponse.getLoanId(), loanDetails.getTransactions().get(2).getId(),
                     new PostLoansLoanIdTransactionsTransactionIdRequest().dateFormat(DATETIME_PATTERN).transactionDate("16 January 2023")
                             .transactionAmount(0.0).locale("en"));
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 500.0, 0.0, 500.0, 0.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 0.0, 125.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 0.0, 125.0, 0.0, 0.0);
@@ -1110,9 +1133,9 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateRepaymentPeriod(loanDetails, 4, 125.0, 0.0, 125.0, 0.0, 0.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makeMerchantIssuedRefund(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeMerchantIssuedRefund(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("17 January 2023").locale("en").transactionAmount(200.0));
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 300.0, 200.0, 300.0, 200.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 125.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 75.0, 50.0, 0.0, 75.0);
@@ -1121,9 +1144,9 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateLoanTransaction(loanDetails, 3, 200.0, 200.0, 0.0, 300.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("31 January 2023").locale("en").transactionAmount(125.0));
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 175.0, 325.0, 175.0, 325.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 125.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 125.0, 0.0, 0.0, 125.0);
@@ -1132,9 +1155,9 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateLoanTransaction(loanDetails, 4, 125.0, 125.0, 0.0, 175.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("15 February 2023").locale("en").transactionAmount(175.0));
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 0.0, 500.0, 0.0, 500.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 125.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 125.0, 0.0, 0.0, 125.0);
@@ -1159,20 +1182,18 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             final PostLoansResponse loanResponse = applyForLoanApplication(client.getClientId(), commonLoanProductId,
                     BigDecimal.valueOf(500.0), 45, 15, 3, BigDecimal.ZERO, "01 January 2023", "01 January 2023");
 
-            loanTransactionHelper.approveLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(500)).dateFormat(DATETIME_PATTERN)
-                            .approvedOnDate("01 January 2023").locale("en"));
+            loanHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(500))
+                    .dateFormat(DATETIME_PATTERN).approvedOnDate("01 January 2023").locale("en"));
 
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().actualDisbursementDate("01 January 2023").dateFormat(DATETIME_PATTERN)
-                            .transactionAmount(BigDecimal.valueOf(500.00)).locale("en"));
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate("01 January 2023")
+                    .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(500.00)).locale("en"));
 
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
-            loanTransactionHelper.reverseLoanTransaction(loanResponse.getLoanId(), loanDetails.getTransactions().get(1).getId(),
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
+            transactionHelper.reverseLoanTransaction(loanResponse.getLoanId(), loanDetails.getTransactions().get(1).getId(),
                     new PostLoansLoanIdTransactionsTransactionIdRequest().dateFormat(DATETIME_PATTERN).transactionDate("01 January 2023")
                             .transactionAmount(0.0).locale("en"));
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 500.0, 0.0, 500.0, 0.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 0.0, 125.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 0.0, 125.0, 0.0, 0.0);
@@ -1180,10 +1201,10 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateRepaymentPeriod(loanDetails, 4, 125.0, 0.0, 125.0, 0.0, 0.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makeGoodwillCredit(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeGoodwillCredit(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("15 January 2023").locale("en").transactionAmount(200.0));
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 300.0, 200.0, 300.0, 200.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 125.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 0.0, 125.0, 0.0, 0.0);
@@ -1192,9 +1213,9 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateLoanTransaction(loanDetails, 2, 200.0, 200.0, 0.0, 300.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("16 January 2023").locale("en").transactionAmount(125.0));
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 175.0, 325.0, 175.0, 325.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 125.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 125.0, 0.0, 0.0, 0.0);
@@ -1203,9 +1224,9 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateLoanTransaction(loanDetails, 3, 125.0, 125.0, 0.0, 175.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("31 January 2023").locale("en").transactionAmount(125.0));
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 50.0, 450.0, 50.0, 450.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 125.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 125.0, 0.0, 0.0, 0.0);
@@ -1214,9 +1235,9 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateLoanTransaction(loanDetails, 4, 125.0, 125.0, 0.0, 50.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("15 February 2023").locale("en").transactionAmount(50.0));
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 0.0, 500.0, 0.0, 500.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 125.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 125.0, 0.0, 0.0, 0.0);
@@ -1241,15 +1262,13 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             final PostLoansResponse loanResponse = applyForLoanApplication(client.getClientId(), commonLoanProductId,
                     BigDecimal.valueOf(500.0), 45, 15, 3, BigDecimal.ZERO, "01 January 2023", "01 January 2023");
 
-            loanTransactionHelper.approveLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(500)).dateFormat(DATETIME_PATTERN)
-                            .approvedOnDate("01 January 2023").locale("en"));
+            loanHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(500))
+                    .dateFormat(DATETIME_PATTERN).approvedOnDate("01 January 2023").locale("en"));
 
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().actualDisbursementDate("01 January 2023").dateFormat(DATETIME_PATTERN)
-                            .transactionAmount(BigDecimal.valueOf(500.00)).locale("en"));
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate("01 January 2023")
+                    .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(500.00)).locale("en"));
 
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 375.0, 125.0, 375.0, 125.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 0.0, 125.0, 0.0, 0.0);
@@ -1258,10 +1277,10 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateLoanTransaction(loanDetails, 1, 125.0, 125.0, 0.0, 375.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makeMerchantIssuedRefund(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeMerchantIssuedRefund(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("08 January 2023").locale("en").transactionAmount(500.0));
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 0.0, 500.0, 0.0, 500.0, 125.0);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 125.0, 0.0, 125.0, 0.0);
@@ -1270,9 +1289,9 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateLoanTransaction(loanDetails, 2, 500.0, 375.0, 125.0, 0.0);
             assertTrue(loanDetails.getStatus().getOverpaid());
 
-            loanTransactionHelper.makeCreditBalanceRefund(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeCreditBalanceRefund(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("09 January 2023").locale("en").transactionAmount(125.0));
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 0.0, 500.0, 0.0, 500.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 125.0, 0.0, 125.0, 0.0);
@@ -1297,15 +1316,13 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             final PostLoansResponse loanResponse = applyForLoanApplication(client.getClientId(), commonLoanProductId,
                     BigDecimal.valueOf(500.0), 45, 15, 3, BigDecimal.ZERO, "01 January 2023", "01 January 2023");
 
-            loanTransactionHelper.approveLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(500)).dateFormat(DATETIME_PATTERN)
-                            .approvedOnDate("01 January 2023").locale("en"));
+            loanHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(500))
+                    .dateFormat(DATETIME_PATTERN).approvedOnDate("01 January 2023").locale("en"));
 
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().actualDisbursementDate("01 January 2023").dateFormat(DATETIME_PATTERN)
-                            .transactionAmount(BigDecimal.valueOf(500.00)).locale("en"));
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate("01 January 2023")
+                    .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(500.00)).locale("en"));
 
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 375.0, 125.0, 375.0, 125.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 0.0, 125.0, 0.0, 0.0);
@@ -1314,10 +1331,10 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateLoanTransaction(loanDetails, 1, 125.0, 125.0, 0.0, 375.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makePayoutRefund(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makePayoutRefund(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("08 January 2023").locale("en").transactionAmount(500.0));
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 0.0, 500.0, 0.0, 500.0, 125.0);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 125.0, 0.0, 125.0, 0.0);
@@ -1326,9 +1343,9 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateLoanTransaction(loanDetails, 2, 500.0, 375.0, 125.0, 0.0);
             assertTrue(loanDetails.getStatus().getOverpaid());
 
-            loanTransactionHelper.makeCreditBalanceRefund(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeCreditBalanceRefund(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("09 January 2023").locale("en").transactionAmount(125.0));
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 0.0, 500.0, 0.0, 500.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 125.0, 0.0, 125.0, 0.0);
@@ -1353,15 +1370,13 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             final PostLoansResponse loanResponse = applyForLoanApplication(client.getClientId(), commonLoanProductId,
                     BigDecimal.valueOf(500.0), 45, 15, 3, BigDecimal.ZERO, "01 January 2023", "01 January 2023");
 
-            loanTransactionHelper.approveLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(500)).dateFormat(DATETIME_PATTERN)
-                            .approvedOnDate("01 January 2023").locale("en"));
+            loanHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(500))
+                    .dateFormat(DATETIME_PATTERN).approvedOnDate("01 January 2023").locale("en"));
 
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().actualDisbursementDate("01 January 2023").dateFormat(DATETIME_PATTERN)
-                            .transactionAmount(BigDecimal.valueOf(500.00)).locale("en"));
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate("01 January 2023")
+                    .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(500.00)).locale("en"));
 
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 375.0, 125.0, 375.0, 125.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 0.0, 125.0, 0.0, 0.0);
@@ -1370,10 +1385,10 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateLoanTransaction(loanDetails, 1, 125.0, 125.0, 0.0, 375.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makeGoodwillCredit(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeGoodwillCredit(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("08 January 2023").locale("en").transactionAmount(500.0));
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 0.0, 500.0, 0.0, 500.0, 125.0);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 125.0, 0.0, 125.0, 0.0);
@@ -1382,9 +1397,9 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateLoanTransaction(loanDetails, 2, 500.0, 375.0, 125.0, 0.0);
             assertTrue(loanDetails.getStatus().getOverpaid());
 
-            loanTransactionHelper.makeCreditBalanceRefund(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeCreditBalanceRefund(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("09 January 2023").locale("en").transactionAmount(125.0));
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 0.0, 500.0, 0.0, 500.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 125.0, 0.0, 125.0, 0.0);
@@ -1409,15 +1424,13 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             final PostLoansResponse loanResponse = applyForLoanApplication(client.getClientId(), commonLoanProductId,
                     BigDecimal.valueOf(500.0), 45, 15, 3, BigDecimal.ZERO, "01 January 2023", "01 January 2023");
 
-            loanTransactionHelper.approveLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(500)).dateFormat(DATETIME_PATTERN)
-                            .approvedOnDate("01 January 2023").locale("en"));
+            loanHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(500))
+                    .dateFormat(DATETIME_PATTERN).approvedOnDate("01 January 2023").locale("en"));
 
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().actualDisbursementDate("01 January 2023").dateFormat(DATETIME_PATTERN)
-                            .transactionAmount(BigDecimal.valueOf(500.00)).locale("en"));
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate("01 January 2023")
+                    .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(500.00)).locale("en"));
 
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 375.0, 125.0, 375.0, 125.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 0.0, 125.0, 0.0, 0.0);
@@ -1426,10 +1439,10 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateLoanTransaction(loanDetails, 1, 125.0, 125.0, 0.0, 375.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("16 January 2023").locale("en").transactionAmount(125.0));
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 250.0, 250.0, 250.0, 250.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 125.0, 0.0, 0.0, 0.0);
@@ -1438,10 +1451,10 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateLoanTransaction(loanDetails, 2, 125.0, 125.0, 0.0, 250.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("31 January 2023").locale("en").transactionAmount(125.0));
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 125.0, 375.0, 125.0, 375.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 125.0, 0.0, 0.0, 0.0);
@@ -1450,10 +1463,10 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateLoanTransaction(loanDetails, 3, 125.0, 125.0, 0.0, 125.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("15 February 2023").locale("en").transactionAmount(125.0));
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 0.0, 500.0, 0.0, 500.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 125.0, 0.0, 0.0, 0.0);
@@ -1462,9 +1475,9 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateLoanTransaction(loanDetails, 4, 125.0, 125.0, 0.0, 0.0);
             assertTrue(loanDetails.getStatus().getClosedObligationsMet());
 
-            loanTransactionHelper.makeMerchantIssuedRefund(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeMerchantIssuedRefund(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("18 February 2023").locale("en").transactionAmount(500.0));
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 0.0, 500.0, 0.0, 500.0, 500.0);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 125.0, 0.0, 0.0, 0.0);
@@ -1473,9 +1486,9 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateLoanTransaction(loanDetails, 5, 500.0, 0.0, 500.0, 0.0);
             assertTrue(loanDetails.getStatus().getOverpaid());
 
-            loanTransactionHelper.makeCreditBalanceRefund(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeCreditBalanceRefund(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("20 February 2023").locale("en").transactionAmount(500.0));
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 0.0, 500.0, 0.0, 500.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 125.0, 0.0, 0.0, 0.0);
@@ -1502,19 +1515,17 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             final PostLoansResponse loanResponse = applyForLoanApplication(client.getClientId(), commonLoanProductId,
                     BigDecimal.valueOf(500.0), 45, 15, 3, BigDecimal.ZERO, "01 January 2023", "01 January 2023");
 
-            loanTransactionHelper.approveLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(500)).dateFormat(DATETIME_PATTERN)
-                            .approvedOnDate("01 January 2023").locale("en"));
+            loanHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(500))
+                    .dateFormat(DATETIME_PATTERN).approvedOnDate("01 January 2023").locale("en"));
 
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().actualDisbursementDate("01 January 2023").dateFormat(DATETIME_PATTERN)
-                            .transactionAmount(BigDecimal.valueOf(500.00)).locale("en"));
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate("01 January 2023")
+                    .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(500.00)).locale("en"));
 
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
-            loanTransactionHelper.reverseLoanTransaction(loanResponse.getLoanId(), loanDetails.getTransactions().get(1).getId(),
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
+            transactionHelper.reverseLoanTransaction(loanResponse.getLoanId(), loanDetails.getTransactions().get(1).getId(),
                     new PostLoansLoanIdTransactionsTransactionIdRequest().dateFormat(DATETIME_PATTERN).transactionDate("16 January 2023")
                             .transactionAmount(0.0).locale("en"));
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 500.0, 0.0, 500.0, 0.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 0.0, 125.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 0.0, 125.0, 0.0, 0.0);
@@ -1522,10 +1533,10 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateRepaymentPeriod(loanDetails, 4, 125.0, 0.0, 125.0, 0.0, 0.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makeMerchantIssuedRefund(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeMerchantIssuedRefund(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("02 January 2023").locale("en").transactionAmount(400.0));
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 100.0, 400.0, 100.0, 400.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 125.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 91.67, 33.33, 91.67, 0.0);
@@ -1534,9 +1545,9 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateLoanTransaction(loanDetails, 2, 400.0, 400.0, 0.0, 100.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("04 January 2023").locale("en").transactionAmount(50.0));
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 50.0, 450.0, 50.0, 450.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 125.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 125.0, 0.0, 125.0, 0.0);
@@ -1545,9 +1556,9 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateLoanTransaction(loanDetails, 3, 50.0, 50.0, 0.0, 50.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("16 January 2023").locale("en").transactionAmount(125.0));
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 0.0, 500.0, 0.0, 500.0, 75.0);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 125.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 125.0, 0.0, 125.0, 0.0);
@@ -1556,9 +1567,9 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateLoanTransaction(loanDetails, 4, 125.0, 50.0, 75.0, 0.0);
             assertTrue(loanDetails.getStatus().getOverpaid());
 
-            loanTransactionHelper.makeCreditBalanceRefund(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeCreditBalanceRefund(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("18 January 2023").locale("en").transactionAmount(75.0));
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 0.0, 500.0, 0.0, 500.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 125.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 125.0, 0.0, 125.0, 0.0);
@@ -1567,10 +1578,10 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateLoanTransaction(loanDetails, 5, 75.0, 0.0, 75.0, 0.0);
             assertTrue(loanDetails.getStatus().getClosedObligationsMet());
 
-            loanTransactionHelper.reverseLoanTransaction(loanResponse.getLoanId(), loanDetails.getTransactions().get(2).getId(),
+            transactionHelper.reverseLoanTransaction(loanResponse.getLoanId(), loanDetails.getTransactions().get(2).getId(),
                     new PostLoansLoanIdTransactionsTransactionIdRequest().dateFormat(DATETIME_PATTERN).transactionDate("20 January 2023")
                             .transactionAmount(0.0).locale("en"));
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 400.0, 175.0, 400.0, 175.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 125.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 50.0, 75.0, 0.0, 0.0);
@@ -1578,9 +1589,9 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateRepaymentPeriod(loanDetails, 4, 125.0, 0.0, 125.0, 0.0, 0.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("31 January 2023").locale("en").transactionAmount(275.0));
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 125.0, 450.0, 125.0, 450.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 125.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 125.0, 0.0, 0.0, 75.0);
@@ -1589,9 +1600,9 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateLoanTransaction(loanDetails, 6, 275.0, 275.0, 0.0, 125.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("15 February 2023").locale("en").transactionAmount(125.0));
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 0.0, 575.0, 0.0, 575.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 125.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 125.0, 0.0, 0.0, 75.0);
@@ -1616,19 +1627,17 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             final PostLoansResponse loanResponse = applyForLoanApplication(client.getClientId(), commonLoanProductId,
                     BigDecimal.valueOf(500.0), 45, 15, 3, BigDecimal.ZERO, "01 January 2023", "01 January 2023");
 
-            loanTransactionHelper.approveLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(500)).dateFormat(DATETIME_PATTERN)
-                            .approvedOnDate("01 January 2023").locale("en"));
+            loanHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(500))
+                    .dateFormat(DATETIME_PATTERN).approvedOnDate("01 January 2023").locale("en"));
 
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().actualDisbursementDate("01 January 2023").dateFormat(DATETIME_PATTERN)
-                            .transactionAmount(BigDecimal.valueOf(500.00)).locale("en"));
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate("01 January 2023")
+                    .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(500.00)).locale("en"));
 
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
-            loanTransactionHelper.reverseLoanTransaction(loanResponse.getLoanId(), loanDetails.getTransactions().get(1).getId(),
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
+            transactionHelper.reverseLoanTransaction(loanResponse.getLoanId(), loanDetails.getTransactions().get(1).getId(),
                     new PostLoansLoanIdTransactionsTransactionIdRequest().dateFormat(DATETIME_PATTERN).transactionDate("16 January 2023")
                             .transactionAmount(0.0).locale("en"));
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 500.0, 0.0, 500.0, 0.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 0.0, 125.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 0.0, 125.0, 0.0, 0.0);
@@ -1636,9 +1645,9 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateRepaymentPeriod(loanDetails, 4, 125.0, 0.0, 125.0, 0.0, 0.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makeMerchantIssuedRefund(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeMerchantIssuedRefund(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("02 January 2023").locale("en").transactionAmount(400.0));
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 100.0, 400.0, 100.0, 400.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 125.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 91.67, 33.33, 91.67, 0.0);
@@ -1647,9 +1656,9 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateLoanTransaction(loanDetails, 2, 400.0, 400.0, 0.0, 100.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("04 January 2023").locale("en").transactionAmount(50.0));
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 50.0, 450.0, 50.0, 450.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 125.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 125.0, 0.0, 125.0, 0.0);
@@ -1658,9 +1667,9 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateLoanTransaction(loanDetails, 3, 50.0, 50.0, 0.0, 50.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makeMerchantIssuedRefund(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeMerchantIssuedRefund(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("06 January 2023").locale("en").transactionAmount(40.0));
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 10.0, 490.0, 10.0, 490.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 125.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 125.0, 0.0, 125.0, 0.0);
@@ -1684,20 +1693,18 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             final Account incomeAccount = accountHelper.createIncomeAccount();
             final Account expenseAccount = accountHelper.createExpenseAccount();
             final Account overpaymentAccount = accountHelper.createLiabilityAccount();
-            Integer localLoanProductId = createLoanProduct("500", "15", "4", true, "25", false, LoanScheduleType.PROGRESSIVE,
+            Long localLoanProductId = createLoanProduct("500", "15", "4", true, "25", false, LoanScheduleType.PROGRESSIVE,
                     LoanScheduleProcessingType.HORIZONTAL, assetAccount, incomeAccount, expenseAccount, overpaymentAccount);
             final PostLoansResponse loanResponse = applyForLoanApplication(client.getClientId(), localLoanProductId,
                     BigDecimal.valueOf(500.0), 45, 15, 3, BigDecimal.ZERO, "01 January 2023", "01 January 2023");
 
-            loanTransactionHelper.approveLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(500)).dateFormat(DATETIME_PATTERN)
-                            .approvedOnDate("01 January 2023").locale("en"));
+            loanHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(500))
+                    .dateFormat(DATETIME_PATTERN).approvedOnDate("01 January 2023").locale("en"));
 
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().actualDisbursementDate("01 January 2023").dateFormat(DATETIME_PATTERN)
-                            .transactionAmount(BigDecimal.valueOf(500.00)).locale("en"));
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate("01 January 2023")
+                    .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(500.00)).locale("en"));
 
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 500.0, 0.0, 500.0, 0.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 0.0, 125.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 0.0, 125.0, 0.0, 0.0);
@@ -1705,9 +1712,9 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateRepaymentPeriod(loanDetails, 4, 125.0, 0.0, 125.0, 0.0, 0.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("04 January 2023").locale("en").transactionAmount(175.0));
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 325.0, 175.0, 325.0, 175.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 125.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 50.0, 75.0, 50.0, 0.0);
@@ -1716,10 +1723,9 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateLoanTransaction(loanDetails, 1, 175.0, 175.0, 0.0, 325.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().actualDisbursementDate("05 January 2023").dateFormat(DATETIME_PATTERN)
-                            .transactionAmount(BigDecimal.valueOf(500.00)).locale("en"));
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate("05 January 2023")
+                    .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(500.00)).locale("en"));
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 825.0, 175.0, 825.0, 175.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 125.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 0.0, 125.0, 0.0, 0.0);
@@ -1729,13 +1735,11 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             assertTrue(loanDetails.getStatus().getActive());
 
             // Add Charge Penalty
-            Integer penalty = ChargesHelper.createCharges(requestSpec, responseSpec,
-                    ChargesHelper.getLoanSpecifiedDueDateJSON(ChargesHelper.CHARGE_CALCULATION_TYPE_FLAT, "100", true));
-            Integer penalty1LoanChargeId = loanTransactionHelper.addChargesForLoan(loanResponse.getLoanId().intValue(),
-                    LoanTransactionHelper.getSpecifiedDueDateChargesForLoanAsJSON(String.valueOf(penalty), "22 February 2023", "100"));
+            Long penalty = chargesHelper.createLoanSpecifiedDueDatePenalty(100.0).getResourceId();
+            Long penalty1LoanChargeId = addSpecifiedDueDateCharge(loanResponse.getLoanId(), penalty, "22 February 2023", 100.0);
             assertNotNull(penalty1LoanChargeId);
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 925.0, 175.0, 825.0, 175.0, null);
             validateRepaymentPeriod(loanDetails, 1, 125.0, 125.0, 0.0, 0.0, 125.0);
             validateRepaymentPeriod(loanDetails, 2, 125.0, 0.0, 125.0, 0.0, 0.0);
@@ -1763,20 +1767,18 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             final Account incomeAccount = accountHelper.createIncomeAccount();
             final Account expenseAccount = accountHelper.createExpenseAccount();
             final Account overpaymentAccount = accountHelper.createLiabilityAccount();
-            Integer localLoanProductId = createLoanProduct("500", "15", "4", true, "25", false, LoanScheduleType.PROGRESSIVE,
+            Long localLoanProductId = createLoanProduct("500", "15", "4", true, "25", false, LoanScheduleType.PROGRESSIVE,
                     LoanScheduleProcessingType.HORIZONTAL, assetAccount, incomeAccount, expenseAccount, overpaymentAccount);
             final PostLoansResponse loanResponse = applyForLoanApplication(client.getClientId(), localLoanProductId,
                     BigDecimal.valueOf(500.0), 45, 15, 3, BigDecimal.ZERO, "01 January 2023", "01 January 2023");
 
-            loanTransactionHelper.approveLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(500)).dateFormat(DATETIME_PATTERN)
-                            .approvedOnDate("01 January 2023").locale("en"));
+            loanHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(500))
+                    .dateFormat(DATETIME_PATTERN).approvedOnDate("01 January 2023").locale("en"));
 
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().actualDisbursementDate("01 January 2023").dateFormat(DATETIME_PATTERN)
-                            .transactionAmount(BigDecimal.valueOf(500.00)).locale("en"));
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate("01 January 2023")
+                    .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(500.00)).locale("en"));
 
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 500.0, 0.0, 500.0, 0.0, null);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2023, 1, 1), 125.0, 0.0, 125.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2023, 1, 16), 125.0, 0.0, 125.0, 0.0, 0.0);
@@ -1784,15 +1786,15 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateRepaymentPeriod(loanDetails, 4, LocalDate.of(2023, 2, 15), 125.0, 0.0, 125.0, 0.0, 0.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            PostCreateRescheduleLoansResponse rescheduleLoansResponse = loanRescheduleRequestHelper
+            PostCreateRescheduleLoansResponse rescheduleLoansResponse = LoanRescheduleRequestHelper
                     .createLoanRescheduleRequest(new PostCreateRescheduleLoansRequest().loanId(loanDetails.getId()).locale("en")
                             .dateFormat(DATETIME_PATTERN).rescheduleReasonId(1L).rescheduleFromDate("16 January 2023")
                             .adjustedDueDate("31 January 2023").submittedOnDate("16 January 2023"));
 
-            loanRescheduleRequestHelper.approveLoanRescheduleRequest(rescheduleLoansResponse.getResourceId(),
+            LoanRescheduleRequestHelper.approveLoanRescheduleRequest(rescheduleLoansResponse.getResourceId(),
                     new PostUpdateRescheduleLoansRequest().approvedOnDate("16 January 2023").locale("en").dateFormat(DATETIME_PATTERN));
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 500.0, 0.0, 500.0, 0.0, null);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2023, 1, 1), 125.0, 0.0, 125.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2023, 1, 31), 125.0, 0.0, 125.0, 0.0, 0.0);
@@ -1800,9 +1802,9 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateRepaymentPeriod(loanDetails, 4, LocalDate.of(2023, 3, 2), 125.0, 0.0, 125.0, 0.0, 0.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("16 January 2023").locale("en").transactionAmount(350.0));
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 150.0, 350.0, 150.0, 350.0, null);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2023, 1, 1), 125.0, 125.0, 0.0, 0.0, 125.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2023, 1, 31), 125.0, 125.0, 0.0, 125.0, 0.0);
@@ -1810,11 +1812,10 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateRepaymentPeriod(loanDetails, 4, LocalDate.of(2023, 3, 2), 125.0, 0.0, 125.0, 0.0, 0.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().actualDisbursementDate("20 February 2023").dateFormat(DATETIME_PATTERN)
-                            .transactionAmount(BigDecimal.valueOf(250.0)).locale("en"));
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate("20 February 2023")
+                    .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(250.0)).locale("en"));
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 400.0, 350.0, 400.0, 350.0, null);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2023, 1, 1), 125.0, 125.0, 0.0, 0.0, 125.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2023, 1, 31), 125.0, 125.0, 0.0, 125.0, 0.0);
@@ -1823,14 +1824,14 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateRepaymentPeriod(loanDetails, 5, LocalDate.of(2023, 3, 2), 312.5, 0.0, 312.5, 0.0, 0.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            rescheduleLoansResponse = loanRescheduleRequestHelper.createLoanRescheduleRequest(new PostCreateRescheduleLoansRequest()
+            rescheduleLoansResponse = LoanRescheduleRequestHelper.createLoanRescheduleRequest(new PostCreateRescheduleLoansRequest()
                     .loanId(loanDetails.getId()).locale("en").dateFormat(DATETIME_PATTERN).rescheduleReasonId(1L)
                     .rescheduleFromDate("15 February 2023").adjustedDueDate("25 February 2023").submittedOnDate("15 February 2023"));
 
-            loanRescheduleRequestHelper.approveLoanRescheduleRequest(rescheduleLoansResponse.getResourceId(),
+            LoanRescheduleRequestHelper.approveLoanRescheduleRequest(rescheduleLoansResponse.getResourceId(),
                     new PostUpdateRescheduleLoansRequest().approvedOnDate("15 February 2023").locale("en").dateFormat(DATETIME_PATTERN));
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 400.0, 350.0, 400.0, 350.0, null);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2023, 1, 1), 125.0, 125.0, 0.0, 0.0, 125.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2023, 1, 31), 125.0, 125.0, 0.0, 125.0, 0.0);
@@ -1855,20 +1856,18 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             final Account incomeAccount = accountHelper.createIncomeAccount();
             final Account expenseAccount = accountHelper.createExpenseAccount();
             final Account overpaymentAccount = accountHelper.createLiabilityAccount();
-            Integer localLoanProductId = createLoanProduct("500", "15", "4", true, "25", false, LoanScheduleType.PROGRESSIVE,
+            Long localLoanProductId = createLoanProduct("500", "15", "4", true, "25", false, LoanScheduleType.PROGRESSIVE,
                     LoanScheduleProcessingType.HORIZONTAL, assetAccount, incomeAccount, expenseAccount, overpaymentAccount);
             final PostLoansResponse loanResponse = applyForLoanApplication(client.getClientId(), localLoanProductId,
                     BigDecimal.valueOf(500.0), 45, 15, 3, BigDecimal.ZERO, "01 January 2023", "01 January 2023");
 
-            loanTransactionHelper.approveLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(500)).dateFormat(DATETIME_PATTERN)
-                            .approvedOnDate("01 January 2023").locale("en"));
+            loanHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(500))
+                    .dateFormat(DATETIME_PATTERN).approvedOnDate("01 January 2023").locale("en"));
 
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().actualDisbursementDate("01 January 2023").dateFormat(DATETIME_PATTERN)
-                            .transactionAmount(BigDecimal.valueOf(500.00)).locale("en"));
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate("01 January 2023")
+                    .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(500.00)).locale("en"));
 
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 500.0, 0.0, 500.0, 0.0, null);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2023, 1, 1), 125.0, 0.0, 125.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2023, 1, 16), 125.0, 0.0, 125.0, 0.0, 0.0);
@@ -1877,13 +1876,11 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             assertTrue(loanDetails.getStatus().getActive());
 
             // Add Charge Penalty
-            Integer penalty = ChargesHelper.createCharges(requestSpec, responseSpec,
-                    ChargesHelper.getLoanSpecifiedDueDateJSON(ChargesHelper.CHARGE_CALCULATION_TYPE_FLAT, "100", true));
-            Integer penalty1LoanChargeId = loanTransactionHelper.addChargesForLoan(loanResponse.getLoanId().intValue(),
-                    LoanTransactionHelper.getSpecifiedDueDateChargesForLoanAsJSON(String.valueOf(penalty), "22 February 2023", "100"));
+            Long penalty = chargesHelper.createLoanSpecifiedDueDatePenalty(100.0).getResourceId();
+            Long penalty1LoanChargeId = addSpecifiedDueDateCharge(loanResponse.getLoanId(), penalty, "22 February 2023", 100.0);
             assertNotNull(penalty1LoanChargeId);
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 600.0, 0.0, 500.0, 0.0, null);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2023, 1, 1), 125.0, 0.0, 125.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2023, 1, 16), 125.0, 0.0, 125.0, 0.0, 0.0);
@@ -1893,9 +1890,9 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                     0.0, 0.0, 0.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("22 February 2023").locale("en").transactionAmount(600.0));
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 0.0, 600.0, 0.0, 500.0, null);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2023, 1, 1), 125.0, 125.0, 0.0, 0.0, 125.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2023, 1, 16), 125.0, 125.0, 0.0, 0.0, 125.0);
@@ -1922,20 +1919,18 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             final Account incomeAccount = accountHelper.createIncomeAccount();
             final Account expenseAccount = accountHelper.createExpenseAccount();
             final Account overpaymentAccount = accountHelper.createLiabilityAccount();
-            Integer localLoanProductId = createLoanProduct("500", "15", "4", true, "25", false, LoanScheduleType.PROGRESSIVE,
+            Long localLoanProductId = createLoanProduct("500", "15", "4", true, "25", false, LoanScheduleType.PROGRESSIVE,
                     LoanScheduleProcessingType.HORIZONTAL, assetAccount, incomeAccount, expenseAccount, overpaymentAccount);
             final PostLoansResponse loanResponse = applyForLoanApplication(client.getClientId(), localLoanProductId,
                     BigDecimal.valueOf(500.0), 45, 15, 3, BigDecimal.ZERO, "01 January 2023", "01 January 2023");
 
-            loanTransactionHelper.approveLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(500)).dateFormat(DATETIME_PATTERN)
-                            .approvedOnDate("01 January 2023").locale("en"));
+            loanHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(500))
+                    .dateFormat(DATETIME_PATTERN).approvedOnDate("01 January 2023").locale("en"));
 
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().actualDisbursementDate("01 January 2023").dateFormat(DATETIME_PATTERN)
-                            .transactionAmount(BigDecimal.valueOf(500.00)).locale("en"));
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate("01 January 2023")
+                    .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(500.00)).locale("en"));
 
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 500.0, 0.0, 500.0, 0.0, null);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2023, 1, 1), 125.0, 0.0, 125.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2023, 1, 16), 125.0, 0.0, 125.0, 0.0, 0.0);
@@ -1944,14 +1939,11 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             assertTrue(loanDetails.getStatus().getActive());
 
             // Add Charge Penalty
-            Integer penalty = ChargesHelper.createCharges(requestSpec, responseSpec,
-                    ChargesHelper.getLoanSpecifiedDueDateJSON(ChargesHelper.CHARGE_CALCULATION_TYPE_FLAT, "25", true));
-            loanTransactionHelper.addChargesForLoan(loanResponse.getLoanId().intValue(),
-                    LoanTransactionHelper.getSpecifiedDueDateChargesForLoanAsJSON(String.valueOf(penalty), "20 January 2023", "25"));
-            loanTransactionHelper.addChargesForLoan(loanResponse.getLoanId().intValue(),
-                    LoanTransactionHelper.getSpecifiedDueDateChargesForLoanAsJSON(String.valueOf(penalty), "10 February 2023", "25"));
+            Long penalty = chargesHelper.createLoanSpecifiedDueDatePenalty(25.0).getResourceId();
+            addSpecifiedDueDateCharge(loanResponse.getLoanId(), penalty, "20 January 2023", 25.0);
+            addSpecifiedDueDateCharge(loanResponse.getLoanId(), penalty, "10 February 2023", 25.0);
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 550.0, 0.0, 500.0, 0.0, null);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2023, 1, 1), 125.0, 0.0, 125.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2023, 1, 16), 125.0, 0.0, 125.0, 0.0, 0.0);
@@ -1961,9 +1953,9 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                     0.0, 0.0, 0.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("22 February 2023").locale("en").transactionAmount(260.0));
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 290.0, 260.0, 250.0, 250.0, null);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2023, 1, 1), 125.0, 125.0, 0.0, 0.0, 125.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2023, 1, 16), 125.0, 125.0, 0.0, 0.0, 125.0);
@@ -1973,9 +1965,9 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                     0.0, 0.0, 0.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("22 February 2023").locale("en").transactionAmount(26.0));
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 264.0, 286.0, 239.0, 261.0, null);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2023, 1, 1), 125.0, 125.0, 0.0, 0.0, 125.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2023, 1, 16), 125.0, 125.0, 0.0, 0.0, 125.0);
@@ -2001,21 +1993,19 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             final Account incomeAccount = accountHelper.createIncomeAccount();
             final Account expenseAccount = accountHelper.createExpenseAccount();
             final Account overpaymentAccount = accountHelper.createLiabilityAccount();
-            Integer localLoanProductId = createLoanProduct("500", "15", "4", true, "25", false, LoanScheduleType.PROGRESSIVE,
+            Long localLoanProductId = createLoanProduct("500", "15", "4", true, "25", false, LoanScheduleType.PROGRESSIVE,
                     LoanScheduleProcessingType.VERTICAL, assetAccount, incomeAccount, expenseAccount, overpaymentAccount);
             final PostLoansResponse loanResponse = applyForLoanApplication(client.getClientId(), localLoanProductId,
                     BigDecimal.valueOf(500.0), 45, 15, 3, BigDecimal.ZERO, "01 January 2023", "01 January 2023",
                     LoanScheduleProcessingType.VERTICAL);
 
-            loanTransactionHelper.approveLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(500)).dateFormat(DATETIME_PATTERN)
-                            .approvedOnDate("01 January 2023").locale("en"));
+            loanHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(500))
+                    .dateFormat(DATETIME_PATTERN).approvedOnDate("01 January 2023").locale("en"));
 
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().actualDisbursementDate("01 January 2023").dateFormat(DATETIME_PATTERN)
-                            .transactionAmount(BigDecimal.valueOf(500.00)).locale("en"));
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate("01 January 2023")
+                    .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(500.00)).locale("en"));
 
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 500.0, 0.0, 500.0, 0.0, null);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2023, 1, 1), 125.0, 0.0, 125.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2023, 1, 16), 125.0, 0.0, 125.0, 0.0, 0.0);
@@ -2024,14 +2014,11 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             assertTrue(loanDetails.getStatus().getActive());
 
             // Add Charge Penalty
-            Integer penalty = ChargesHelper.createCharges(requestSpec, responseSpec,
-                    ChargesHelper.getLoanSpecifiedDueDateJSON(ChargesHelper.CHARGE_CALCULATION_TYPE_FLAT, "25", true));
-            loanTransactionHelper.addChargesForLoan(loanResponse.getLoanId().intValue(),
-                    LoanTransactionHelper.getSpecifiedDueDateChargesForLoanAsJSON(String.valueOf(penalty), "20 January 2023", "25"));
-            loanTransactionHelper.addChargesForLoan(loanResponse.getLoanId().intValue(),
-                    LoanTransactionHelper.getSpecifiedDueDateChargesForLoanAsJSON(String.valueOf(penalty), "10 February 2023", "25"));
+            Long penalty = chargesHelper.createLoanSpecifiedDueDatePenalty(25.0).getResourceId();
+            addSpecifiedDueDateCharge(loanResponse.getLoanId(), penalty, "20 January 2023", 25.0);
+            addSpecifiedDueDateCharge(loanResponse.getLoanId(), penalty, "10 February 2023", 25.0);
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 550.0, 0.0, 500.0, 0.0, null);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2023, 1, 1), 125.0, 0.0, 125.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2023, 1, 16), 125.0, 0.0, 125.0, 0.0, 0.0);
@@ -2041,9 +2028,9 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                     0.0, 0.0, 0.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("22 February 2023").locale("en").transactionAmount(26.0));
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 524.0, 26.0, 500.0, 0.0, null);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2023, 1, 1), 125.0, 0.0, 125.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2023, 1, 16), 125.0, 0.0, 125.0, 0.0, 0.0);
@@ -2053,9 +2040,9 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                     0.0, 0.0, 1.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("22 February 2023").locale("en").transactionAmount(26.0));
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 498.0, 52.0, 498.0, 2.0, null);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2023, 1, 1), 125.0, 2.0, 123.0, 0.0, 2.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2023, 1, 16), 125.0, 0.0, 125.0, 0.0, 0.0);
@@ -2110,13 +2097,13 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             final Account overpaymentAccount = accountHelper.createLiabilityAccount();
             AdvancedPaymentData defaultPaymentAllocation = createDefaultPaymentAllocationWithMixedGrouping();
 
-            Integer localLoanProductId = createLoanProduct("500", "15", "4", false, LoanScheduleType.PROGRESSIVE,
+            Long localLoanProductId = createLoanProduct("500", "15", "4", false, LoanScheduleType.PROGRESSIVE,
                     LoanScheduleProcessingType.VERTICAL, defaultPaymentAllocation, assetAccount, incomeAccount, expenseAccount,
                     overpaymentAccount);
             assertNotNull(localLoanProductId);
 
-            Integer localLoanProductId2 = createLoanProduct("500", "15", "4", false, LoanScheduleType.CUMULATIVE, assetAccount,
-                    incomeAccount, expenseAccount, overpaymentAccount);
+            Long localLoanProductId2 = createLoanProduct("500", "15", "4", false, LoanScheduleType.CUMULATIVE, assetAccount, incomeAccount,
+                    expenseAccount, overpaymentAccount);
             assertNotNull(localLoanProductId2);
 
             CallFailedRuntimeException exception = assertThrows(CallFailedRuntimeException.class,
@@ -2124,7 +2111,7 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                             BigDecimal.ZERO, "01 January 2023", "01 January 2023",
                             FineractStyleLoanRepaymentScheduleTransactionProcessor.STRATEGY_CODE,
                             LoanScheduleProcessingType.VERTICAL.name()));
-            assertEquals(400, exception.getResponse().code());
+            assertEquals(400, exception.getStatus());
             assertTrue(exception.getMessage().contains("supported.only.with.advanced.payment.allocation.strategy"));
 
             exception = assertThrows(CallFailedRuntimeException.class,
@@ -2132,7 +2119,7 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                             BigDecimal.ZERO, "01 January 2023", "01 January 2023",
                             AdvancedPaymentScheduleTransactionProcessor.ADVANCED_PAYMENT_ALLOCATION_STRATEGY,
                             LoanScheduleProcessingType.HORIZONTAL.name()));
-            assertEquals(400, exception.getResponse().code());
+            assertEquals(400, exception.getStatus());
             assertTrue(exception.getMessage()
                     .contains("mixed.due.type.allocation.rules.are.not.supported.with.horizontal.installment.processing"));
         });
@@ -2151,34 +2138,32 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             final Account incomeAccount = accountHelper.createIncomeAccount();
             final Account expenseAccount = accountHelper.createExpenseAccount();
             final Account overpaymentAccount = accountHelper.createLiabilityAccount();
-            Integer localLoanProductId = createLoanProduct("1000", "15", "3", false, null, false, LoanScheduleType.PROGRESSIVE,
+            Long localLoanProductId = createLoanProduct("1000", "15", "3", false, null, false, LoanScheduleType.PROGRESSIVE,
                     LoanScheduleProcessingType.HORIZONTAL, assetAccount, incomeAccount, expenseAccount, overpaymentAccount);
             assertNotNull(localLoanProductId);
 
             PostLoansResponse loanResponse = applyForLoanApplication(client.getClientId(), localLoanProductId, BigDecimal.valueOf(1000), 45,
                     15, 3, BigDecimal.ZERO, "01 January 2023", "01 January 2023");
 
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2023, 1, 16), 333.33, 0.0, 333.33, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2023, 1, 31), 333.33, 0.0, 333.33, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 3, LocalDate.of(2023, 2, 15), 333.34, 0.0, 333.34, 0.0, 0.0);
             assertTrue(loanDetails.getStatus().getPendingApproval());
 
-            loanTransactionHelper.approveLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(1000)).dateFormat(DATETIME_PATTERN)
-                            .approvedOnDate("01 January 2023").locale("en"));
+            loanHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(1000))
+                    .dateFormat(DATETIME_PATTERN).approvedOnDate("01 January 2023").locale("en"));
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2023, 1, 16), 333.33, 0.0, 333.33, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2023, 1, 31), 333.33, 0.0, 333.33, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 3, LocalDate.of(2023, 2, 15), 333.34, 0.0, 333.34, 0.0, 0.0);
             assertTrue(loanDetails.getStatus().getWaitingForDisbursal());
 
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().actualDisbursementDate("01 January 2023").dateFormat(DATETIME_PATTERN)
-                            .transactionAmount(BigDecimal.valueOf(1000)).locale("en"));
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate("01 January 2023")
+                    .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(1000)).locale("en"));
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 1000.0, 0.0, 1000.0, 0.0, null);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2023, 1, 16), 333.33, 0.0, 333.33, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2023, 1, 31), 333.33, 0.0, 333.33, 0.0, 0.0);
@@ -2188,7 +2173,7 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             loanResponse = applyForLoanApplication(client.getClientId(), localLoanProductId, BigDecimal.valueOf(1000), 90, 15, 6,
                     BigDecimal.ZERO, "01 January 2023", "01 January 2023");
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2023, 1, 16), 166.67, 0.0, 166.67, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2023, 1, 31), 166.67, 0.0, 166.67, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 3, LocalDate.of(2023, 2, 15), 166.67, 0.0, 166.67, 0.0, 0.0);
@@ -2197,11 +2182,10 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateRepaymentPeriod(loanDetails, 6, LocalDate.of(2023, 4, 1), 166.65, 0.0, 166.65, 0.0, 0.0);
             assertTrue(loanDetails.getStatus().getPendingApproval());
 
-            loanTransactionHelper.approveLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(1000)).dateFormat(DATETIME_PATTERN)
-                            .approvedOnDate("01 January 2023").locale("en"));
+            loanHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(1000))
+                    .dateFormat(DATETIME_PATTERN).approvedOnDate("01 January 2023").locale("en"));
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2023, 1, 16), 166.67, 0.0, 166.67, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2023, 1, 31), 166.67, 0.0, 166.67, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 3, LocalDate.of(2023, 2, 15), 166.67, 0.0, 166.67, 0.0, 0.0);
@@ -2210,11 +2194,10 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateRepaymentPeriod(loanDetails, 6, LocalDate.of(2023, 4, 1), 166.65, 0.0, 166.65, 0.0, 0.0);
             assertTrue(loanDetails.getStatus().getWaitingForDisbursal());
 
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().actualDisbursementDate("01 January 2023").dateFormat(DATETIME_PATTERN)
-                            .transactionAmount(BigDecimal.valueOf(1000)).locale("en"));
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate("01 January 2023")
+                    .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(1000)).locale("en"));
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 1000.0, 0.0, 1000.0, 0.0, null);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2023, 1, 16), 166.67, 0.0, 166.67, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2023, 1, 31), 166.67, 0.0, 166.67, 0.0, 0.0);
@@ -2240,34 +2223,32 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             final Account incomeAccount = accountHelper.createIncomeAccount();
             final Account expenseAccount = accountHelper.createExpenseAccount();
             final Account overpaymentAccount = accountHelper.createLiabilityAccount();
-            Integer localLoanProductId = createLoanProduct("1000", "15", "3", false, null, false, LoanScheduleType.PROGRESSIVE,
+            Long localLoanProductId = createLoanProduct("1000", "15", "3", false, null, false, LoanScheduleType.PROGRESSIVE,
                     LoanScheduleProcessingType.HORIZONTAL, assetAccount, incomeAccount, expenseAccount, overpaymentAccount);
             assertNotNull(localLoanProductId);
 
             PostLoansResponse loanResponse = applyForLoanApplication(client.getClientId(), localLoanProductId, BigDecimal.valueOf(1000), 45,
                     15, 3, BigDecimal.ZERO, "01 January 2023", "01 January 2023");
 
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2023, 1, 16), 333.33, 0.0, 333.33, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2023, 1, 31), 333.33, 0.0, 333.33, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 3, LocalDate.of(2023, 2, 15), 333.34, 0.0, 333.34, 0.0, 0.0);
             assertTrue(loanDetails.getStatus().getPendingApproval());
 
-            loanTransactionHelper.approveLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(1000)).dateFormat(DATETIME_PATTERN)
-                            .approvedOnDate("01 January 2023").locale("en"));
+            loanHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(1000))
+                    .dateFormat(DATETIME_PATTERN).approvedOnDate("01 January 2023").locale("en"));
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2023, 1, 16), 333.33, 0.0, 333.33, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2023, 1, 31), 333.33, 0.0, 333.33, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 3, LocalDate.of(2023, 2, 15), 333.34, 0.0, 333.34, 0.0, 0.0);
             assertTrue(loanDetails.getStatus().getWaitingForDisbursal());
 
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().actualDisbursementDate("01 January 2023").dateFormat(DATETIME_PATTERN)
-                            .transactionAmount(BigDecimal.valueOf(1000)).locale("en"));
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate("01 January 2023")
+                    .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(1000)).locale("en"));
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 1000.0, 0.0, 1000.0, 0.0, null);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2023, 1, 16), 333.33, 0.0, 333.33, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2023, 1, 31), 333.33, 0.0, 333.33, 0.0, 0.0);
@@ -2277,7 +2258,7 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             loanResponse = applyForLoanApplication(client.getClientId(), localLoanProductId, BigDecimal.valueOf(1000), 90, 15, 6,
                     BigDecimal.ZERO, "01 January 2023", "01 January 2023");
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2023, 1, 16), 166.67, 0.0, 166.67, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2023, 1, 31), 166.67, 0.0, 166.67, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 3, LocalDate.of(2023, 2, 15), 166.67, 0.0, 166.67, 0.0, 0.0);
@@ -2286,11 +2267,10 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateRepaymentPeriod(loanDetails, 6, LocalDate.of(2023, 4, 1), 166.65, 0.0, 166.65, 0.0, 0.0);
             assertTrue(loanDetails.getStatus().getPendingApproval());
 
-            loanTransactionHelper.approveLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(1000)).dateFormat(DATETIME_PATTERN)
-                            .approvedOnDate("01 January 2023").locale("en"));
+            loanHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(1000))
+                    .dateFormat(DATETIME_PATTERN).approvedOnDate("01 January 2023").locale("en"));
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2023, 1, 16), 166.67, 0.0, 166.67, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2023, 1, 31), 166.67, 0.0, 166.67, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 3, LocalDate.of(2023, 2, 15), 166.67, 0.0, 166.67, 0.0, 0.0);
@@ -2299,11 +2279,10 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateRepaymentPeriod(loanDetails, 6, LocalDate.of(2023, 4, 1), 166.65, 0.0, 166.65, 0.0, 0.0);
             assertTrue(loanDetails.getStatus().getWaitingForDisbursal());
 
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().actualDisbursementDate("01 January 2023").dateFormat(DATETIME_PATTERN)
-                            .transactionAmount(BigDecimal.valueOf(1000)).locale("en"));
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate("01 January 2023")
+                    .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(1000)).locale("en"));
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 1000.0, 0.0, 1000.0, 0.0, null);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2023, 1, 16), 166.67, 0.0, 166.67, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2023, 1, 31), 166.67, 0.0, 166.67, 0.0, 0.0);
@@ -2330,36 +2309,34 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             final Account incomeAccount = accountHelper.createIncomeAccount();
             final Account expenseAccount = accountHelper.createExpenseAccount();
             final Account overpaymentAccount = accountHelper.createLiabilityAccount();
-            Integer localLoanProductId = createLoanProduct("40.50", "15", "3", true, "25", false, LoanScheduleType.PROGRESSIVE,
+            Long localLoanProductId = createLoanProduct("40.50", "15", "3", true, "25", false, LoanScheduleType.PROGRESSIVE,
                     LoanScheduleProcessingType.HORIZONTAL, assetAccount, incomeAccount, expenseAccount, overpaymentAccount);
             assertNotNull(localLoanProductId);
 
             PostLoansResponse loanResponse = applyForLoanApplication(client.getClientId(), localLoanProductId, BigDecimal.valueOf(40.50),
                     45, 15, 3, BigDecimal.ZERO, "01 January 2023", "01 January 2023");
 
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2023, 1, 1), 10.12, 0.0, 10.12, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2023, 1, 16), 10.13, 0.0, 10.13, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 3, LocalDate.of(2023, 1, 31), 10.13, 0.0, 10.13, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 4, LocalDate.of(2023, 2, 15), 10.12, 0.0, 10.12, 0.0, 0.0);
             assertTrue(loanDetails.getStatus().getPendingApproval());
 
-            loanTransactionHelper.approveLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(40.5)).dateFormat(DATETIME_PATTERN)
-                            .approvedOnDate("01 January 2023").locale("en"));
+            loanHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(40.5))
+                    .dateFormat(DATETIME_PATTERN).approvedOnDate("01 January 2023").locale("en"));
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2023, 1, 1), 10.12, 0.0, 10.12, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2023, 1, 16), 10.13, 0.0, 10.13, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 3, LocalDate.of(2023, 1, 31), 10.13, 0.0, 10.13, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 4, LocalDate.of(2023, 2, 15), 10.12, 0.0, 10.12, 0.0, 0.0);
             assertTrue(loanDetails.getStatus().getWaitingForDisbursal());
 
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().actualDisbursementDate("01 January 2023").dateFormat(DATETIME_PATTERN)
-                            .transactionAmount(BigDecimal.valueOf(40.5)).locale("en"));
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate("01 January 2023")
+                    .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(40.5)).locale("en"));
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 40.5, 0.0, 40.5, 0.0, null);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2023, 1, 1), 10.12, 0.0, 10.12, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2023, 1, 16), 10.13, 0.0, 10.13, 0.0, 0.0);
@@ -2383,36 +2360,34 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             final Account incomeAccount = accountHelper.createIncomeAccount();
             final Account expenseAccount = accountHelper.createExpenseAccount();
             final Account overpaymentAccount = accountHelper.createLiabilityAccount();
-            Integer localLoanProductId = createLoanProduct("40.50", "15", "3", true, "25", false, LoanScheduleType.PROGRESSIVE,
+            Long localLoanProductId = createLoanProduct("40.50", "15", "3", true, "25", false, LoanScheduleType.PROGRESSIVE,
                     LoanScheduleProcessingType.HORIZONTAL, assetAccount, incomeAccount, expenseAccount, overpaymentAccount);
             assertNotNull(localLoanProductId);
 
             PostLoansResponse loanResponse = applyForLoanApplication(client.getClientId(), localLoanProductId, BigDecimal.valueOf(40.50),
                     45, 15, 3, BigDecimal.ZERO, "01 January 2023", "01 January 2023");
 
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2023, 1, 1), 10.12, 0.0, 10.12, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2023, 1, 16), 10.13, 0.0, 10.13, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 3, LocalDate.of(2023, 1, 31), 10.13, 0.0, 10.13, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 4, LocalDate.of(2023, 2, 15), 10.12, 0.0, 10.12, 0.0, 0.0);
             assertTrue(loanDetails.getStatus().getPendingApproval());
 
-            loanTransactionHelper.approveLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(40.5)).dateFormat(DATETIME_PATTERN)
-                            .approvedOnDate("01 January 2023").locale("en"));
+            loanHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(40.5))
+                    .dateFormat(DATETIME_PATTERN).approvedOnDate("01 January 2023").locale("en"));
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2023, 1, 1), 10.12, 0.0, 10.12, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2023, 1, 16), 10.13, 0.0, 10.13, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 3, LocalDate.of(2023, 1, 31), 10.13, 0.0, 10.13, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 4, LocalDate.of(2023, 2, 15), 10.12, 0.0, 10.12, 0.0, 0.0);
             assertTrue(loanDetails.getStatus().getWaitingForDisbursal());
 
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().actualDisbursementDate("01 January 2023").dateFormat(DATETIME_PATTERN)
-                            .transactionAmount(BigDecimal.valueOf(40.5)).locale("en"));
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate("01 January 2023")
+                    .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(40.5)).locale("en"));
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 40.5, 0.0, 40.5, 0.0, null);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2023, 1, 1), 10.12, 0.0, 10.12, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2023, 1, 16), 10.13, 0.0, 10.13, 0.0, 0.0);
@@ -2439,20 +2414,18 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             final Account incomeAccount = accountHelper.createIncomeAccount();
             final Account expenseAccount = accountHelper.createExpenseAccount();
             final Account overpaymentAccount = accountHelper.createLiabilityAccount();
-            Integer localLoanProductId = createLoanProduct("1000", "15", "3", true, "25", false, LoanScheduleType.PROGRESSIVE,
+            Long localLoanProductId = createLoanProduct("1000", "15", "3", true, "25", false, LoanScheduleType.PROGRESSIVE,
                     LoanScheduleProcessingType.HORIZONTAL, assetAccount, incomeAccount, expenseAccount, overpaymentAccount);
             final PostLoansResponse loanResponse = applyForLoanApplication(client.getClientId(), localLoanProductId,
                     BigDecimal.valueOf(1000.0), 45, 15, 3, BigDecimal.ZERO, "01 September 2023", "01 September 2023");
 
-            loanTransactionHelper.approveLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(1000)).dateFormat(DATETIME_PATTERN)
-                            .approvedOnDate("01 September 2023").locale("en"));
+            loanHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(1000))
+                    .dateFormat(DATETIME_PATTERN).approvedOnDate("01 September 2023").locale("en"));
 
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().actualDisbursementDate("01 September 2023").dateFormat(DATETIME_PATTERN)
-                            .transactionAmount(BigDecimal.valueOf(1000.0)).locale("en"));
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate("01 September 2023")
+                    .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(1000.0)).locale("en"));
 
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 1000.0, 0.0, 1000.0, 0.0, null);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2023, 9, 1), 250.0, 0.0, 250.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2023, 9, 16), 250.0, 0.0, 250.0, 0.0, 0.0);
@@ -2461,12 +2434,10 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             assertTrue(loanDetails.getStatus().getActive());
 
             // Add Charge Penalty
-            Integer penalty = ChargesHelper.createCharges(requestSpec, responseSpec,
-                    ChargesHelper.getLoanSpecifiedDueDateJSON(ChargesHelper.CHARGE_CALCULATION_TYPE_FLAT, "20", true));
-            loanTransactionHelper.addChargesForLoan(loanResponse.getLoanId().intValue(),
-                    LoanTransactionHelper.getSpecifiedDueDateChargesForLoanAsJSON(String.valueOf(penalty), "17 October 2023", "20"));
+            Long penalty = chargesHelper.createLoanSpecifiedDueDatePenalty(20.0).getResourceId();
+            addSpecifiedDueDateCharge(loanResponse.getLoanId(), penalty, "17 October 2023", 20.0);
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 1020.0, 0.0, 1000.0, 0.0, null);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2023, 9, 1), 250.0, 0.0, 250.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2023, 9, 16), 250.0, 0.0, 250.0, 0.0, 0.0);
@@ -2476,9 +2447,9 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                     0.0, 0.0, 0.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("01 September 2023").locale("en").transactionAmount(250.0));
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 770.0, 250.0, 750.0, 250.0, null);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2023, 9, 1), 250.0, 250.0, 0.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2023, 9, 16), 250.0, 0.0, 250.0, 0.0, 0.0);
@@ -2488,12 +2459,11 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                     0.0, 0.0, 0.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            businessDateHelper.updateBusinessDate(new BusinessDateUpdateRequest().type(BusinessDateUpdateRequest.TypeEnum.BUSINESS_DATE)
-                    .date("2023.09.16").dateFormat("yyyy.MM.dd").locale("en"));
+            updateBusinessDate("2023-09-16");
 
-            loanTransactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("16 September 2023").locale("en").transactionAmount(250.0));
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 520.0, 500.0, 500.0, 500.0, null);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2023, 9, 1), 250.0, 250.0, 0.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2023, 9, 16), 250.0, 250.0, 0.0, 0.0, 0.0);
@@ -2503,14 +2473,12 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                     0.0, 0.0, 0.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.addChargesForLoan(loanResponse.getLoanId().intValue(),
-                    LoanTransactionHelper.getSpecifiedDueDateChargesForLoanAsJSON(String.valueOf(penalty), "17 September 2023", "20"));
-            loanTransactionHelper.addChargesForLoan(loanResponse.getLoanId().intValue(),
-                    LoanTransactionHelper.getSpecifiedDueDateChargesForLoanAsJSON(String.valueOf(penalty), "16 October 2023", "20"));
+            addSpecifiedDueDateCharge(loanResponse.getLoanId(), penalty, "17 September 2023", 20.0);
+            addSpecifiedDueDateCharge(loanResponse.getLoanId(), penalty, "16 October 2023", 20.0);
 
-            loanTransactionHelper.makeGoodwillCredit(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeGoodwillCredit(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("16 September 2023").locale("en").transactionAmount(50.0));
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 510.0, 550.0, 490.0, 510.0, null);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2023, 9, 1), 250.0, 250.0, 0.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2023, 9, 16), 250.0, 250.0, 0.0, 0.0, 0.0);
@@ -2545,21 +2513,19 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             final Account incomeAccount = accountHelper.createIncomeAccount();
             final Account expenseAccount = accountHelper.createExpenseAccount();
             final Account overpaymentAccount = accountHelper.createLiabilityAccount();
-            Integer localLoanProductId = createLoanProduct("1000", "15", "3", true, "25", false, LoanScheduleType.PROGRESSIVE,
+            Long localLoanProductId = createLoanProduct("1000", "15", "3", true, "25", false, LoanScheduleType.PROGRESSIVE,
                     LoanScheduleProcessingType.VERTICAL, assetAccount, incomeAccount, expenseAccount, overpaymentAccount);
             final PostLoansResponse loanResponse = applyForLoanApplication(client.getClientId(), localLoanProductId,
                     BigDecimal.valueOf(1000.0), 45, 15, 3, BigDecimal.ZERO, "01 September 2023", "01 September 2023",
                     LoanScheduleProcessingType.VERTICAL);
 
-            loanTransactionHelper.approveLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(1000)).dateFormat(DATETIME_PATTERN)
-                            .approvedOnDate("01 September 2023").locale("en"));
+            loanHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(1000))
+                    .dateFormat(DATETIME_PATTERN).approvedOnDate("01 September 2023").locale("en"));
 
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().actualDisbursementDate("01 September 2023").dateFormat(DATETIME_PATTERN)
-                            .transactionAmount(BigDecimal.valueOf(1000.0)).locale("en"));
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate("01 September 2023")
+                    .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(1000.0)).locale("en"));
 
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 1000.0, 0.0, 1000.0, 0.0, null);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2023, 9, 1), 250.0, 0.0, 250.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2023, 9, 16), 250.0, 0.0, 250.0, 0.0, 0.0);
@@ -2568,12 +2534,10 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             assertTrue(loanDetails.getStatus().getActive());
 
             // Add Charge Penalty
-            Integer penalty = ChargesHelper.createCharges(requestSpec, responseSpec,
-                    ChargesHelper.getLoanSpecifiedDueDateJSON(ChargesHelper.CHARGE_CALCULATION_TYPE_FLAT, "20", true));
-            loanTransactionHelper.addChargesForLoan(loanResponse.getLoanId().intValue(),
-                    LoanTransactionHelper.getSpecifiedDueDateChargesForLoanAsJSON(String.valueOf(penalty), "17 October 2023", "20"));
+            Long penalty = chargesHelper.createLoanSpecifiedDueDatePenalty(20.0).getResourceId();
+            addSpecifiedDueDateCharge(loanResponse.getLoanId(), penalty, "17 October 2023", 20.0);
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 1020.0, 0.0, 1000.0, 0.0, null);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2023, 9, 1), 250.0, 0.0, 250.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2023, 9, 16), 250.0, 0.0, 250.0, 0.0, 0.0);
@@ -2583,9 +2547,9 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                     0.0, 0.0, 0.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("01 September 2023").locale("en").transactionAmount(250.0));
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 770.0, 250.0, 750.0, 250.0, null);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2023, 9, 1), 250.0, 250.0, 0.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2023, 9, 16), 250.0, 0.0, 250.0, 0.0, 0.0);
@@ -2595,12 +2559,11 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                     0.0, 0.0, 0.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            businessDateHelper.updateBusinessDate(new BusinessDateUpdateRequest().type(BusinessDateUpdateRequest.TypeEnum.BUSINESS_DATE)
-                    .date("2023.09.16").dateFormat("yyyy.MM.dd").locale("en"));
+            updateBusinessDate("2023-09-16");
 
-            loanTransactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("16 September 2023").locale("en").transactionAmount(250.0));
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 520.0, 500.0, 500.0, 500.0, null);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2023, 9, 1), 250.0, 250.0, 0.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2023, 9, 16), 250.0, 250.0, 0.0, 0.0, 0.0);
@@ -2610,14 +2573,12 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                     0.0, 0.0, 0.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.addChargesForLoan(loanResponse.getLoanId().intValue(),
-                    LoanTransactionHelper.getSpecifiedDueDateChargesForLoanAsJSON(String.valueOf(penalty), "17 September 2023", "20"));
-            loanTransactionHelper.addChargesForLoan(loanResponse.getLoanId().intValue(),
-                    LoanTransactionHelper.getSpecifiedDueDateChargesForLoanAsJSON(String.valueOf(penalty), "16 October 2023", "20"));
+            addSpecifiedDueDateCharge(loanResponse.getLoanId(), penalty, "17 September 2023", 20.0);
+            addSpecifiedDueDateCharge(loanResponse.getLoanId(), penalty, "16 October 2023", 20.0);
 
-            loanTransactionHelper.makeGoodwillCredit(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeGoodwillCredit(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("16 September 2023").locale("en").transactionAmount(50.0));
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 510.0, 550.0, 500.0, 500.0, null);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2023, 9, 1), 250.0, 250.0, 0.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2023, 9, 16), 250.0, 250.0, 0.0, 0.0, 0.0);
@@ -2651,20 +2612,18 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             final Account incomeAccount = accountHelper.createIncomeAccount();
             final Account expenseAccount = accountHelper.createExpenseAccount();
             final Account overpaymentAccount = accountHelper.createLiabilityAccount();
-            Integer localLoanProductId = createLoanProduct("1000", "15", "3", true, "25", false, LoanScheduleType.PROGRESSIVE,
+            Long localLoanProductId = createLoanProduct("1000", "15", "3", true, "25", false, LoanScheduleType.PROGRESSIVE,
                     LoanScheduleProcessingType.HORIZONTAL, assetAccount, incomeAccount, expenseAccount, overpaymentAccount);
             final PostLoansResponse loanResponse = applyForLoanApplication(client.getClientId(), localLoanProductId,
                     BigDecimal.valueOf(1000.0), 45, 15, 3, BigDecimal.ZERO, "01 September 2023", "01 September 2023");
 
-            loanTransactionHelper.approveLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(1000)).dateFormat(DATETIME_PATTERN)
-                            .approvedOnDate("01 September 2023").locale("en"));
+            loanHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(1000))
+                    .dateFormat(DATETIME_PATTERN).approvedOnDate("01 September 2023").locale("en"));
 
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().actualDisbursementDate("01 September 2023").dateFormat(DATETIME_PATTERN)
-                            .transactionAmount(BigDecimal.valueOf(1000.0)).locale("en"));
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate("01 September 2023")
+                    .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(1000.0)).locale("en"));
 
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 1000.0, 0.0, 1000.0, 0.0, null);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2023, 9, 1), 250.0, 0.0, 250.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2023, 9, 16), 250.0, 0.0, 250.0, 0.0, 0.0);
@@ -2673,12 +2632,10 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             assertTrue(loanDetails.getStatus().getActive());
 
             // Add Charge Penalty
-            Integer penalty = ChargesHelper.createCharges(requestSpec, responseSpec,
-                    ChargesHelper.getLoanSpecifiedDueDateJSON(ChargesHelper.CHARGE_CALCULATION_TYPE_FLAT, "20", true));
-            loanTransactionHelper.addChargesForLoan(loanResponse.getLoanId().intValue(),
-                    LoanTransactionHelper.getSpecifiedDueDateChargesForLoanAsJSON(String.valueOf(penalty), "17 October 2023", "20"));
+            Long penalty = chargesHelper.createLoanSpecifiedDueDatePenalty(20.0).getResourceId();
+            addSpecifiedDueDateCharge(loanResponse.getLoanId(), penalty, "17 October 2023", 20.0);
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 1020.0, 0.0, 1000.0, 0.0, null);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2023, 9, 1), 250.0, 0.0, 250.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2023, 9, 16), 250.0, 0.0, 250.0, 0.0, 0.0);
@@ -2688,9 +2645,9 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                     0.0, 0.0, 0.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("01 September 2023").locale("en").transactionAmount(250.0));
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 770.0, 250.0, 750.0, 250.0, null);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2023, 9, 1), 250.0, 250.0, 0.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2023, 9, 16), 250.0, 0.0, 250.0, 0.0, 0.0);
@@ -2700,12 +2657,11 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                     0.0, 0.0, 0.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            businessDateHelper.updateBusinessDate(new BusinessDateUpdateRequest().type(BusinessDateUpdateRequest.TypeEnum.BUSINESS_DATE)
-                    .date("2023.09.16").dateFormat("yyyy.MM.dd").locale("en"));
+            updateBusinessDate("2023-09-16");
 
-            loanTransactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("16 September 2023").locale("en").transactionAmount(250.0));
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 520.0, 500.0, 500.0, 500.0, null);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2023, 9, 1), 250.0, 250.0, 0.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2023, 9, 16), 250.0, 250.0, 0.0, 0.0, 0.0);
@@ -2715,14 +2671,12 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                     0.0, 0.0, 0.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.addChargesForLoan(loanResponse.getLoanId().intValue(),
-                    LoanTransactionHelper.getSpecifiedDueDateChargesForLoanAsJSON(String.valueOf(penalty), "17 September 2023", "20"));
-            loanTransactionHelper.addChargesForLoan(loanResponse.getLoanId().intValue(),
-                    LoanTransactionHelper.getSpecifiedDueDateChargesForLoanAsJSON(String.valueOf(penalty), "16 October 2023", "20"));
+            addSpecifiedDueDateCharge(loanResponse.getLoanId(), penalty, "17 September 2023", 20.0);
+            addSpecifiedDueDateCharge(loanResponse.getLoanId(), penalty, "16 October 2023", 20.0);
 
-            loanTransactionHelper.makeMerchantIssuedRefund(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeMerchantIssuedRefund(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("16 September 2023").locale("en").transactionAmount(30.0));
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 530.0, 530.0, 500.0, 500.0, null);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2023, 9, 1), 250.0, 250.0, 0.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2023, 9, 16), 250.0, 250.0, 0.0, 0.0, 0.0);
@@ -2756,20 +2710,18 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             final Account incomeAccount = accountHelper.createIncomeAccount();
             final Account expenseAccount = accountHelper.createExpenseAccount();
             final Account overpaymentAccount = accountHelper.createLiabilityAccount();
-            Integer localLoanProductId = createLoanProduct("1000", "15", "3", true, "25", false, LoanScheduleType.PROGRESSIVE,
+            Long localLoanProductId = createLoanProduct("1000", "15", "3", true, "25", false, LoanScheduleType.PROGRESSIVE,
                     LoanScheduleProcessingType.VERTICAL, assetAccount, incomeAccount, expenseAccount, overpaymentAccount);
             final PostLoansResponse loanResponse = applyForLoanApplication(client.getClientId(), localLoanProductId,
                     BigDecimal.valueOf(1000.0), 45, 15, 3, BigDecimal.ZERO, "01 September 2023", "01 September 2023");
 
-            loanTransactionHelper.approveLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(1000)).dateFormat(DATETIME_PATTERN)
-                            .approvedOnDate("01 September 2023").locale("en"));
+            loanHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(1000))
+                    .dateFormat(DATETIME_PATTERN).approvedOnDate("01 September 2023").locale("en"));
 
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().actualDisbursementDate("01 September 2023").dateFormat(DATETIME_PATTERN)
-                            .transactionAmount(BigDecimal.valueOf(1000.0)).locale("en"));
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate("01 September 2023")
+                    .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(1000.0)).locale("en"));
 
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 1000.0, 0.0, 1000.0, 0.0, null);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2023, 9, 1), 250.0, 0.0, 250.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2023, 9, 16), 250.0, 0.0, 250.0, 0.0, 0.0);
@@ -2778,12 +2730,10 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             assertTrue(loanDetails.getStatus().getActive());
 
             // Add Charge Penalty
-            Integer penalty = ChargesHelper.createCharges(requestSpec, responseSpec,
-                    ChargesHelper.getLoanSpecifiedDueDateJSON(ChargesHelper.CHARGE_CALCULATION_TYPE_FLAT, "20", true));
-            loanTransactionHelper.addChargesForLoan(loanResponse.getLoanId().intValue(),
-                    LoanTransactionHelper.getSpecifiedDueDateChargesForLoanAsJSON(String.valueOf(penalty), "17 October 2023", "20"));
+            Long penalty = chargesHelper.createLoanSpecifiedDueDatePenalty(20.0).getResourceId();
+            addSpecifiedDueDateCharge(loanResponse.getLoanId(), penalty, "17 October 2023", 20.0);
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 1020.0, 0.0, 1000.0, 0.0, null);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2023, 9, 1), 250.0, 0.0, 250.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2023, 9, 16), 250.0, 0.0, 250.0, 0.0, 0.0);
@@ -2793,9 +2743,9 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                     0.0, 0.0, 0.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("01 September 2023").locale("en").transactionAmount(250.0));
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 770.0, 250.0, 750.0, 250.0, null);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2023, 9, 1), 250.0, 250.0, 0.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2023, 9, 16), 250.0, 0.0, 250.0, 0.0, 0.0);
@@ -2805,12 +2755,11 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                     0.0, 0.0, 0.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            businessDateHelper.updateBusinessDate(new BusinessDateUpdateRequest().type(BusinessDateUpdateRequest.TypeEnum.BUSINESS_DATE)
-                    .date("2023.09.16").dateFormat("yyyy.MM.dd").locale("en"));
+            updateBusinessDate("2023-09-16");
 
-            loanTransactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("16 September 2023").locale("en").transactionAmount(250.0));
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 520.0, 500.0, 500.0, 500.0, null);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2023, 9, 1), 250.0, 250.0, 0.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2023, 9, 16), 250.0, 250.0, 0.0, 0.0, 0.0);
@@ -2819,13 +2768,11 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateRepaymentPeriod(loanDetails, 5, LocalDate.of(2023, 10, 17), 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 20.0, 0.0, 20.0, 0.0, 0.0,
                     0.0, 0.0, 0.0);
             assertTrue(loanDetails.getStatus().getActive());
-            loanTransactionHelper.addChargesForLoan(loanResponse.getLoanId().intValue(),
-                    LoanTransactionHelper.getSpecifiedDueDateChargesForLoanAsJSON(String.valueOf(penalty), "17 September 2023", "20"));
-            loanTransactionHelper.addChargesForLoan(loanResponse.getLoanId().intValue(),
-                    LoanTransactionHelper.getSpecifiedDueDateChargesForLoanAsJSON(String.valueOf(penalty), "16 October 2023", "20"));
-            loanTransactionHelper.makeMerchantIssuedRefund(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            addSpecifiedDueDateCharge(loanResponse.getLoanId(), penalty, "17 September 2023", 20.0);
+            addSpecifiedDueDateCharge(loanResponse.getLoanId(), penalty, "16 October 2023", 20.0);
+            transactionHelper.makeMerchantIssuedRefund(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("16 September 2023").locale("en").transactionAmount(30.0));
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 530.0, 530.0, 500.0, 500.0, null);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2023, 9, 1), 250.0, 250.0, 0.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2023, 9, 16), 250.0, 250.0, 0.0, 0.0, 0.0);
@@ -2856,20 +2803,18 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             final Account incomeAccount = accountHelper.createIncomeAccount();
             final Account expenseAccount = accountHelper.createExpenseAccount();
             final Account overpaymentAccount = accountHelper.createLiabilityAccount();
-            Integer localLoanProductId = createLoanProduct("1000", "15", "3", true, "25", false, LoanScheduleType.PROGRESSIVE,
+            Long localLoanProductId = createLoanProduct("1000", "15", "3", true, "25", false, LoanScheduleType.PROGRESSIVE,
                     LoanScheduleProcessingType.HORIZONTAL, assetAccount, incomeAccount, expenseAccount, overpaymentAccount);
             final PostLoansResponse loanResponse = applyForLoanApplication(client.getClientId(), localLoanProductId,
                     BigDecimal.valueOf(1000.0), 45, 15, 3, BigDecimal.ZERO, "01 January 2023", "01 January 2023");
 
-            loanTransactionHelper.approveLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(1000)).dateFormat(DATETIME_PATTERN)
-                            .approvedOnDate("01 January 2023").locale("en"));
+            loanHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(1000))
+                    .dateFormat(DATETIME_PATTERN).approvedOnDate("01 January 2023").locale("en"));
 
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().actualDisbursementDate("01 January 2023").dateFormat(DATETIME_PATTERN)
-                            .transactionAmount(BigDecimal.valueOf(1000.0)).locale("en"));
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate("01 January 2023")
+                    .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(1000.0)).locale("en"));
 
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 1000.0, 0.0, 1000.0, 0.0, null);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2023, 1, 1), 250.0, 0.0, 250.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2023, 1, 16), 250.0, 0.0, 250.0, 0.0, 0.0);
@@ -2878,12 +2823,10 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             assertTrue(loanDetails.getStatus().getActive());
 
             // Add Charge Fee
-            Integer fee = ChargesHelper.createCharges(requestSpec, responseSpec,
-                    ChargesHelper.getLoanSpecifiedDueDateJSON(ChargesHelper.CHARGE_CALCULATION_TYPE_FLAT, "50", false));
-            loanTransactionHelper.addChargesForLoan(loanResponse.getLoanId().intValue(),
-                    LoanTransactionHelper.getSpecifiedDueDateChargesForLoanAsJSON(String.valueOf(fee), "01 January 2023", "50"));
+            Long fee = chargesHelper.createLoanSpecifiedDueDateCharge(50.0).getResourceId();
+            addSpecifiedDueDateCharge(loanResponse.getLoanId(), fee, "01 January 2023", 50.0);
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 1050.0, 0.0, 1000.0, 0.0, null);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2023, 1, 1), 250.0, 0.0, 250.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2023, 1, 16), 250.0, 0.0, 250.0, 50.0, 0.0, 50.0, 0.0, 0.0, 0.0, 0.0, 0.0,
@@ -2892,9 +2835,9 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateRepaymentPeriod(loanDetails, 4, LocalDate.of(2023, 2, 15), 250.0, 0.0, 250.0, 0.0, 0.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("01 January 2023").locale("en").transactionAmount(250.0));
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 800.0, 250.0, 750.0, 250.0, null);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2023, 1, 1), 250.0, 250.0, 0.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2023, 1, 16), 250.0, 0.0, 250.0, 50.0, 0.0, 50.0, 0.0, 0.0, 0.0, 0.0, 0.0,
@@ -2904,10 +2847,9 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             assertTrue(loanDetails.getStatus().getActive());
 
             updateBusinessDate("16 January 2023");
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().actualDisbursementDate("16 January 2023").dateFormat(DATETIME_PATTERN)
-                            .transactionAmount(BigDecimal.valueOf(400.0)).locale("en"));
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate("16 January 2023")
+                    .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(400.0)).locale("en"));
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 1200.0, 250.0, 1150.0, 250.0, null);
             validatePeriod(loanDetails, 0, LocalDate.of(2023, 1, 1), null, 1000.0, null, null, null, 0.0, 0.0, null, null, null, null, null,
                     null, null, null, null);
@@ -2943,20 +2885,18 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             final Account incomeAccount = accountHelper.createIncomeAccount();
             final Account expenseAccount = accountHelper.createExpenseAccount();
             final Account overpaymentAccount = accountHelper.createLiabilityAccount();
-            Integer localLoanProductId = createLoanProduct("1000", "15", "3", true, "25", false, LoanScheduleType.PROGRESSIVE,
+            Long localLoanProductId = createLoanProduct("1000", "15", "3", true, "25", false, LoanScheduleType.PROGRESSIVE,
                     LoanScheduleProcessingType.HORIZONTAL, assetAccount, incomeAccount, expenseAccount, overpaymentAccount);
             final PostLoansResponse loanResponse = applyForLoanApplication(client.getClientId(), localLoanProductId,
                     BigDecimal.valueOf(1000.0), 45, 15, 3, BigDecimal.ZERO, "01 January 2023", "01 January 2023");
 
-            loanTransactionHelper.approveLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(1000)).dateFormat(DATETIME_PATTERN)
-                            .approvedOnDate("01 January 2023").locale("en"));
+            loanHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(1000))
+                    .dateFormat(DATETIME_PATTERN).approvedOnDate("01 January 2023").locale("en"));
 
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().actualDisbursementDate("01 January 2023").dateFormat(DATETIME_PATTERN)
-                            .transactionAmount(BigDecimal.valueOf(1000.0)).locale("en"));
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate("01 January 2023")
+                    .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(1000.0)).locale("en"));
 
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 1000.0, 0.0, 1000.0, 0.0, null);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2023, 1, 1), 250.0, 0.0, 250.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2023, 1, 16), 250.0, 0.0, 250.0, 0.0, 0.0);
@@ -2965,12 +2905,10 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             assertTrue(loanDetails.getStatus().getActive());
 
             // Add Charge Fee
-            Integer fee = ChargesHelper.createCharges(requestSpec, responseSpec,
-                    ChargesHelper.getLoanSpecifiedDueDateJSON(ChargesHelper.CHARGE_CALCULATION_TYPE_FLAT, "50", false));
-            loanTransactionHelper.addChargesForLoan(loanResponse.getLoanId().intValue(),
-                    LoanTransactionHelper.getSpecifiedDueDateChargesForLoanAsJSON(String.valueOf(fee), "01 January 2023", "50"));
+            Long fee = chargesHelper.createLoanSpecifiedDueDateCharge(50.0).getResourceId();
+            addSpecifiedDueDateCharge(loanResponse.getLoanId(), fee, "01 January 2023", 50.0);
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 1050.0, 0.0, 1000.0, 0.0, null);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2023, 1, 1), 250.0, 0.0, 250.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2023, 1, 16), 250.0, 0.0, 250.0, 50.0, 0.0, 50.0, 0.0, 0.0, 0.0, 0.0, 0.0,
@@ -2979,9 +2917,9 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateRepaymentPeriod(loanDetails, 4, LocalDate.of(2023, 2, 15), 250.0, 0.0, 250.0, 0.0, 0.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("01 January 2023").locale("en").transactionAmount(250.0));
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 800.0, 250.0, 750.0, 250.0, null);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2023, 1, 1), 250.0, 250.0, 0.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2023, 1, 16), 250.0, 0.0, 250.0, 50.0, 0.0, 50.0, 0.0, 0.0, 0.0, 0.0, 0.0,
@@ -2991,13 +2929,11 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             assertTrue(loanDetails.getStatus().getActive());
 
             updateBusinessDate("16 January 2023");
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().actualDisbursementDate("16 January 2023").dateFormat(DATETIME_PATTERN)
-                            .transactionAmount(BigDecimal.valueOf(400.0)).locale("en"));
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().actualDisbursementDate("16 January 2023").dateFormat(DATETIME_PATTERN)
-                            .transactionAmount(BigDecimal.valueOf(80.0)).locale("en"));
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate("16 January 2023")
+                    .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(400.0)).locale("en"));
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate("16 January 2023")
+                    .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(80.0)).locale("en"));
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 1280.0, 250.0, 1230.0, 250.0, null);
             validatePeriod(loanDetails, 0, LocalDate.of(2023, 1, 1), null, 1000.0, null, null, null, 0.0, 0.0, null, null, null, null, null,
                     null, null, null, null);
@@ -3033,20 +2969,18 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             final Account incomeAccount = accountHelper.createIncomeAccount();
             final Account expenseAccount = accountHelper.createExpenseAccount();
             final Account overpaymentAccount = accountHelper.createLiabilityAccount();
-            Integer localLoanProductId = createLoanProduct("1000", "15", "3", true, "25", false, LoanScheduleType.PROGRESSIVE,
+            Long localLoanProductId = createLoanProduct("1000", "15", "3", true, "25", false, LoanScheduleType.PROGRESSIVE,
                     LoanScheduleProcessingType.HORIZONTAL, assetAccount, incomeAccount, expenseAccount, overpaymentAccount);
             final PostLoansResponse loanResponse = applyForLoanApplication(client.getClientId(), localLoanProductId,
                     BigDecimal.valueOf(1000.0), 45, 15, 3, BigDecimal.ZERO, "01 January 2023", "01 January 2023");
 
-            loanTransactionHelper.approveLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(1000)).dateFormat(DATETIME_PATTERN)
-                            .approvedOnDate("01 January 2023").locale("en"));
+            loanHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(1000))
+                    .dateFormat(DATETIME_PATTERN).approvedOnDate("01 January 2023").locale("en"));
 
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().actualDisbursementDate("01 January 2023").dateFormat(DATETIME_PATTERN)
-                            .transactionAmount(BigDecimal.valueOf(1000.0)).locale("en"));
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate("01 January 2023")
+                    .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(1000.0)).locale("en"));
 
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 1000.0, 0.0, 1000.0, 0.0, null);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2023, 1, 1), 250.0, 0.0, 250.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2023, 1, 16), 250.0, 0.0, 250.0, 0.0, 0.0);
@@ -3054,10 +2988,9 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateRepaymentPeriod(loanDetails, 4, LocalDate.of(2023, 2, 15), 250.0, 0.0, 250.0, 0.0, 0.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().actualDisbursementDate("01 January 2023").dateFormat(DATETIME_PATTERN)
-                            .transactionAmount(BigDecimal.valueOf(400.0)).locale("en"));
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate("01 January 2023")
+                    .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(400.0)).locale("en"));
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 1400.0, 0.0, 1400.0, 0.0, null);
             validatePeriod(loanDetails, 0, LocalDate.of(2023, 1, 1), null, 1000.0, null, null, null, 0.0, 0.0, null, null, null, null, null,
                     null, null, null, null);
@@ -3113,20 +3046,18 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             final Account incomeAccount = accountHelper.createIncomeAccount();
             final Account expenseAccount = accountHelper.createExpenseAccount();
             final Account overpaymentAccount = accountHelper.createLiabilityAccount();
-            Integer localLoanProductId = createLoanProduct("1000", "15", "3", true, "25", true, LoanScheduleType.PROGRESSIVE,
+            Long localLoanProductId = createLoanProduct("1000", "15", "3", true, "25", true, LoanScheduleType.PROGRESSIVE,
                     LoanScheduleProcessingType.HORIZONTAL, assetAccount, incomeAccount, expenseAccount, overpaymentAccount);
             final PostLoansResponse loanResponse = applyForLoanApplication(client.getClientId(), localLoanProductId,
                     BigDecimal.valueOf(1000.0), 45, 15, 3, BigDecimal.ZERO, "22 November 2023", "01 January 2023");
 
-            loanTransactionHelper.approveLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(1000)).dateFormat(DATETIME_PATTERN)
-                            .approvedOnDate("22 November 2023").locale("en"));
+            loanHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(1000))
+                    .dateFormat(DATETIME_PATTERN).approvedOnDate("22 November 2023").locale("en"));
 
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().actualDisbursementDate("22 November 2023").dateFormat(DATETIME_PATTERN)
-                            .transactionAmount(BigDecimal.valueOf(100.0)).locale("en"));
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate("22 November 2023")
+                    .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(100.0)).locale("en"));
 
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 75.0, 25.0, 75.0, 25.0, null);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2023, 11, 22), 25.0, 25.0, 0.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2023, 12, 7), 25.0, 0.0, 25.0, 0.0, 0.0);
@@ -3134,10 +3065,9 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateRepaymentPeriod(loanDetails, 4, LocalDate.of(2024, 1, 6), 25.0, 0.0, 25.0, 0.0, 0.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().actualDisbursementDate("22 November 2023").dateFormat(DATETIME_PATTERN)
-                            .transactionAmount(BigDecimal.valueOf(901.0)).locale("en"));
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate("22 November 2023")
+                    .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(901.0)).locale("en"));
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 750.75, 250.25, 750.75, 250.25, null);
             validatePeriod(loanDetails, 0, LocalDate.of(2023, 11, 22), null, 100.0, null, null, null, 0.0, 0.0, null, null, null, null,
                     null, null, null, null, null);
@@ -3168,10 +3098,10 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             final Account incomeAccount = accountHelper.createIncomeAccount();
             final Account expenseAccount = accountHelper.createExpenseAccount();
             final Account overpaymentAccount = accountHelper.createLiabilityAccount();
-            Integer localLoanProductId = createLoanProduct("1000", "15", "3", true, "25", false, LoanScheduleType.PROGRESSIVE,
+            Long localLoanProductId = createLoanProduct("1000", "15", "3", true, "25", false, LoanScheduleType.PROGRESSIVE,
                     LoanScheduleProcessingType.HORIZONTAL, assetAccount, incomeAccount, expenseAccount, overpaymentAccount);
 
-            loanTransactionHelper.applyLoan(new PostLoansRequest().clientId(client.getClientId()).productId(localLoanProductId.longValue())
+            loanHelper.applyForLoan(new PostLoansRequest().clientId(client.getClientId()).productId(localLoanProductId)
                     .loanType("individual").locale("en").submittedOnDate(operationDate).expectedDisbursementDate(operationDate)
                     .dateFormat(DATETIME_PATTERN).amortizationType(1).interestRatePerPeriod(BigDecimal.ZERO)
                     .interestCalculationPeriodType(1).interestType(0).repaymentFrequencyType(0).repaymentEvery(15).repaymentFrequencyType(0)
@@ -3180,12 +3110,12 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                     .transactionProcessingStrategyCode(AdvancedPaymentScheduleTransactionProcessor.ADVANCED_PAYMENT_ALLOCATION_STRATEGY)
                     .loanScheduleProcessingType(LoanScheduleProcessingType.HORIZONTAL.name()));
 
-            loanTransactionHelper.applyLoanWithError(new PostLoansRequest().clientId(client.getClientId())
-                    .productId(localLoanProductId.longValue()).loanType("individual").locale("en").submittedOnDate(operationDate)
-                    .expectedDisbursementDate(operationDate).dateFormat(DATETIME_PATTERN).amortizationType(1)
-                    .interestRatePerPeriod(BigDecimal.ZERO).interestCalculationPeriodType(1).interestType(0).repaymentFrequencyType(0)
-                    .repaymentEvery(15).repaymentFrequencyType(0).numberOfRepayments(3).loanTermFrequency(45).loanTermFrequencyType(0)
-                    .principal(BigDecimal.valueOf(1000.0)).maxOutstandingLoanBalance(BigDecimal.valueOf(35000))
+            applyLoanExpectingError(new PostLoansRequest().clientId(client.getClientId()).productId(localLoanProductId)
+                    .loanType("individual").locale("en").submittedOnDate(operationDate).expectedDisbursementDate(operationDate)
+                    .dateFormat(DATETIME_PATTERN).amortizationType(1).interestRatePerPeriod(BigDecimal.ZERO)
+                    .interestCalculationPeriodType(1).interestType(0).repaymentFrequencyType(0).repaymentEvery(15).repaymentFrequencyType(0)
+                    .numberOfRepayments(3).loanTermFrequency(45).loanTermFrequencyType(0).principal(BigDecimal.valueOf(1000.0))
+                    .maxOutstandingLoanBalance(BigDecimal.valueOf(35000))
                     .transactionProcessingStrategyCode(FineractStyleLoanRepaymentScheduleTransactionProcessor.STRATEGY_CODE)
                     .loanScheduleProcessingType(LoanScheduleProcessingType.HORIZONTAL.name()), 403);
 
@@ -3202,28 +3132,26 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
     @Test
     public void uc122() {
         runAt("24 November 2023", () -> {
-            Long clientId = clientHelper.createClient(ClientHelper.defaultClientCreationRequest()).getClientId();
+            Long clientId = clientHelper.createClient(ClientRequestBuilders.defaultClient()).getClientId();
             PostLoanProductsRequest product = createOnePeriod30DaysLongNoInterestPeriodicAccrualProductWithAdvancedPaymentAllocation()
                     .numberOfRepayments(3).repaymentEvery(15).enableDownPayment(true)
                     .disbursedAmountPercentageForDownPayment(BigDecimal.valueOf(25)).enableAutoRepaymentForDownPayment(false);
-            PostLoanProductsResponse loanProductResponse = loanProductHelper.createLoanProduct(product);
+            PostLoanProductsResponse loanProductResponse = loanHelper.createLoanProduct(product);
             PostLoansRequest applicationRequest = applyLoanRequest(clientId, loanProductResponse.getResourceId(), "22 November 2023",
                     1000.0, 4);
 
             applicationRequest = applicationRequest.numberOfRepayments(3).loanTermFrequency(45)
                     .transactionProcessingStrategyCode(LoanProductTestBuilder.ADVANCED_PAYMENT_ALLOCATION_STRATEGY).repaymentEvery(15);
 
-            PostLoansResponse loanResponse = loanTransactionHelper.applyLoan(applicationRequest);
+            PostLoansResponse loanResponse = loanHelper.applyForLoan(applicationRequest);
 
-            loanTransactionHelper.approveLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(1000)).dateFormat(DATETIME_PATTERN)
-                            .approvedOnDate("22 November 2023").locale("en"));
+            loanHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(1000))
+                    .dateFormat(DATETIME_PATTERN).approvedOnDate("22 November 2023").locale("en"));
 
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().actualDisbursementDate("22 November 2023").dateFormat(DATETIME_PATTERN)
-                            .transactionAmount(BigDecimal.valueOf(100.0)).locale("en"));
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate("22 November 2023")
+                    .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(100.0)).locale("en"));
 
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 100.0, 0.0, 100.0, 0.0, null);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2023, 11, 22), 25.0, 0.0, 25.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2023, 12, 7), 25.0, 0.0, 25.0, 0.0, 0.0);
@@ -3231,9 +3159,9 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateRepaymentPeriod(loanDetails, 4, LocalDate.of(2024, 1, 6), 25.0, 0.0, 25.0, 0.0, 0.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("23 November 2023").locale("en").transactionAmount(150.0));
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 0.0, 100.0, 0.0, 100.0, 50.0);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2023, 11, 22), 25.0, 25.0, 0.0, 0.0, 25.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2023, 12, 7), 25.0, 25.0, 0.0, 25.0, 0.0);
@@ -3241,10 +3169,9 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateRepaymentPeriod(loanDetails, 4, LocalDate.of(2024, 1, 6), 25.0, 25.0, 0.0, 25.0, 0.0);
             assertTrue(loanDetails.getStatus().getOverpaid());
 
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().actualDisbursementDate("24 November 2023").dateFormat(DATETIME_PATTERN)
-                            .transactionAmount(BigDecimal.valueOf(100.0)).locale("en"));
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate("24 November 2023")
+                    .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(100.0)).locale("en"));
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 50.0, 150.0, 50.0, 150.0, null);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2023, 11, 22), 25.0, 25.0, 0.0, 0.0, 25.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2023, 11, 24), 25.0, 25.0, 0.0, 0.0, 0.0);
@@ -3259,14 +3186,14 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                     transaction(100, "Disbursement", "24 November 2023", 50.0, 0.0, 0.0, 0.0, 0.0, 0.0, 50.0) //
             );
             // verify journal entries
-            verifyJournalEntries(loanResponse.getLoanId(), journalEntry(100.0, loansReceivableAccount, "DEBIT"), //
-                    journalEntry(100.0, fundSource, "CREDIT"), //
-                    journalEntry(100.0, loansReceivableAccount, "CREDIT"), //
-                    journalEntry(50.0, overpaymentAccount, "CREDIT"), //
-                    journalEntry(150.0, fundSource, "DEBIT"), //
-                    journalEntry(50.0, loansReceivableAccount, "DEBIT"), //
-                    journalEntry(50.0, overpaymentAccount, "DEBIT"), //
-                    journalEntry(100.0, fundSource, "CREDIT") //
+            verifyJournalEntries(loanResponse.getLoanId(), journalEntry(100.0, loansReceivableAccount(), "DEBIT"), //
+                    journalEntry(100.0, fundSource(), "CREDIT"), //
+                    journalEntry(100.0, loansReceivableAccount(), "CREDIT"), //
+                    journalEntry(50.0, overpaymentAccount(), "CREDIT"), //
+                    journalEntry(150.0, fundSource(), "DEBIT"), //
+                    journalEntry(50.0, loansReceivableAccount(), "DEBIT"), //
+                    journalEntry(50.0, overpaymentAccount(), "DEBIT"), //
+                    journalEntry(100.0, fundSource(), "CREDIT") //
             );
         });
     }
@@ -3281,28 +3208,26 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
     @Test
     public void uc123() {
         runAt("22 November 2023", () -> {
-            Long clientId = clientHelper.createClient(ClientHelper.defaultClientCreationRequest()).getClientId();
+            Long clientId = clientHelper.createClient(ClientRequestBuilders.defaultClient()).getClientId();
             PostLoanProductsRequest product = createOnePeriod30DaysLongNoInterestPeriodicAccrualProductWithAdvancedPaymentAllocation()
                     .numberOfRepayments(3).repaymentEvery(15).enableDownPayment(true)
                     .disbursedAmountPercentageForDownPayment(BigDecimal.valueOf(25)).enableAutoRepaymentForDownPayment(false);
-            PostLoanProductsResponse loanProductResponse = loanProductHelper.createLoanProduct(product);
+            PostLoanProductsResponse loanProductResponse = loanHelper.createLoanProduct(product);
             PostLoansRequest applicationRequest = applyLoanRequest(clientId, loanProductResponse.getResourceId(), "22 November 2023",
                     1000.0, 4);
 
             applicationRequest = applicationRequest.numberOfRepayments(3).loanTermFrequency(45)
                     .transactionProcessingStrategyCode(LoanProductTestBuilder.ADVANCED_PAYMENT_ALLOCATION_STRATEGY).repaymentEvery(15);
 
-            PostLoansResponse loanResponse = loanTransactionHelper.applyLoan(applicationRequest);
+            PostLoansResponse loanResponse = loanHelper.applyForLoan(applicationRequest);
 
-            loanTransactionHelper.approveLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(1000)).dateFormat(DATETIME_PATTERN)
-                            .approvedOnDate("22 November 2023").locale("en"));
+            loanHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(1000))
+                    .dateFormat(DATETIME_PATTERN).approvedOnDate("22 November 2023").locale("en"));
 
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().actualDisbursementDate("22 November 2023").dateFormat(DATETIME_PATTERN)
-                            .transactionAmount(BigDecimal.valueOf(100.0)).locale("en"));
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate("22 November 2023")
+                    .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(100.0)).locale("en"));
 
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 100.0, 0.0, 100.0, 0.0, null);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2023, 11, 22), 25.0, 0.0, 25.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2023, 12, 7), 25.0, 0.0, 25.0, 0.0, 0.0);
@@ -3310,9 +3235,9 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateRepaymentPeriod(loanDetails, 4, LocalDate.of(2024, 1, 6), 25.0, 0.0, 25.0, 0.0, 0.0);
             assertTrue(loanDetails.getStatus().getActive());
 
-            loanTransactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeLoanRepayment(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("22 November 2023").locale("en").transactionAmount(150.0));
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 0.0, 100.0, 0.0, 100.0, 50.0);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2023, 11, 22), 25.0, 25.0, 0.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2023, 12, 7), 25.0, 25.0, 0.0, 25.0, 0.0);
@@ -3320,10 +3245,9 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             validateRepaymentPeriod(loanDetails, 4, LocalDate.of(2024, 1, 6), 25.0, 25.0, 0.0, 25.0, 0.0);
             assertTrue(loanDetails.getStatus().getOverpaid());
 
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().actualDisbursementDate("22 November 2023").dateFormat(DATETIME_PATTERN)
-                            .transactionAmount(BigDecimal.valueOf(28.0)).locale("en"));
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate("22 November 2023")
+                    .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(28.0)).locale("en"));
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 0.0, 128.0, 0.0, 128.0, 22.0);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2023, 11, 22), 25.0, 25.0, 0.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2023, 11, 22), 7.0, 7.0, 0.0, 0.0, 0.0);
@@ -3338,13 +3262,13 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                     transaction(28, "Disbursement", "22 November 2023", 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 28.0) //
             );
             // verify journal entries
-            verifyJournalEntries(loanResponse.getLoanId(), journalEntry(100.0, loansReceivableAccount, "DEBIT"), //
-                    journalEntry(100.0, fundSource, "CREDIT"), //
-                    journalEntry(100.0, loansReceivableAccount, "CREDIT"), //
-                    journalEntry(50.0, overpaymentAccount, "CREDIT"), //
-                    journalEntry(150.0, fundSource, "DEBIT"), //
-                    journalEntry(28.0, overpaymentAccount, "DEBIT"), //
-                    journalEntry(28.0, fundSource, "CREDIT") //
+            verifyJournalEntries(loanResponse.getLoanId(), journalEntry(100.0, loansReceivableAccount(), "DEBIT"), //
+                    journalEntry(100.0, fundSource(), "CREDIT"), //
+                    journalEntry(100.0, loansReceivableAccount(), "CREDIT"), //
+                    journalEntry(50.0, overpaymentAccount(), "CREDIT"), //
+                    journalEntry(150.0, fundSource(), "DEBIT"), //
+                    journalEntry(28.0, overpaymentAccount(), "DEBIT"), //
+                    journalEntry(28.0, fundSource(), "CREDIT") //
             );
         });
     }
@@ -3364,87 +3288,85 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
     @Test
     public void uc124() {
         runAt("06 March 2024", () -> {
-            Long clientId = clientHelper.createClient(ClientHelper.defaultClientCreationRequest()).getClientId();
+            Long clientId = clientHelper.createClient(ClientRequestBuilders.defaultClient()).getClientId();
             PostLoanProductsRequest product = createOnePeriod30DaysLongNoInterestPeriodicAccrualProductWithAdvancedPaymentAllocation()
                     .numberOfRepayments(1).repaymentEvery(30).enableDownPayment(false);
-            PostLoanProductsResponse loanProductResponse = loanProductHelper.createLoanProduct(product);
+            PostLoanProductsResponse loanProductResponse = loanHelper.createLoanProduct(product);
             PostLoansRequest applicationRequest = applyLoanRequest(clientId, loanProductResponse.getResourceId(), "25 January 2024", 1000.0,
                     4);
 
             applicationRequest = applicationRequest.numberOfRepayments(1).loanTermFrequency(30)
                     .transactionProcessingStrategyCode(LoanProductTestBuilder.ADVANCED_PAYMENT_ALLOCATION_STRATEGY).repaymentEvery(30);
 
-            PostLoansResponse loanResponse = loanTransactionHelper.applyLoan(applicationRequest);
+            PostLoansResponse loanResponse = loanHelper.applyForLoan(applicationRequest);
 
-            loanTransactionHelper.approveLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(1000)).dateFormat(DATETIME_PATTERN)
-                            .approvedOnDate("25 January 2024").locale("en"));
+            loanHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(1000))
+                    .dateFormat(DATETIME_PATTERN).approvedOnDate("25 January 2024").locale("en"));
 
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().actualDisbursementDate("25 January 2024").dateFormat(DATETIME_PATTERN)
-                            .transactionAmount(BigDecimal.valueOf(100.0)).locale("en"));
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate("25 January 2024")
+                    .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(100.0)).locale("en"));
 
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 100.0, 0.0, 100.0, 0.0, null);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2024, 2, 24), 100.0, 0.0, 100.0, 0.0, 0.0);
             assertTrue(loanDetails.getStatus().getActive());
 
             String repaymentExternalId = UUID.randomUUID().toString();
-            loanTransactionHelper.makeLoanRepayment(loanResponse.getLoanId(),
+            transactionHelper.makeLoanRepayment(loanResponse.getLoanId(),
                     new PostLoansLoanIdTransactionsRequest().dateFormat(DATETIME_PATTERN).transactionDate("24 February 2024").locale("en")
                             .transactionAmount(100.0).externalId(repaymentExternalId));
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 0.0, 100.0, 0.0, 100.0, null);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2024, 2, 24), 100.0, 100.0, 0.0, 0.0, 0.0);
             assertTrue(loanDetails.getStatus().getClosedObligationsMet());
 
             String mir1ExternalId = UUID.randomUUID().toString();
-            loanTransactionHelper.makeMerchantIssuedRefund(loanResponse.getLoanId(),
+            transactionHelper.makeMerchantIssuedRefund(loanResponse.getLoanId(),
                     new PostLoansLoanIdTransactionsRequest().transactionDate("28 February 2024").dateFormat(DATETIME_PATTERN)
                             .transactionAmount(36.99).locale("en").externalId(mir1ExternalId));
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 0.0, 100.0, 0.0, 100.0, 36.99);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2024, 2, 24), 100.0, 100.0, 0.0, 0.0, 0.0);
             assertTrue(loanDetails.getStatus().getOverpaid());
 
-            loanTransactionHelper.makeMerchantIssuedRefund(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeMerchantIssuedRefund(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .transactionDate("28 February 2024").dateFormat(DATETIME_PATTERN).transactionAmount(18.94).locale("en"));
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 0.0, 100.0, 0.0, 100.0, 55.93);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2024, 2, 24), 100.0, 100.0, 0.0, 0.0, 0.0);
             assertTrue(loanDetails.getStatus().getOverpaid());
 
-            loanTransactionHelper.makeMerchantIssuedRefund(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeMerchantIssuedRefund(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .transactionDate("28 February 2024").dateFormat(DATETIME_PATTERN).transactionAmount(36.99).locale("en"));
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 0.0, 100.0, 0.0, 100.0, 92.92);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2024, 2, 24), 100.0, 100.0, 0.0, 0.0, 0.0);
             assertTrue(loanDetails.getStatus().getOverpaid());
 
-            loanTransactionHelper.makeMerchantIssuedRefund(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeMerchantIssuedRefund(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .transactionDate("28 February 2024").dateFormat(DATETIME_PATTERN).transactionAmount(31.99).locale("en"));
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 0.0, 100.0, 0.0, 100.0, 124.91);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2024, 2, 24), 100.0, 100.0, 0.0, 0.0, 0.0);
             assertTrue(loanDetails.getStatus().getOverpaid());
 
-            loanTransactionHelper.makeCreditBalanceRefund(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeCreditBalanceRefund(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .transactionDate("01 March 2024").dateFormat(DATETIME_PATTERN).transactionAmount(124.91).locale("en"));
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 0.0, 100.0, 0.0, 100.0, null);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2024, 2, 24), 100.0, 100.0, 0.0, 0.0, 0.0);
             assertTrue(loanDetails.getStatus().getClosedObligationsMet());
 
-            loanTransactionHelper.makeMerchantIssuedRefund(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeMerchantIssuedRefund(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .transactionDate("02 March 2024").dateFormat(DATETIME_PATTERN).transactionAmount(19.99).locale("en"));
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 0.0, 100.0, 0.0, 100.0, 19.99);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2024, 2, 24), 100.0, 100.0, 0.0, 0.0, 0.0);
             assertTrue(loanDetails.getStatus().getOverpaid());
 
-            loanTransactionHelper.makeMerchantIssuedRefund(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeMerchantIssuedRefund(loanResponse.getLoanId(), new PostLoansLoanIdTransactionsRequest()
                     .transactionDate("02 March 2024").dateFormat(DATETIME_PATTERN).transactionAmount(19.99).locale("en"));
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 0.0, 100.0, 0.0, 100.0, 39.98);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2024, 2, 24), 100.0, 100.0, 0.0, 0.0, 0.0);
             assertTrue(loanDetails.getStatus().getOverpaid());
@@ -3461,11 +3383,11 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                     transaction(19.99, "Merchant Issued Refund", "02 March 2024", 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 19.99) //
             );
 
-            loanTransactionHelper.reverseLoanTransaction(loanResponse.getLoanId(), mir1ExternalId,
+            transactionHelper.reverseLoanTransaction(loanResponse.getLoanId(), mir1ExternalId,
                     new PostLoansLoanIdTransactionsTransactionIdRequest().dateFormat(DATETIME_PATTERN).transactionDate("02 March 2024")
                             .transactionAmount(0.0).locale("en"));
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 0.0, 224.91, 0.0, 224.91, 2.99);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2024, 2, 24), 100.0, 100.0, 0.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2024, 3, 1), 124.91, 124.91, 0.0, 0.0, 36.99);
@@ -3483,10 +3405,10 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                     transaction(19.99, "Merchant Issued Refund", "02 March 2024", 0.0, 17.0, 0.0, 0.0, 0.0, 0.0, 2.99) //
             );
 
-            loanTransactionHelper.chargebackLoanTransaction(loanResponse.getLoanId(), repaymentExternalId,
+            transactionHelper.chargebackLoanTransaction(loanResponse.getLoanId(), repaymentExternalId,
                     new PostLoansLoanIdTransactionsTransactionIdRequest().locale("en").transactionAmount(2.0));
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 0.0, 224.91, 0.0, 224.91, 0.99);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2024, 2, 24), 100.0, 100.0, 0.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2024, 3, 1), 124.91, 124.91, 0.0, 0.0, 36.99);
@@ -3505,10 +3427,10 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                     transaction(2.0, "Chargeback", "06 March 2024", 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2.0) //
             );
 
-            loanTransactionHelper.chargebackLoanTransaction(loanResponse.getLoanId(), repaymentExternalId,
+            transactionHelper.chargebackLoanTransaction(loanResponse.getLoanId(), repaymentExternalId,
                     new PostLoansLoanIdTransactionsTransactionIdRequest().locale("en").transactionAmount(1.0));
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 0.01, 225.90, 0.01, 225.90, null);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2024, 2, 24), 100.0, 100.0, 0.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2024, 3, 6), 125.91, 125.90, 0.01, 0.0, 36.99);
@@ -3545,21 +3467,20 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             PostLoanProductsRequest product = createOnePeriod30DaysLongNoInterestPeriodicAccrualProductWithAdvancedPaymentAllocation()
                     .installmentAmountInMultiplesOf(null).numberOfRepayments(3).repaymentEvery(15).enableDownPayment(true)
                     .enableAutoRepaymentForDownPayment(true).disbursedAmountPercentageForDownPayment(BigDecimal.valueOf(25));
-            PostLoanProductsResponse loanProductResponse = loanProductHelper.createLoanProduct(product);
+            PostLoanProductsResponse loanProductResponse = loanHelper.createLoanProduct(product);
             PostLoansRequest applicationRequest = applyLoanRequest(client.getClientId(), loanProductResponse.getResourceId(),
                     "23 March 2024", 1000.0, 4);
 
             applicationRequest = applicationRequest.numberOfRepayments(3).loanTermFrequency(45)
                     .transactionProcessingStrategyCode(LoanProductTestBuilder.ADVANCED_PAYMENT_ALLOCATION_STRATEGY).repaymentEvery(15);
 
-            PostLoansResponse loanResponse = loanTransactionHelper.applyLoan(applicationRequest);
+            PostLoansResponse loanResponse = loanHelper.applyForLoan(applicationRequest);
 
-            loanTransactionHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest()
-                    .approvedLoanAmount(BigDecimal.valueOf(10)).dateFormat(DATETIME_PATTERN).approvedOnDate("23 March 2024").locale("en"));
+            loanHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(10))
+                    .dateFormat(DATETIME_PATTERN).approvedOnDate("23 March 2024").locale("en"));
 
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().actualDisbursementDate("23 March 2024").dateFormat(DATETIME_PATTERN)
-                            .transactionAmount(BigDecimal.valueOf(10.0)).locale("en"));
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate("23 March 2024")
+                    .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(10.0)).locale("en"));
 
             // verify schedule
             verifyRepaymentSchedule(loanResponse.getLoanId(), //
@@ -3573,7 +3494,7 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
         });
 
         runAt("24 March 2024", () -> {
-            loanTransactionHelper.disburseLoan(createdLoanId.get(), new PostLoansLoanIdRequest().actualDisbursementDate("24 March 2024")
+            loanHelper.disburseLoan(createdLoanId.get(), new PostLoansLoanIdRequest().actualDisbursementDate("24 March 2024")
                     .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(100.0)).locale("en"));
 
             // verify schedule
@@ -3587,7 +3508,7 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                     installment(27.5, 0, 0, 0, 27.5, false, "07 May 2024", 0.0) //
             );
 
-            loanTransactionHelper.disburseLoan(createdLoanId.get(), new PostLoansLoanIdRequest().actualDisbursementDate("24 March 2024")
+            loanHelper.disburseLoan(createdLoanId.get(), new PostLoansLoanIdRequest().actualDisbursementDate("24 March 2024")
                     .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(11.0)).locale("en"));
 
             // verify schedule
@@ -3617,27 +3538,25 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
     public void uc126() {
         runAt("22 November 2023", () -> {
             final Integer fixedLength = 40; // 40 days
-            Long clientId = clientHelper.createClient(ClientHelper.defaultClientCreationRequest()).getClientId();
+            Long clientId = clientHelper.createClient(ClientRequestBuilders.defaultClient()).getClientId();
             PostLoanProductsRequest product = createOnePeriod30DaysLongNoInterestPeriodicAccrualProductWithAdvancedPaymentAllocation()
                     .numberOfRepayments(3).repaymentEvery(15).fixedLength(fixedLength);
-            PostLoanProductsResponse loanProductResponse = loanProductHelper.createLoanProduct(product);
+            PostLoanProductsResponse loanProductResponse = loanHelper.createLoanProduct(product);
             PostLoansRequest applicationRequest = applyLoanRequest(clientId, loanProductResponse.getResourceId(), "22 November 2023",
                     1000.0, 4);
 
             applicationRequest = applicationRequest.numberOfRepayments(3).loanTermFrequency(45)
                     .transactionProcessingStrategyCode(LoanProductTestBuilder.ADVANCED_PAYMENT_ALLOCATION_STRATEGY).repaymentEvery(15);
 
-            PostLoansResponse loanResponse = loanTransactionHelper.applyLoan(applicationRequest);
+            PostLoansResponse loanResponse = loanHelper.applyForLoan(applicationRequest);
 
-            loanTransactionHelper.approveLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(1000)).dateFormat(DATETIME_PATTERN)
-                            .approvedOnDate("22 November 2023").locale("en"));
+            loanHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(1000))
+                    .dateFormat(DATETIME_PATTERN).approvedOnDate("22 November 2023").locale("en"));
 
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().actualDisbursementDate("22 November 2023").dateFormat(DATETIME_PATTERN)
-                            .transactionAmount(BigDecimal.valueOf(100.0)).locale("en"));
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate("22 November 2023")
+                    .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(100.0)).locale("en"));
 
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 100.0, 0.0, 100.0, 0.0, null);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2023, 12, 7), 33.0, 0.0, 33.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2023, 12, 22), 33.0, 0.0, 33.0, 0.0, 0.0);
@@ -3665,11 +3584,11 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             final Integer fixedLength = 5; // 5 weeks
             final Integer repaymentFrequencyType = 1; // week
 
-            Long clientId = clientHelper.createClient(ClientHelper.defaultClientCreationRequest()).getClientId();
+            Long clientId = clientHelper.createClient(ClientRequestBuilders.defaultClient()).getClientId();
             PostLoanProductsRequest product = createOnePeriod30DaysLongNoInterestPeriodicAccrualProductWithAdvancedPaymentAllocation()
                     .numberOfRepayments(3).repaymentEvery(2).repaymentFrequencyType(repaymentFrequencyType.longValue())
                     .fixedLength(fixedLength);
-            PostLoanProductsResponse loanProductResponse = loanProductHelper.createLoanProduct(product);
+            PostLoanProductsResponse loanProductResponse = loanHelper.createLoanProduct(product);
             PostLoansRequest applicationRequest = applyLoanRequest(clientId, loanProductResponse.getResourceId(), "22 November 2023",
                     1000.0, 4);
 
@@ -3677,17 +3596,15 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                     .transactionProcessingStrategyCode(LoanProductTestBuilder.ADVANCED_PAYMENT_ALLOCATION_STRATEGY).repaymentEvery(2)
                     .repaymentFrequencyType(repaymentFrequencyType);
 
-            PostLoansResponse loanResponse = loanTransactionHelper.applyLoan(applicationRequest);
+            PostLoansResponse loanResponse = loanHelper.applyForLoan(applicationRequest);
 
-            loanTransactionHelper.approveLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(1000)).dateFormat(DATETIME_PATTERN)
-                            .approvedOnDate("22 November 2023").locale("en"));
+            loanHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(1000))
+                    .dateFormat(DATETIME_PATTERN).approvedOnDate("22 November 2023").locale("en"));
 
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().actualDisbursementDate("22 November 2023").dateFormat(DATETIME_PATTERN)
-                            .transactionAmount(BigDecimal.valueOf(100.0)).locale("en"));
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate("22 November 2023")
+                    .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(100.0)).locale("en"));
 
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 100.0, 0.0, 100.0, 0.0, null);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2023, 12, 6), 33.0, 0.0, 33.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2023, 12, 20), 33.0, 0.0, 33.0, 0.0, 0.0);
@@ -3716,11 +3633,11 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             final Integer fixedLength = 11; // 11 months
             final Integer repaymentFrequencyType = 2; // month
 
-            Long clientId = clientHelper.createClient(ClientHelper.defaultClientCreationRequest()).getClientId();
+            Long clientId = clientHelper.createClient(ClientRequestBuilders.defaultClient()).getClientId();
             PostLoanProductsRequest product = createOnePeriod30DaysLongNoInterestPeriodicAccrualProductWithAdvancedPaymentAllocation()
                     .numberOfRepayments(6).repaymentEvery(2).repaymentFrequencyType(repaymentFrequencyType.longValue())
                     .fixedLength(fixedLength);
-            PostLoanProductsResponse loanProductResponse = loanProductHelper.createLoanProduct(product);
+            PostLoanProductsResponse loanProductResponse = loanHelper.createLoanProduct(product);
             PostLoansRequest applicationRequest = applyLoanRequest(clientId, loanProductResponse.getResourceId(), "22 November 2023",
                     1000.0, 4);
 
@@ -3729,17 +3646,15 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                     .transactionProcessingStrategyCode(LoanProductTestBuilder.ADVANCED_PAYMENT_ALLOCATION_STRATEGY).repaymentEvery(2)
                     .repaymentFrequencyType(repaymentFrequencyType);
 
-            PostLoansResponse loanResponse = loanTransactionHelper.applyLoan(applicationRequest);
+            PostLoansResponse loanResponse = loanHelper.applyForLoan(applicationRequest);
 
-            loanTransactionHelper.approveLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(1000)).dateFormat(DATETIME_PATTERN)
-                            .approvedOnDate("22 November 2023").locale("en"));
+            loanHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(1000))
+                    .dateFormat(DATETIME_PATTERN).approvedOnDate("22 November 2023").locale("en"));
 
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().actualDisbursementDate("22 November 2023").dateFormat(DATETIME_PATTERN)
-                            .transactionAmount(BigDecimal.valueOf(100.0)).locale("en"));
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate("22 November 2023")
+                    .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(100.0)).locale("en"));
 
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 100.0, 0.0, 100.0, 0.0, null);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2024, 1, 22), 17.0, 0.0, 17.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2024, 3, 22), 17.0, 0.0, 17.0, 0.0, 0.0);
@@ -3772,11 +3687,11 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             // Try to create a Loan Product using Fixed Length with a wrong Loan Term setup
             LOG.info("Try to create a Loan Product using Fixed Length with a wrong Loan Term setup");
             CallFailedRuntimeException exception = assertThrows(CallFailedRuntimeException.class,
-                    () -> loanProductHelper
+                    () -> loanHelper
                             .createLoanProduct(createOnePeriod30DaysLongNoInterestPeriodicAccrualProductWithAdvancedPaymentAllocation()
                                     .interestRatePerPeriod(0.0).numberOfRepayments(6).repaymentEvery(1)
                                     .repaymentFrequencyType(repaymentFrequencyType.longValue()).fixedLength(fixedLength)));
-            assertEquals(403, exception.getResponse().code());
+            assertEquals(403, exception.getStatus());
             assertTrue(exception.getMessage().contains("error.msg.number.repayments.and.fixed.length.configuration.not.valid"));
         });
     }
@@ -3797,13 +3712,13 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
 
             PostLoanProductsRequest product = createOnePeriod30DaysLongNoInterestPeriodicAccrualProductWithAdvancedPaymentAllocation()
                     .numberOfRepayments(6).repaymentEvery(1).repaymentFrequencyType(repaymentFrequencyType.longValue()).fixedLength(6);
-            PostLoanProductsResponse loanProductResponse = loanProductHelper.createLoanProduct(product);
+            PostLoanProductsResponse loanProductResponse = loanHelper.createLoanProduct(product);
 
             // Try to use Fixed Length without Advanced Payment Allocation as transaction
             // processing strategy code
             LOG.info("Try to use Fixed Length without Advanced Payment Allocation as transaction processing strategy code");
             CallFailedRuntimeException exception = assertThrows(CallFailedRuntimeException.class,
-                    () -> loanTransactionHelper.applyLoan(new PostLoansRequest().clientId(client.getClientId())
+                    () -> loanHelper.applyForLoan(new PostLoansRequest().clientId(client.getClientId())
                             .productId(loanProductResponse.getResourceId()).loanType("individual").locale("en")
                             .submittedOnDate(operationDate).expectedDisbursementDate(operationDate).dateFormat(DATETIME_PATTERN)
                             .amortizationType(1).interestRatePerPeriod(BigDecimal.ZERO).interestCalculationPeriodType(1).interestType(0)
@@ -3813,7 +3728,7 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                             .transactionProcessingStrategyCode(FineractStyleLoanRepaymentScheduleTransactionProcessor.STRATEGY_CODE)
                             .loanScheduleProcessingType(LoanScheduleProcessingType.HORIZONTAL.name())));
 
-            assertEquals(403, exception.getResponse().code());
+            assertEquals(403, exception.getStatus());
             assertTrue(exception.getMessage()
                     .contains("error.msg.loan.repayment.strategy.can.not.be.different.than.advanced.payment.allocation"));
         });
@@ -3835,12 +3750,12 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
 
             PostLoanProductsRequest product = createOnePeriod30DaysLongNoInterestPeriodicAccrualProductWithAdvancedPaymentAllocation()
                     .numberOfRepayments(6).repaymentEvery(1).repaymentFrequencyType(repaymentFrequencyType.longValue()).fixedLength(6);
-            PostLoanProductsResponse loanProductResponse = loanProductHelper.createLoanProduct(product);
+            PostLoanProductsResponse loanProductResponse = loanHelper.createLoanProduct(product);
 
             // Try to use Fixed Length with an Interest Rate value higher than Zero
             LOG.info("Try to use Fixed Length with an Interest Rate value higher than Zero");
             CallFailedRuntimeException exception = assertThrows(CallFailedRuntimeException.class,
-                    () -> loanTransactionHelper.applyLoan(new PostLoansRequest().clientId(client.getClientId())
+                    () -> loanHelper.applyForLoan(new PostLoansRequest().clientId(client.getClientId())
                             .productId(loanProductResponse.getResourceId()).loanType("individual").locale("en")
                             .submittedOnDate(operationDate).expectedDisbursementDate(operationDate).dateFormat(DATETIME_PATTERN)
                             .amortizationType(1).interestRatePerPeriod(BigDecimal.ONE).interestCalculationPeriodType(1).interestType(0)
@@ -3851,7 +3766,7 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                                     AdvancedPaymentScheduleTransactionProcessor.ADVANCED_PAYMENT_ALLOCATION_STRATEGY)
                             .loanScheduleProcessingType(LoanScheduleProcessingType.HORIZONTAL.name())));
 
-            assertEquals(403, exception.getResponse().code());
+            assertEquals(403, exception.getStatus());
             assertTrue(exception.getMessage().contains("error.msg.fixed.length.only.supported.for.zero.interest"));
         });
     }
@@ -3872,12 +3787,12 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
 
             PostLoanProductsRequest product = createOnePeriod30DaysLongNoInterestPeriodicAccrualProductWithAdvancedPaymentAllocation()
                     .numberOfRepayments(6).repaymentEvery(1).repaymentFrequencyType(repaymentFrequencyType.longValue()).fixedLength(6);
-            PostLoanProductsResponse loanProductResponse = loanProductHelper.createLoanProduct(product);
+            PostLoanProductsResponse loanProductResponse = loanHelper.createLoanProduct(product);
 
             // Try to use Fixed Length with a wrong Loan Term setup
             LOG.info("Try to use Fixed Length with a wrong Loan Term setup");
             CallFailedRuntimeException exception = assertThrows(CallFailedRuntimeException.class,
-                    () -> loanTransactionHelper.applyLoan(new PostLoansRequest().clientId(client.getClientId())
+                    () -> loanHelper.applyForLoan(new PostLoansRequest().clientId(client.getClientId())
                             .productId(loanProductResponse.getResourceId()).loanType("individual").locale("en")
                             .submittedOnDate(operationDate).expectedDisbursementDate(operationDate).dateFormat(DATETIME_PATTERN)
                             .amortizationType(1).interestRatePerPeriod(BigDecimal.ZERO).interestCalculationPeriodType(1).interestType(0)
@@ -3888,7 +3803,7 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                                     AdvancedPaymentScheduleTransactionProcessor.ADVANCED_PAYMENT_ALLOCATION_STRATEGY)
                             .loanScheduleProcessingType(LoanScheduleProcessingType.HORIZONTAL.name())));
 
-            assertEquals(403, exception.getResponse().code());
+            assertEquals(403, exception.getStatus());
             assertTrue(exception.getMessage().contains("error.msg.number.repayments.and.fixed.length.configuration.not.valid"));
         });
     }
@@ -3909,28 +3824,26 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             final Integer repaymentFrequencyType = RepaymentFrequencyType.DAYS;
             final Integer numberOfRepayments = 3;
 
-            Long clientId = clientHelper.createClient(ClientHelper.defaultClientCreationRequest()).getClientId();
+            Long clientId = clientHelper.createClient(ClientRequestBuilders.defaultClient()).getClientId();
 
             PostLoanProductsRequest product = createOnePeriod30DaysLongNoInterestPeriodicAccrualProductWithAdvancedPaymentAllocation()
                     .numberOfRepayments(numberOfRepayments).repaymentEvery(15).repaymentFrequencyType(repaymentFrequencyType.longValue())
                     .fixedLength(fixedLength);
-            PostLoanProductsResponse loanProductResponse = loanProductHelper.createLoanProduct(product);
+            PostLoanProductsResponse loanProductResponse = loanHelper.createLoanProduct(product);
 
             PostLoansRequest applicationRequest = applyLoanRequest(clientId, loanProductResponse.getResourceId(), "22 November 2023",
                     1000.0, numberOfRepayments)
                     .transactionProcessingStrategyCode(LoanProductTestBuilder.ADVANCED_PAYMENT_ALLOCATION_STRATEGY);
 
-            PostLoansResponse loanResponse = loanTransactionHelper.applyLoan(applicationRequest);
+            PostLoansResponse loanResponse = loanHelper.applyForLoan(applicationRequest);
 
-            loanTransactionHelper.approveLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(1000)).dateFormat(DATETIME_PATTERN)
-                            .approvedOnDate("22 November 2023").locale("en"));
+            loanHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(1000))
+                    .dateFormat(DATETIME_PATTERN).approvedOnDate("22 November 2023").locale("en"));
 
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().actualDisbursementDate("22 November 2023").dateFormat(DATETIME_PATTERN)
-                            .transactionAmount(BigDecimal.valueOf(100.0)).locale("en"));
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate("22 November 2023")
+                    .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(100.0)).locale("en"));
 
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             LOG.info("Loan {} {}", loanDetails.getTimeline().getActualDisbursementDate(), loanDetails.getRepaymentSchedule().getPeriods()
                     .get(loanDetails.getRepaymentSchedule().getPeriods().size() - 1).getDueDate());
             assertEquals(
@@ -3957,28 +3870,27 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
         final String operationDate = "1 January 2024";
         runAt(operationDate, () -> {
             final Integer fixedLength = 119; // 120 days
-            final Integer repaymentFrequencyType = RepaymentFrequencyType.DAYS;
             final Integer numberOfRepayments = 4;
 
-            Long clientId = clientHelper.createClient(ClientHelper.defaultClientCreationRequest()).getClientId();
+            Long clientId = clientHelper.createClient(ClientRequestBuilders.defaultClient()).getClientId();
             PostLoanProductsRequest product = createOnePeriod30DaysLongNoInterestPeriodicAccrualProductWithAdvancedPaymentAllocation()
                     .numberOfRepayments(numberOfRepayments).repaymentEvery(30).fixedLength(fixedLength);
-            PostLoanProductsResponse loanProductResponse = loanProductHelper.createLoanProduct(product);
+            PostLoanProductsResponse loanProductResponse = loanHelper.createLoanProduct(product);
             PostLoansRequest applicationRequest = applyLoanRequest(clientId, loanProductResponse.getResourceId(), operationDate, 1000.0,
                     numberOfRepayments);
 
             applicationRequest = applicationRequest.numberOfRepayments(numberOfRepayments).loanTermFrequency(120)
                     .transactionProcessingStrategyCode(LoanProductTestBuilder.ADVANCED_PAYMENT_ALLOCATION_STRATEGY).repaymentEvery(30);
 
-            PostLoansResponse loanResponse = loanTransactionHelper.applyLoan(applicationRequest);
+            PostLoansResponse loanResponse = loanHelper.applyForLoan(applicationRequest);
 
-            loanTransactionHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest()
-                    .approvedLoanAmount(BigDecimal.valueOf(1000)).dateFormat(DATETIME_PATTERN).approvedOnDate(operationDate).locale("en"));
+            loanHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(1000))
+                    .dateFormat(DATETIME_PATTERN).approvedOnDate(operationDate).locale("en"));
 
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate(operationDate)
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate(operationDate)
                     .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(1000.0)).locale("en"));
 
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 1000.0, 0.0, 1000.0, 0.0, null);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2024, 1, 31), 250.0, 0.0, 250.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2024, 3, 1), 250.0, 0.0, 250.0, 0.0, 0.0);
@@ -3991,15 +3903,15 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                             .getPeriods().get(loanDetails.getRepaymentSchedule().getPeriods().size() - 1).getDueDate()),
                     fixedLength.longValue());
 
-            PostCreateRescheduleLoansResponse rescheduleLoansResponse = loanRescheduleRequestHelper
+            PostCreateRescheduleLoansResponse rescheduleLoansResponse = LoanRescheduleRequestHelper
                     .createLoanRescheduleRequest(new PostCreateRescheduleLoansRequest().loanId(loanDetails.getId()).locale("en")
                             .dateFormat(DATETIME_PATTERN).rescheduleReasonId(1L).rescheduleFromDate("1 March 2024")
                             .adjustedDueDate("15 March 2024").submittedOnDate("16 January 2024"));
 
-            loanRescheduleRequestHelper.approveLoanRescheduleRequest(rescheduleLoansResponse.getResourceId(),
+            LoanRescheduleRequestHelper.approveLoanRescheduleRequest(rescheduleLoansResponse.getResourceId(),
                     new PostUpdateRescheduleLoansRequest().approvedOnDate("16 January 2024").locale("en").dateFormat(DATETIME_PATTERN));
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 1000.0, 0.0, 1000.0, 0.0, null);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2024, 1, 31), 250.0, 0.0, 250.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2024, 3, 15), 250.0, 0.0, 250.0, 0.0, 0.0);
@@ -4030,28 +3942,27 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
         final String operationDate = "1 January 2024";
         runAt(operationDate, () -> {
             final Integer fixedLength = 119; // 120 days
-            final Integer repaymentFrequencyType = RepaymentFrequencyType.DAYS;
             final Integer numberOfRepayments = 4;
 
-            Long clientId = clientHelper.createClient(ClientHelper.defaultClientCreationRequest()).getClientId();
+            Long clientId = clientHelper.createClient(ClientRequestBuilders.defaultClient()).getClientId();
             PostLoanProductsRequest product = createOnePeriod30DaysLongNoInterestPeriodicAccrualProductWithAdvancedPaymentAllocation()
                     .numberOfRepayments(numberOfRepayments).repaymentEvery(30).fixedLength(fixedLength);
-            PostLoanProductsResponse loanProductResponse = loanProductHelper.createLoanProduct(product);
+            PostLoanProductsResponse loanProductResponse = loanHelper.createLoanProduct(product);
             PostLoansRequest applicationRequest = applyLoanRequest(clientId, loanProductResponse.getResourceId(), operationDate, 1000.0,
                     numberOfRepayments);
 
             applicationRequest = applicationRequest.numberOfRepayments(numberOfRepayments).loanTermFrequency(120)
                     .transactionProcessingStrategyCode(LoanProductTestBuilder.ADVANCED_PAYMENT_ALLOCATION_STRATEGY).repaymentEvery(30);
 
-            PostLoansResponse loanResponse = loanTransactionHelper.applyLoan(applicationRequest);
+            PostLoansResponse loanResponse = loanHelper.applyForLoan(applicationRequest);
 
-            loanTransactionHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest()
-                    .approvedLoanAmount(BigDecimal.valueOf(1000)).dateFormat(DATETIME_PATTERN).approvedOnDate(operationDate).locale("en"));
+            loanHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(1000))
+                    .dateFormat(DATETIME_PATTERN).approvedOnDate(operationDate).locale("en"));
 
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate(operationDate)
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate(operationDate)
                     .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(1000.0)).locale("en"));
 
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 1000.0, 0.0, 1000.0, 0.0, null);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2024, 1, 31), 250.0, 0.0, 250.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2024, 3, 1), 250.0, 0.0, 250.0, 0.0, 0.0);
@@ -4064,15 +3975,15 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                             .getPeriods().get(loanDetails.getRepaymentSchedule().getPeriods().size() - 1).getDueDate()),
                     fixedLength.longValue());
 
-            PostCreateRescheduleLoansResponse rescheduleLoansResponse = loanRescheduleRequestHelper
+            PostCreateRescheduleLoansResponse rescheduleLoansResponse = LoanRescheduleRequestHelper
                     .createLoanRescheduleRequest(new PostCreateRescheduleLoansRequest().loanId(loanDetails.getId()).locale("en")
                             .dateFormat(DATETIME_PATTERN).rescheduleReasonId(1L).rescheduleFromDate("29 April 2024")
                             .adjustedDueDate("5 May 2024").submittedOnDate("16 January 2024"));
 
-            loanRescheduleRequestHelper.approveLoanRescheduleRequest(rescheduleLoansResponse.getResourceId(),
+            LoanRescheduleRequestHelper.approveLoanRescheduleRequest(rescheduleLoansResponse.getResourceId(),
                     new PostUpdateRescheduleLoansRequest().approvedOnDate("16 January 2024").locale("en").dateFormat(DATETIME_PATTERN));
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 1000.0, 0.0, 1000.0, 0.0, null);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2024, 1, 31), 250.0, 0.0, 250.0, 0.0, 0.0);
             validateRepaymentPeriod(loanDetails, 2, LocalDate.of(2024, 3, 1), 250.0, 0.0, 250.0, 0.0, 0.0);
@@ -4096,7 +4007,6 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
     // 3. Disburse the loan and validate downpayment
     @Test
     public void uc136() {
-        AtomicLong createdLoanId = new AtomicLong();
         runAt("23 March 2024", () -> {
             // Rounding mode - HALF_DOWN
             globalConfigurationHelper.updateGlobalConfigurationInternal(GlobalConfigurationConstants.ROUNDING_MODE, 5L);
@@ -4120,19 +4030,18 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
     public void uc137() {
         runAt("22 February 2023", () -> {
 
-            final Account assetAccount = accountHelper.createAssetAccount();
-            final Account incomeAccount = accountHelper.createIncomeAccount();
-            final Account expenseAccount = accountHelper.createExpenseAccount();
-            final Account overpaymentAccount = accountHelper.createLiabilityAccount();
-            AdvancedPaymentData defaultPaymentAllocation = createDefaultPaymentAllocationWithMixedGrouping();
+            accountHelper.createAssetAccount();
+            accountHelper.createIncomeAccount();
+            accountHelper.createExpenseAccount();
+            accountHelper.createLiabilityAccount();
 
             // First scenario (Legacy): Loan product no Advanced Payment Allocation and Cumulative Loan Schedule type
-            PostLoanProductsResponse loanProductResponse = loanProductHelper.createLoanProduct(
+            PostLoanProductsResponse loanProductResponse = loanHelper.createLoanProduct(
                     createOnePeriod30DaysLongNoInterestPeriodicAccrualProduct().loanScheduleType(LoanScheduleType.CUMULATIVE.toString()));
             assertNotNull(loanProductResponse.getResourceId());
 
             // Second scenario: Loan product with Advanced Payment Allocation and Progressive Loan Schedule type
-            loanProductResponse = loanProductHelper
+            loanProductResponse = loanHelper
                     .createLoanProduct(createOnePeriod30DaysLongNoInterestPeriodicAccrualProductWithAdvancedPaymentAllocation()
                             .loanScheduleType(LoanScheduleType.PROGRESSIVE.toString()));
             assertNotNull(loanProductResponse.getResourceId());
@@ -4140,10 +4049,10 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             // Third scenario: Loan product no Advanced Payment Allocation and Progressive Loan Schedule type,
             // validation expected
             CallFailedRuntimeException exception = assertThrows(CallFailedRuntimeException.class,
-                    () -> loanProductHelper.createLoanProduct(createOnePeriod30DaysLongNoInterestPeriodicAccrualProduct()
+                    () -> loanHelper.createLoanProduct(createOnePeriod30DaysLongNoInterestPeriodicAccrualProduct()
                             .loanScheduleType(LoanScheduleType.PROGRESSIVE.toString()) //
                             .loanScheduleProcessingType(LoanScheduleProcessingType.HORIZONTAL.toString())));
-            assertEquals(400, exception.getResponse().code());
+            assertEquals(400, exception.getStatus());
             assertTrue(exception.getMessage().contains("supported.only.with.advanced.payment.allocation.strategy"));
         });
     }
@@ -4160,7 +4069,7 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             PostLoanProductsRequest product = createOnePeriod30DaysLongNoInterestPeriodicAccrualProductWithAdvancedPaymentAllocation()
                     .installmentAmountInMultiplesOf(null).numberOfRepayments(3).repaymentEvery(15).enableDownPayment(true)
                     .enableAutoRepaymentForDownPayment(true).disbursedAmountPercentageForDownPayment(BigDecimal.valueOf(25));
-            PostLoanProductsResponse loanProductResponse = loanProductHelper.createLoanProduct(product);
+            PostLoanProductsResponse loanProductResponse = loanHelper.createLoanProduct(product);
             PostLoansRequest applicationRequest = applyLoanRequest(client.getClientId(), loanProductResponse.getResourceId(),
                     "23 March 2024", 1000.0, 4);
 
@@ -4168,14 +4077,13 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                     .transactionProcessingStrategyCode(LoanProductTestBuilder.ADVANCED_PAYMENT_ALLOCATION_STRATEGY).repaymentEvery(15)
                     .enableDownPayment(false);
 
-            PostLoansResponse loanResponse = loanTransactionHelper.applyLoan(applicationRequest);
+            PostLoansResponse loanResponse = loanHelper.applyForLoan(applicationRequest);
 
-            loanTransactionHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest()
-                    .approvedLoanAmount(BigDecimal.valueOf(10)).dateFormat(DATETIME_PATTERN).approvedOnDate("23 March 2024").locale("en"));
+            loanHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(10))
+                    .dateFormat(DATETIME_PATTERN).approvedOnDate("23 March 2024").locale("en"));
 
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().actualDisbursementDate("23 March 2024").dateFormat(DATETIME_PATTERN)
-                            .transactionAmount(BigDecimal.valueOf(10.0)).locale("en"));
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate("23 March 2024")
+                    .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(10.0)).locale("en"));
 
             // verify schedule (without DownPayment)
             verifyRepaymentSchedule(loanResponse.getLoanId(), //
@@ -4203,7 +4111,7 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             PostLoanProductsRequest product = createOnePeriod30DaysLongNoInterestPeriodicAccrualProductWithAdvancedPaymentAllocation()
                     .installmentAmountInMultiplesOf(null).numberOfRepayments(3).repaymentEvery(15).enableDownPayment(true)
                     .enableAutoRepaymentForDownPayment(true).disbursedAmountPercentageForDownPayment(BigDecimal.valueOf(25));
-            PostLoanProductsResponse loanProductResponse = loanProductHelper.createLoanProduct(product);
+            PostLoanProductsResponse loanProductResponse = loanHelper.createLoanProduct(product);
             PostLoansRequest applicationRequest = applyLoanRequest(client.getClientId(), loanProductResponse.getResourceId(), processDate,
                     amount, 4);
 
@@ -4211,9 +4119,9 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                     .transactionProcessingStrategyCode(LoanProductTestBuilder.ADVANCED_PAYMENT_ALLOCATION_STRATEGY).repaymentEvery(15)
                     .enableDownPayment(false);
 
-            PostLoansResponse loanResponse = loanTransactionHelper.applyLoan(applicationRequest);
+            PostLoansResponse loanResponse = loanHelper.applyForLoan(applicationRequest);
 
-            loanTransactionHelper.modifyApplicationForLoan(loanResponse.getLoanId(), "modify",
+            loanHelper.modifyLoanApplication(loanResponse.getLoanId(), "modify",
                     new PutLoansLoanIdRequest().clientId(client.getClientId()).productId(loanProductResponse.getResourceId())
                             .transactionProcessingStrategyCode(LoanProductTestBuilder.ADVANCED_PAYMENT_ALLOCATION_STRATEGY)
                             .repaymentEvery(15).interestCalculationPeriodType(1).interestType(0).expectedDisbursementDate(processDate)
@@ -4221,10 +4129,10 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                             .loanTermFrequencyType(0).enableDownPayment(true).loanType("individual").dateFormat(DATETIME_PATTERN)
                             .locale("en"));
 
-            loanTransactionHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest()
-                    .approvedLoanAmount(BigDecimal.valueOf(10)).dateFormat(DATETIME_PATTERN).approvedOnDate(processDate).locale("en"));
+            loanHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(10))
+                    .dateFormat(DATETIME_PATTERN).approvedOnDate(processDate).locale("en"));
 
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate(processDate)
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate(processDate)
                     .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(10.0)).locale("en"));
 
             // verify schedule (with DownPayment)
@@ -4254,7 +4162,7 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             PostLoanProductsRequest product = createOnePeriod30DaysLongNoInterestPeriodicAccrualProductWithAdvancedPaymentAllocation()
                     .installmentAmountInMultiplesOf(null).numberOfRepayments(3).repaymentEvery(15).enableDownPayment(true)
                     .enableAutoRepaymentForDownPayment(true).disbursedAmountPercentageForDownPayment(BigDecimal.valueOf(25));
-            PostLoanProductsResponse loanProductResponse = loanProductHelper.createLoanProduct(product);
+            PostLoanProductsResponse loanProductResponse = loanHelper.createLoanProduct(product);
             PostLoansRequest applicationRequest = applyLoanRequest(client.getClientId(), loanProductResponse.getResourceId(), processDate,
                     amount, 4);
 
@@ -4262,9 +4170,9 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                     .transactionProcessingStrategyCode(LoanProductTestBuilder.ADVANCED_PAYMENT_ALLOCATION_STRATEGY).repaymentEvery(15)
                     .enableDownPayment(true);
 
-            PostLoansResponse loanResponse = loanTransactionHelper.applyLoan(applicationRequest);
+            PostLoansResponse loanResponse = loanHelper.applyForLoan(applicationRequest);
 
-            loanTransactionHelper.modifyApplicationForLoan(loanResponse.getLoanId(), "modify",
+            loanHelper.modifyLoanApplication(loanResponse.getLoanId(), "modify",
                     new PutLoansLoanIdRequest().clientId(client.getClientId()).productId(loanProductResponse.getResourceId())
                             .transactionProcessingStrategyCode(LoanProductTestBuilder.ADVANCED_PAYMENT_ALLOCATION_STRATEGY)
                             .repaymentEvery(15).interestCalculationPeriodType(1).interestType(0).expectedDisbursementDate(processDate)
@@ -4272,10 +4180,10 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                             .loanTermFrequencyType(0).enableDownPayment(false).loanType("individual").dateFormat(DATETIME_PATTERN)
                             .locale("en"));
 
-            loanTransactionHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest()
-                    .approvedLoanAmount(BigDecimal.valueOf(10)).dateFormat(DATETIME_PATTERN).approvedOnDate(processDate).locale("en"));
+            loanHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(10))
+                    .dateFormat(DATETIME_PATTERN).approvedOnDate(processDate).locale("en"));
 
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate(processDate)
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate(processDate)
                     .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(10.0)).locale("en"));
 
             // verify schedule (without DownPayment)
@@ -4298,16 +4206,12 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
         runAt("23 March 2024", () -> {
             PostLoanProductsRequest product = createOnePeriod30DaysLongNoInterestPeriodicAccrualProductWithAdvancedPaymentAllocation()
                     .installmentAmountInMultiplesOf(null).numberOfRepayments(3).repaymentEvery(15).enableDownPayment(false);
-            PostLoanProductsResponse loanProductResponse = loanProductHelper.createLoanProduct(product);
-            PostLoansRequest applicationRequest = applyLoanRequest(client.getClientId(), loanProductResponse.getResourceId(),
-                    "23 March 2024", 1000.0, 3)
-                    .transactionProcessingStrategyCode(LoanProductTestBuilder.ADVANCED_PAYMENT_ALLOCATION_STRATEGY).repaymentEvery(15)
-                    .enableDownPayment(true);
+            PostLoanProductsResponse loanProductResponse = loanHelper.createLoanProduct(product);
 
             Long clientId = client.getClientId();
             CallFailedRuntimeException callFailedRuntimeException = Assertions.assertThrows(CallFailedRuntimeException.class,
-                    () -> loanTransactionHelper
-                            .applyLoan(applyLoanRequest(clientId, loanProductResponse.getResourceId(), "23 March 2024", 1000.0, 3)
+                    () -> loanHelper
+                            .applyForLoan(applyLoanRequest(clientId, loanProductResponse.getResourceId(), "23 March 2024", 1000.0, 3)
                                     .transactionProcessingStrategyCode(LoanProductTestBuilder.ADVANCED_PAYMENT_ALLOCATION_STRATEGY)
                                     .repaymentEvery(15).enableDownPayment(true)));
 
@@ -4323,10 +4227,10 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             double amount = 1000.0;
             String loanDisbursementDate = "1 January 2023";
 
-            Long clientId = clientHelper.createClient(ClientHelper.defaultClientCreationRequest()).getClientId();
+            Long clientId = clientHelper.createClient(ClientRequestBuilders.defaultClient()).getClientId();
 
             LOG.info("------------------------------CREATING NEW LOAN PRODUCT ---------------------------------------");
-            PostLoanProductsResponse loanProductResponse = loanProductHelper
+            PostLoanProductsResponse loanProductResponse = loanHelper
                     .createLoanProduct(createOnePeriod30DaysLongNoInterestPeriodicAccrualProductWithAdvancedPaymentAllocation()
                             .addCreditAllocationItem(createChargebackAllocation())
                             .loanScheduleType(LoanScheduleType.PROGRESSIVE.toString()));
@@ -4342,7 +4246,7 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                     installment(250.0, false, "01 May 2023") //
             );
 
-            loanTransactionHelper.disburseLoan(loanId, new PostLoansLoanIdRequest().actualDisbursementDate("1 January 2023")
+            loanHelper.disburseLoan(loanId, new PostLoansLoanIdRequest().actualDisbursementDate("1 January 2023")
                     .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(1000.0)).locale("en"));
 
             verifyTransactions(loanId, //
@@ -4407,7 +4311,7 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                     installment(250.0, false, "01 May 2023") //
             );
 
-            loanTransactionHelper.reverseRepayment(Math.toIntExact(loanId), Math.toIntExact(repayment1TransactionId), "2 January 2023");
+            transactionHelper.reverseLoanTransaction(loanId, repayment1TransactionId, "2 January 2023");
 
             verifyTransactions(loanId, //
                     transaction(1000.0, "Disbursement", "01 January 2023", 1000.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
@@ -4453,7 +4357,7 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
     public void uc141() {
         final String operationDate = "1 January 2024";
         runAt(operationDate, () -> {
-            Long clientId = clientHelper.createClient(ClientHelper.defaultClientCreationRequest()).getClientId();
+            Long clientId = clientHelper.createClient(ClientRequestBuilders.defaultClient()).getClientId();
             PostLoanProductsRequest product = createOnePeriod30DaysLongNoInterestPeriodicAccrualProductWithAdvancedPaymentAllocation()
                     .interestRatePerPeriod(5.0).interestCalculationPeriodType(DAYS).interestRateFrequencyType(YEARS)
                     .daysInMonthType(DaysInMonthType.DAYS_30).daysInYearType(DaysInYearType.DAYS_360).numberOfRepayments(5)//
@@ -4470,7 +4374,7 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                     .installmentAmountInMultiplesOf(null)//
                     .disbursedAmountPercentageForDownPayment(BigDecimal.valueOf(25))//
             ;//
-            PostLoanProductsResponse loanProductResponse = loanProductHelper.createLoanProduct(product);
+            PostLoanProductsResponse loanProductResponse = loanHelper.createLoanProduct(product);
             PostLoansRequest applicationRequest = applyLoanRequest(clientId, loanProductResponse.getResourceId(), operationDate, 100.0, 5);
 
             applicationRequest = applicationRequest.numberOfRepayments(5).loanTermFrequency(5).loanTermFrequencyType(2)
@@ -4478,15 +4382,15 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                     .transactionProcessingStrategyCode(LoanProductTestBuilder.ADVANCED_PAYMENT_ALLOCATION_STRATEGY).repaymentEvery(1)
                     .repaymentFrequencyType(2);
 
-            PostLoansResponse loanResponse = loanTransactionHelper.applyLoan(applicationRequest);
+            PostLoansResponse loanResponse = loanHelper.applyForLoan(applicationRequest);
 
-            loanTransactionHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest()
-                    .approvedLoanAmount(BigDecimal.valueOf(100)).dateFormat(DATETIME_PATTERN).approvedOnDate(operationDate).locale("en"));
+            loanHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(100))
+                    .dateFormat(DATETIME_PATTERN).approvedOnDate(operationDate).locale("en"));
 
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate(operationDate)
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate(operationDate)
                     .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(100.0)).locale("en"));
 
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 100.94, 0.0, 100.0, 0.0, null);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2024, 1, 1), 25.0, 0.0, 25.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
                     0.0, 0.0);
@@ -4515,7 +4419,7 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
     public void uc142() {
         final String operationDate = "1 January 2024";
         runAt(operationDate, () -> {
-            Long clientId = clientHelper.createClient(ClientHelper.defaultClientCreationRequest()).getClientId();
+            Long clientId = clientHelper.createClient(ClientRequestBuilders.defaultClient()).getClientId();
             PostLoanProductsRequest product = createOnePeriod30DaysLongNoInterestPeriodicAccrualProductWithAdvancedPaymentAllocation()
                     .interestRatePerPeriod(12.3).interestCalculationPeriodType(RepaymentFrequencyType.DAYS).interestRateFrequencyType(YEARS)
                     .daysInMonthType(DaysInMonthType.DAYS_30).daysInYearType(DaysInYearType.DAYS_360).numberOfRepayments(5)//
@@ -4532,7 +4436,7 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                     .installmentAmountInMultiplesOf(null)//
                     .disbursedAmountPercentageForDownPayment(BigDecimal.valueOf(25))//
             ;//
-            PostLoanProductsResponse loanProductResponse = loanProductHelper.createLoanProduct(product);
+            PostLoanProductsResponse loanProductResponse = loanHelper.createLoanProduct(product);
             PostLoansRequest applicationRequest = applyLoanRequest(clientId, loanProductResponse.getResourceId(), operationDate, 100.0, 5);
 
             applicationRequest = applicationRequest.numberOfRepayments(5).loanTermFrequency(5).loanTermFrequencyType(2)
@@ -4540,15 +4444,15 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                     .transactionProcessingStrategyCode(LoanProductTestBuilder.ADVANCED_PAYMENT_ALLOCATION_STRATEGY).repaymentEvery(1)
                     .repaymentFrequencyType(2);
 
-            PostLoansResponse loanResponse = loanTransactionHelper.applyLoan(applicationRequest);
+            PostLoansResponse loanResponse = loanHelper.applyForLoan(applicationRequest);
 
-            loanTransactionHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest()
-                    .approvedLoanAmount(BigDecimal.valueOf(100)).dateFormat(DATETIME_PATTERN).approvedOnDate(operationDate).locale("en"));
+            loanHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(100))
+                    .dateFormat(DATETIME_PATTERN).approvedOnDate(operationDate).locale("en"));
 
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate(operationDate)
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate(operationDate)
                     .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(100.0)).locale("en"));
 
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 102.33, 0.0, 100.0, 0.0, null);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2024, 1, 1), 25.0, 0.0, 25.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
                     0.0, 0.0);
@@ -4578,7 +4482,7 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
     public void uc143() {
         final String operationDate = "1 January 2024";
         runAt(operationDate, () -> {
-            Long clientId = clientHelper.createClient(ClientHelper.defaultClientCreationRequest()).getClientId();
+            Long clientId = clientHelper.createClient(ClientRequestBuilders.defaultClient()).getClientId();
             PostLoanProductsRequest product = createOnePeriod30DaysLongNoInterestPeriodicAccrualProductWithAdvancedPaymentAllocation()
                     .interestRatePerPeriod(12.3).interestCalculationPeriodType(RepaymentFrequencyType.DAYS).interestRateFrequencyType(YEARS)
                     .daysInMonthType(DaysInMonthType.DAYS_30).daysInYearType(DaysInYearType.DAYS_360).numberOfRepayments(5)//
@@ -4595,7 +4499,7 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                     .installmentAmountInMultiplesOf(null)//
                     .disbursedAmountPercentageForDownPayment(BigDecimal.valueOf(25))//
             ;//
-            PostLoanProductsResponse loanProductResponse = loanProductHelper.createLoanProduct(product);
+            PostLoanProductsResponse loanProductResponse = loanHelper.createLoanProduct(product);
             PostLoansRequest applicationRequest = applyLoanRequest(clientId, loanProductResponse.getResourceId(), operationDate, 100.0, 5);
 
             applicationRequest = applicationRequest.numberOfRepayments(5).loanTermFrequency(5).loanTermFrequencyType(2)
@@ -4603,15 +4507,15 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                     .transactionProcessingStrategyCode(LoanProductTestBuilder.ADVANCED_PAYMENT_ALLOCATION_STRATEGY).repaymentEvery(1)
                     .repaymentFrequencyType(2);
 
-            PostLoansResponse loanResponse = loanTransactionHelper.applyLoan(applicationRequest);
+            PostLoansResponse loanResponse = loanHelper.applyForLoan(applicationRequest);
 
-            loanTransactionHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest()
-                    .approvedLoanAmount(BigDecimal.valueOf(100)).dateFormat(DATETIME_PATTERN).approvedOnDate(operationDate).locale("en"));
+            loanHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(100))
+                    .dateFormat(DATETIME_PATTERN).approvedOnDate(operationDate).locale("en"));
 
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate(operationDate)
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate(operationDate)
                     .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(100.0)).locale("en"));
 
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 102.33, 0.0, 100.0, 0.0, null);
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2024, 1, 1), 25.0, 0.0, 25.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
                     0.0, 0.0);
@@ -4641,7 +4545,7 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
         final String operationDate = "1 January 2024";
         AtomicLong createdLoanId = new AtomicLong();
         runAt(operationDate, () -> {
-            Long clientId = clientHelper.createClient(ClientHelper.defaultClientCreationRequest()).getClientId();
+            Long clientId = clientHelper.createClient(ClientRequestBuilders.defaultClient()).getClientId();
             PostLoanProductsRequest product = createOnePeriod30DaysLongNoInterestPeriodicAccrualProductWithAdvancedPaymentAllocation()
                     .interestRatePerPeriod(12.3).interestCalculationPeriodType(RepaymentFrequencyType.DAYS).interestRateFrequencyType(YEARS)
                     .daysInMonthType(DaysInMonthType.ACTUAL).daysInYearType(DaysInYearType.DAYS_365).numberOfRepayments(4)//
@@ -4655,7 +4559,7 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                     .overAppliedNumber(null)//
                     .installmentAmountInMultiplesOf(null)//
             ;//
-            PostLoanProductsResponse loanProductResponse = loanProductHelper.createLoanProduct(product);
+            PostLoanProductsResponse loanProductResponse = loanHelper.createLoanProduct(product);
             PostLoansRequest applicationRequest = applyLoanRequest(clientId, loanProductResponse.getResourceId(), operationDate, 100.0, 5);
 
             applicationRequest = applicationRequest.numberOfRepayments(5).loanTermFrequency(5).loanTermFrequencyType(2)
@@ -4663,17 +4567,17 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                     .transactionProcessingStrategyCode(LoanProductTestBuilder.ADVANCED_PAYMENT_ALLOCATION_STRATEGY).repaymentEvery(1)
                     .repaymentFrequencyType(2);
 
-            PostLoansResponse loanResponse = loanTransactionHelper.applyLoan(applicationRequest);
+            PostLoansResponse loanResponse = loanHelper.applyForLoan(applicationRequest);
             createdLoanId.set(loanResponse.getLoanId());
 
-            loanTransactionHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest()
-                    .approvedLoanAmount(BigDecimal.valueOf(100)).dateFormat(DATETIME_PATTERN).approvedOnDate(operationDate).locale("en"));
+            loanHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(100))
+                    .dateFormat(DATETIME_PATTERN).approvedOnDate(operationDate).locale("en"));
 
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate(operationDate)
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate(operationDate)
                     .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(100.0)).locale("en"));
 
             // After Disbursement we are expecting no Accrual transactions
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             assertEquals(BigDecimal.ZERO, loanDetails.getSummary().getTotalUnpaidPayableDueInterest().stripTrailingZeros());
             assertEquals(BigDecimal.ZERO, loanDetails.getSummary().getTotalUnpaidPayableNotDueInterest().stripTrailingZeros());
         });
@@ -4683,13 +4587,13 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             // Generate the Accruals
             PeriodicAccrualAccountingHelper.runPeriodicAccrualAccounting("30 January 2024");
 
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(createdLoanId.get());
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(createdLoanId.get());
             assertEquals(BigDecimal.ZERO, loanDetails.getSummary().getTotalUnpaidPayableDueInterest().stripTrailingZeros());
             assertEquals(new BigDecimal("0.98"), loanDetails.getSummary().getTotalUnpaidPayableNotDueInterest().stripTrailingZeros());
 
             // Partial interest repayment
             addRepaymentForLoan(createdLoanId.get(), 20.50, "30 January 2024");
-            loanDetails = loanTransactionHelper.getLoanDetails(createdLoanId.get());
+            loanDetails = loanHelper.getLoanDetails(createdLoanId.get());
             assertEquals(BigDecimal.ZERO, loanDetails.getSummary().getTotalUnpaidPayableDueInterest().stripTrailingZeros());
             assertEquals(new BigDecimal("0.06"), loanDetails.getSummary().getTotalUnpaidPayableNotDueInterest().stripTrailingZeros());
         });
@@ -4698,7 +4602,7 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             // Generate the Accruals
             PeriodicAccrualAccountingHelper.runPeriodicAccrualAccounting("31 January 2024");
 
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(createdLoanId.get());
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(createdLoanId.get());
             assertEquals(BigDecimal.ZERO, loanDetails.getSummary().getTotalUnpaidPayableDueInterest().stripTrailingZeros());
             assertEquals(new BigDecimal("0.09"), loanDetails.getSummary().getTotalUnpaidPayableNotDueInterest().stripTrailingZeros());
         });
@@ -4707,7 +4611,7 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             // Generate the Accruals
             PeriodicAccrualAccountingHelper.runPeriodicAccrualAccounting("1 February 2024");
 
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(createdLoanId.get());
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(createdLoanId.get());
             assertEquals(new BigDecimal("0.12"), loanDetails.getSummary().getTotalUnpaidPayableDueInterest().stripTrailingZeros());
             assertEquals(BigDecimal.ZERO, loanDetails.getSummary().getTotalUnpaidPayableNotDueInterest().stripTrailingZeros());
         });
@@ -4716,7 +4620,7 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
         runAt("20 February 2024", () -> {
             PeriodicAccrualAccountingHelper.runPeriodicAccrualAccounting("20 February 2024");
 
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(createdLoanId.get());
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(createdLoanId.get());
             assertEquals(new BigDecimal("0.12"), loanDetails.getSummary().getTotalUnpaidPayableDueInterest().stripTrailingZeros());
             assertEquals(new BigDecimal("0.51"), loanDetails.getSummary().getTotalUnpaidPayableNotDueInterest().stripTrailingZeros());
         });
@@ -4733,7 +4637,7 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
         final String operationDate = "1 January 2024";
         AtomicLong createdLoanId = new AtomicLong();
         runAt(operationDate, () -> {
-            Long clientId = clientHelper.createClient(ClientHelper.defaultClientCreationRequest()).getClientId();
+            Long clientId = clientHelper.createClient(ClientRequestBuilders.defaultClient()).getClientId();
             PostLoanProductsRequest product = createOnePeriod30DaysLongNoInterestPeriodicAccrualProductWithAdvancedPaymentAllocation()
                     .interestRatePerPeriod(108.0).interestCalculationPeriodType(RepaymentFrequencyType.DAYS)
                     .interestRateFrequencyType(YEARS).daysInMonthType(DaysInMonthType.ACTUAL).daysInYearType(DaysInYearType.DAYS_360)
@@ -4749,25 +4653,24 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                     .overAppliedNumber(null)//
                     .installmentAmountInMultiplesOf(null)//
             ;//
-            PostLoanProductsResponse loanProductResponse = loanProductHelper.createLoanProduct(product);
+            PostLoanProductsResponse loanProductResponse = loanHelper.createLoanProduct(product);
             PostLoansRequest applicationRequest = applyLoanRequest(clientId, loanProductResponse.getResourceId(), operationDate, 1000.0, 4)
                     .interestRatePerPeriod(BigDecimal.valueOf(108.0));
 
             applicationRequest = applicationRequest.interestCalculationPeriodType(DAYS)
                     .transactionProcessingStrategyCode(LoanProductTestBuilder.ADVANCED_PAYMENT_ALLOCATION_STRATEGY);
 
-            PostLoansResponse loanResponse = loanTransactionHelper.applyLoan(applicationRequest);
+            PostLoansResponse loanResponse = loanHelper.applyForLoan(applicationRequest);
             createdLoanId.set(loanResponse.getLoanId());
 
-            loanTransactionHelper.approveLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(1000.0)).dateFormat(DATETIME_PATTERN)
-                            .approvedOnDate(operationDate).locale("en"));
+            loanHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(1000.0))
+                    .dateFormat(DATETIME_PATTERN).approvedOnDate(operationDate).locale("en"));
 
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate(operationDate)
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate(operationDate)
                     .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(1000.0)).locale("en"));
 
             // After Disbursement we are expecting amount in Zero (first day)
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             assertEquals(BigDecimal.ZERO, loanDetails.getSummary().getTotalUnpaidPayableDueInterest().stripTrailingZeros());
             assertEquals(BigDecimal.ZERO, loanDetails.getSummary().getTotalUnpaidPayableNotDueInterest().stripTrailingZeros());
         });
@@ -4777,7 +4680,7 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             // Generate the Accruals
             PeriodicAccrualAccountingHelper.runPeriodicAccrualAccounting("2 January 2024");
 
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(createdLoanId.get());
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(createdLoanId.get());
             assertEquals(BigDecimal.ZERO, loanDetails.getSummary().getTotalUnpaidPayableDueInterest().stripTrailingZeros());
             assertEquals(BigDecimal.valueOf(3.0).stripTrailingZeros(),
                     loanDetails.getSummary().getTotalUnpaidPayableNotDueInterest().stripTrailingZeros());
@@ -4785,7 +4688,7 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
 
         // Second day on First Period, then TotalUnpaidPayableDueInterest = 0 and TotalUnpaidPayableNotDueInterest = 6
         runAt("3 January 2024", () -> {
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(createdLoanId.get());
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(createdLoanId.get());
             assertEquals(BigDecimal.ZERO, loanDetails.getSummary().getTotalUnpaidPayableDueInterest().stripTrailingZeros());
             assertEquals(BigDecimal.valueOf(6.0).stripTrailingZeros(),
                     loanDetails.getSummary().getTotalUnpaidPayableNotDueInterest().stripTrailingZeros());
@@ -4793,7 +4696,7 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
 
         // Third day on First Period, then TotalUnpaidPayableDueInterest = 0 and TotalUnpaidPayableNotDueInterest = 9
         runAt("4 January 2024", () -> {
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(createdLoanId.get());
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(createdLoanId.get());
             assertEquals(BigDecimal.ZERO, loanDetails.getSummary().getTotalUnpaidPayableDueInterest().stripTrailingZeros());
             assertEquals(BigDecimal.valueOf(9.0).stripTrailingZeros(),
                     loanDetails.getSummary().getTotalUnpaidPayableNotDueInterest().stripTrailingZeros());
@@ -4801,7 +4704,7 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
 
         // Fourth day on First Period, then TotalUnpaidPayableDueInterest = 0 and TotalUnpaidPayableNotDueInterest = 12
         runAt("5 January 2024", () -> {
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(createdLoanId.get());
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(createdLoanId.get());
             assertEquals(BigDecimal.ZERO, loanDetails.getSummary().getTotalUnpaidPayableDueInterest().stripTrailingZeros());
             assertEquals(BigDecimal.valueOf(12.0).stripTrailingZeros(),
                     loanDetails.getSummary().getTotalUnpaidPayableNotDueInterest().stripTrailingZeros());
@@ -4809,7 +4712,7 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
 
         // Last day on First Period, then TotalUnpaidPayableDueInterest = 90 and TotalUnpaidPayableNotDueInterest = 0
         runAt("31 January 2024", () -> {
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(createdLoanId.get());
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(createdLoanId.get());
             assertEquals(BigDecimal.valueOf(90.0).stripTrailingZeros(),
                     loanDetails.getSummary().getTotalUnpaidPayableDueInterest().stripTrailingZeros());
             assertEquals(BigDecimal.ZERO.stripTrailingZeros(),
@@ -4819,7 +4722,7 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
         // First day on Second Period, then TotalUnpaidPayableDueInterest = 90 and TotalUnpaidPayableNotDueInterest =
         // 2.34
         runAt("1 February 2024", () -> {
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(createdLoanId.get());
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(createdLoanId.get());
             assertEquals(BigDecimal.valueOf(90.0).stripTrailingZeros(),
                     loanDetails.getSummary().getTotalUnpaidPayableDueInterest().stripTrailingZeros());
             assertEquals(BigDecimal.valueOf(2.34), loanDetails.getSummary().getTotalUnpaidPayableNotDueInterest().stripTrailingZeros());
@@ -4828,7 +4731,7 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
         // Second day on Second Period, then TotalUnpaidPayableDueInterest = 90 and TotalUnpaidPayableNotDueInterest =
         // 4.69
         runAt("2 February 2024", () -> {
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(createdLoanId.get());
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(createdLoanId.get());
             assertEquals(BigDecimal.valueOf(90.0).stripTrailingZeros(),
                     loanDetails.getSummary().getTotalUnpaidPayableDueInterest().stripTrailingZeros());
             assertEquals(BigDecimal.valueOf(4.69), loanDetails.getSummary().getTotalUnpaidPayableNotDueInterest().stripTrailingZeros());
@@ -4837,7 +4740,7 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
         // Third day on Second Period, then TotalUnpaidPayableDueInterest = 90 and TotalUnpaidPayableNotDueInterest =
         // 7.03
         runAt("3 February 2024", () -> {
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(createdLoanId.get());
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(createdLoanId.get());
             assertEquals(BigDecimal.valueOf(90.0).stripTrailingZeros(),
                     loanDetails.getSummary().getTotalUnpaidPayableDueInterest().stripTrailingZeros());
             assertEquals(BigDecimal.valueOf(7.03), loanDetails.getSummary().getTotalUnpaidPayableNotDueInterest().stripTrailingZeros());
@@ -4845,7 +4748,7 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
 
         // N day on Second Period, then TotalUnpaidPayableDueInterest = 90 and TotalUnpaidPayableNotDueInterest = 21.096
         runAt("10 February 2024", () -> {
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(createdLoanId.get());
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(createdLoanId.get());
             assertEquals(BigDecimal.valueOf(90.0).stripTrailingZeros(),
                     loanDetails.getSummary().getTotalUnpaidPayableDueInterest().stripTrailingZeros());
             assertEquals(BigDecimal.valueOf(23.44).stripTrailingZeros(),
@@ -4855,7 +4758,7 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
         // First day on Third Period, then TotalUnpaidPayableDueInterest = 90 + 70.32 and
         // TotalUnpaidPayableNotDueInterest = 0
         runAt("1 March 2024", () -> {
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(createdLoanId.get());
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(createdLoanId.get());
             assertEquals(BigDecimal.valueOf(160.32).stripTrailingZeros(),
                     loanDetails.getSummary().getTotalUnpaidPayableDueInterest().stripTrailingZeros());
             assertEquals(BigDecimal.ZERO, loanDetails.getSummary().getTotalUnpaidPayableNotDueInterest().stripTrailingZeros());
@@ -4864,7 +4767,7 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
         // Second day on Third Period, then TotalUnpaidPayableDueInterest = 90 + 70.32 and
         // TotalUnpaidPayableNotDueInterest = 1.63
         runAt("2 March 2024", () -> {
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(createdLoanId.get());
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(createdLoanId.get());
             assertEquals(BigDecimal.valueOf(160.32).stripTrailingZeros(),
                     loanDetails.getSummary().getTotalUnpaidPayableDueInterest().stripTrailingZeros());
             assertEquals(BigDecimal.valueOf(1.63), loanDetails.getSummary().getTotalUnpaidPayableNotDueInterest().stripTrailingZeros());
@@ -4873,7 +4776,7 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
         // Third day on Third Period, then TotalUnpaidPayableDueInterest = 90 + 70.32 and
         // TotalUnpaidPayableNotDueInterest = 3.26
         runAt("3 March 2024", () -> {
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(createdLoanId.get());
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(createdLoanId.get());
             assertEquals(BigDecimal.valueOf(160.32).stripTrailingZeros(),
                     loanDetails.getSummary().getTotalUnpaidPayableDueInterest().stripTrailingZeros());
             assertEquals(BigDecimal.valueOf(3.26), loanDetails.getSummary().getTotalUnpaidPayableNotDueInterest().stripTrailingZeros());
@@ -4882,7 +4785,7 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
         // Last day on Third Period, then TotalUnpaidPayableDueInterest = 90 + 70.32 + 48.87 and
         // TotalUnpaidPayableNotDueInterest = 0
         runAt("31 March 2024", () -> {
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(createdLoanId.get());
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(createdLoanId.get());
             assertEquals(BigDecimal.valueOf(209.19).stripTrailingZeros(),
                     loanDetails.getSummary().getTotalUnpaidPayableDueInterest().stripTrailingZeros());
             assertEquals(BigDecimal.ZERO, loanDetails.getSummary().getTotalUnpaidPayableNotDueInterest().stripTrailingZeros());
@@ -4893,7 +4796,7 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
         runAt("11 March 2024", () -> {
             addRepaymentForLoan(createdLoanId.get(), 340.00, "11 March 2024");
 
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(createdLoanId.get());
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(createdLoanId.get());
             assertEquals(BigDecimal.valueOf(70.32).stripTrailingZeros(),
                     loanDetails.getSummary().getTotalUnpaidPayableDueInterest().stripTrailingZeros());
             assertEquals(BigDecimal.valueOf(16.29).stripTrailingZeros(),
@@ -4909,7 +4812,7 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
     public void uc146() {
         AtomicLong createdLoanId = new AtomicLong();
         runAt("1 January 2024", () -> {
-            Long clientId = clientHelper.createClient(ClientHelper.defaultClientCreationRequest()).getClientId();
+            Long clientId = clientHelper.createClient(ClientRequestBuilders.defaultClient()).getClientId();
             final ArrayList<String> interestRefundTypes = new ArrayList<String>();
             interestRefundTypes.add("PAYOUT_REFUND");
             interestRefundTypes.add("MERCHANT_ISSUED_REFUND");
@@ -4927,35 +4830,33 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                     .installmentAmountInMultiplesOf(null)//
                     .supportedInterestRefundTypes(interestRefundTypes) //
             ;//
-            PostLoanProductsResponse loanProductResponse = loanProductHelper.createLoanProduct(product);
+            PostLoanProductsResponse loanProductResponse = loanHelper.createLoanProduct(product);
             PostLoansRequest applicationRequest = applyLoanRequest(clientId, loanProductResponse.getResourceId(), "1 January 2024", 1000.0,
                     4);
 
             applicationRequest = applicationRequest.interestCalculationPeriodType(DAYS)
                     .transactionProcessingStrategyCode(LoanProductTestBuilder.ADVANCED_PAYMENT_ALLOCATION_STRATEGY);
 
-            PostLoansResponse loanResponse = loanTransactionHelper.applyLoan(applicationRequest);
+            PostLoansResponse loanResponse = loanHelper.applyForLoan(applicationRequest);
             createdLoanId.set(loanResponse.getLoanId());
 
-            loanTransactionHelper.approveLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(1000.0)).dateFormat(DATETIME_PATTERN)
-                            .approvedOnDate("1 January 2024").locale("en"));
+            loanHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(1000.0))
+                    .dateFormat(DATETIME_PATTERN).approvedOnDate("1 January 2024").locale("en"));
 
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().actualDisbursementDate("1 January 2024").dateFormat(DATETIME_PATTERN)
-                            .transactionAmount(BigDecimal.valueOf(1000.0)).locale("en"));
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate("1 January 2024")
+                    .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(1000.0)).locale("en"));
 
             // After Disbursement we are expecting zero interest refund
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             assertEquals(BigDecimal.ZERO, loanDetails.getSummary().getTotalInterestRefund().stripTrailingZeros());
         });
 
         runAt("10 January 2024", () -> {
-            loanTransactionHelper.makeMerchantIssuedRefund(createdLoanId.get(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeMerchantIssuedRefund(createdLoanId.get(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("10 January 2024").locale("en").transactionAmount(300.0));
 
             // After Interest refund transaction we are expecting non zero interest refund
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(createdLoanId.get());
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(createdLoanId.get());
             LOG.info("value {}", loanDetails.getSummary().getTotalInterestRefund().stripTrailingZeros());
             assertEquals(BigDecimal.ZERO, loanDetails.getSummary().getTotalInterestRefund().stripTrailingZeros());
         });
@@ -4974,7 +4875,7 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
         runAt(operationDate, () -> {
             BigDecimal interestRatePerPeriod = BigDecimal.valueOf(9.4822);
 
-            Long clientId = clientHelper.createClient(ClientHelper.defaultClientCreationRequest()).getClientId();
+            Long clientId = clientHelper.createClient(ClientRequestBuilders.defaultClient()).getClientId();
             PostLoanProductsRequest product = createOnePeriod30DaysLongNoInterestPeriodicAccrualProductWithAdvancedPaymentAllocation()
                     .interestRatePerPeriod(interestRatePerPeriod.doubleValue()).interestCalculationPeriodType(RepaymentFrequencyType.DAYS)
                     .interestRateFrequencyType(YEARS).daysInMonthType(DaysInMonthType.DAYS_30).daysInYearType(DaysInYearType.DAYS_360)
@@ -4993,7 +4894,7 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                     .outstandingLoanBalance(10000.0)//
                     .installmentAmountInMultiplesOf(null)//
             ;//
-            PostLoanProductsResponse loanProductResponse = loanProductHelper.createLoanProduct(product);
+            PostLoanProductsResponse loanProductResponse = loanHelper.createLoanProduct(product);
             PostLoansRequest applicationRequest = applyLoanRequest(clientId, loanProductResponse.getResourceId(), operationDate, 100.0, 6);
 
             applicationRequest = applicationRequest.numberOfRepayments(6)//
@@ -5006,24 +4907,23 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                     .maxOutstandingLoanBalance(BigDecimal.valueOf(10000.0))//
             ;//
 
-            PostLoansResponse loanResponse = loanTransactionHelper.applyLoan(applicationRequest);
+            PostLoansResponse loanResponse = loanHelper.applyForLoan(applicationRequest);
 
-            loanTransactionHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest()
-                    .approvedLoanAmount(BigDecimal.valueOf(100)).dateFormat(DATETIME_PATTERN).approvedOnDate(operationDate).locale("en"));
+            loanHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(100))
+                    .dateFormat(DATETIME_PATTERN).approvedOnDate(operationDate).locale("en"));
 
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate(operationDate)
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate(operationDate)
                     .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(100.0)).locale("en"));
 
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 102.78, 0.0, 100.0, 0.0, null);
 
             String disbursementDate2nd = "8 January 2024";
             updateBusinessDate(disbursementDate2nd);
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().actualDisbursementDate(disbursementDate2nd).dateFormat(DATETIME_PATTERN)
-                            .transactionAmount(BigDecimal.valueOf(200.0)).locale("en"));
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate(disbursementDate2nd)
+                    .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(200.0)).locale("en"));
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 307.98, 0.0, 300.0, 0.0, null);
 
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2024, 2, 1), 49.32, 0.0, 49.32, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2.01, 0.0,
@@ -5056,7 +4956,7 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
         runAt(operationDate, () -> {
             BigDecimal interestRatePerPeriod = BigDecimal.valueOf(9.4822);
 
-            Long clientId = clientHelper.createClient(ClientHelper.defaultClientCreationRequest()).getClientId();
+            Long clientId = clientHelper.createClient(ClientRequestBuilders.defaultClient()).getClientId();
             PostLoanProductsRequest product = createOnePeriod30DaysLongNoInterestPeriodicAccrualProductWithAdvancedPaymentAllocation()
                     .interestRatePerPeriod(interestRatePerPeriod.doubleValue()).interestCalculationPeriodType(RepaymentFrequencyType.DAYS)
                     .interestRateFrequencyType(YEARS).daysInMonthType(DaysInMonthType.DAYS_30).daysInYearType(DaysInYearType.DAYS_360)
@@ -5075,7 +4975,7 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                     .outstandingLoanBalance(10000.0)//
                     .installmentAmountInMultiplesOf(null)//
             ;//
-            PostLoanProductsResponse loanProductResponse = loanProductHelper.createLoanProduct(product);
+            PostLoanProductsResponse loanProductResponse = loanHelper.createLoanProduct(product);
             PostLoansRequest applicationRequest = applyLoanRequest(clientId, loanProductResponse.getResourceId(), operationDate, 100.0, 5);
 
             applicationRequest = applicationRequest.numberOfRepayments(6)//
@@ -5088,32 +4988,31 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                     .maxOutstandingLoanBalance(BigDecimal.valueOf(10000.0))//
             ;//
 
-            PostLoansResponse loanResponse = loanTransactionHelper.applyLoan(applicationRequest);
+            PostLoansResponse loanResponse = loanHelper.applyForLoan(applicationRequest);
 
-            loanTransactionHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest()
-                    .approvedLoanAmount(BigDecimal.valueOf(100)).dateFormat(DATETIME_PATTERN).approvedOnDate(operationDate).locale("en"));
+            loanHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(100))
+                    .dateFormat(DATETIME_PATTERN).approvedOnDate(operationDate).locale("en"));
 
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate(operationDate)
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate(operationDate)
                     .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(100.0)).locale("en"));
 
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 102.78, 0.0, 100.0, 0.0, null);
 
             final String repaymentDate = "1 February 2024";
             updateBusinessDate(repaymentDate);
-            loanTransactionHelper.makeRepayment(repaymentDate, 17.13f, loanResponse.getLoanId().intValue());
+            transactionHelper.makeRepayment(repaymentDate, 17.13f, loanResponse.getLoanId().intValue());
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
 
             validateLoanSummaryBalances(loanDetails, 85.65, 17.13, 83.66, 16.34, null);
 
             final String dateOf2ndDisbursement = "15 February 2024";
             updateBusinessDate(dateOf2ndDisbursement);
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().actualDisbursementDate(dateOf2ndDisbursement).dateFormat(DATETIME_PATTERN)
-                            .transactionAmount(BigDecimal.valueOf(100.0)).locale("en"));
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate(dateOf2ndDisbursement)
+                    .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(100.0)).locale("en"));
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 187.65, 17.13, 183.66, 16.34, null);
 
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2024, 2, 1), 16.34, 16.34, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.79, 0.79,
@@ -5151,7 +5050,7 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
         runAt(operationDate, () -> {
             BigDecimal interestRatePerPeriod = BigDecimal.valueOf(9.4822);
 
-            Long clientId = clientHelper.createClient(ClientHelper.defaultClientCreationRequest()).getClientId();
+            Long clientId = clientHelper.createClient(ClientRequestBuilders.defaultClient()).getClientId();
             PostLoanProductsRequest product = createOnePeriod30DaysLongNoInterestPeriodicAccrualProductWithAdvancedPaymentAllocation()//
                     .interestRatePerPeriod(interestRatePerPeriod.doubleValue())//
                     .interestCalculationPeriodType(RepaymentFrequencyType.DAYS)//
@@ -5174,7 +5073,7 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                     .outstandingLoanBalance(10000.0)//
                     .installmentAmountInMultiplesOf(null)//
             ;//
-            PostLoanProductsResponse loanProductResponse = loanProductHelper.createLoanProduct(product);
+            PostLoanProductsResponse loanProductResponse = loanHelper.createLoanProduct(product);
             PostLoansRequest applicationRequest = applyLoanRequest(clientId, loanProductResponse.getResourceId(), "1 January 2024", 100.0,
                     6);
 
@@ -5188,28 +5087,27 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                     .maxOutstandingLoanBalance(BigDecimal.valueOf(10000.0))//
             ;//
 
-            PostLoansResponse loanResponse = loanTransactionHelper.applyLoan(applicationRequest);
+            PostLoansResponse loanResponse = loanHelper.applyForLoan(applicationRequest);
 
-            loanTransactionHelper.approveLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(100)).dateFormat(DATETIME_PATTERN)
-                            .approvedOnDate("1 January 2024").locale("en"));
+            loanHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(100))
+                    .dateFormat(DATETIME_PATTERN).approvedOnDate("1 January 2024").locale("en"));
 
             final String disbursementDate1st = "8 January 2024";
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(), //
+            loanHelper.disburseLoan(loanResponse.getLoanId(), //
                     new PostLoansLoanIdRequest()//
                             .actualDisbursementDate(disbursementDate1st).dateFormat(DATETIME_PATTERN)//
                             .transactionAmount(BigDecimal.valueOf(100.0)).locale("en"));//
 
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 102.6, 0.0, 100.0, 0.0, null);
 
             final String disbursementDate2nd = "5 January 2024";
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(), //
+            loanHelper.disburseLoan(loanResponse.getLoanId(), //
                     new PostLoansLoanIdRequest()//
                             .actualDisbursementDate(disbursementDate2nd).dateFormat(DATETIME_PATTERN)//
                             .transactionAmount(BigDecimal.valueOf(50.0)).locale("en"));//
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 153.95, 0.0, 150.0, 0.0, null);
 
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2024, 2, 1), 24.70, 0.0, 24.70, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.96, 0.0,
@@ -5229,12 +5127,12 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
 
             // 2nd disbursement on the same date
             final String disbursementDate3rd = "8 January 2024";
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(), //
+            loanHelper.disburseLoan(loanResponse.getLoanId(), //
                     new PostLoansLoanIdRequest()//
                             .actualDisbursementDate(disbursementDate3rd).dateFormat(DATETIME_PATTERN)//
                             .transactionAmount(BigDecimal.valueOf(25.0)).locale("en"));//
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 179.60, 0.0, 175.0, 0.0, null);
 
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2024, 2, 1), 28.82, 0.0, 28.82, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.11, 0.0,
@@ -5270,7 +5168,7 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
         runAt(operationDate, () -> {
             BigDecimal interestRatePerPeriod = BigDecimal.valueOf(7.0);
 
-            Long clientId = clientHelper.createClient(ClientHelper.defaultClientCreationRequest()).getClientId();
+            Long clientId = clientHelper.createClient(ClientRequestBuilders.defaultClient()).getClientId();
             PostLoanProductsRequest product = createOnePeriod30DaysLongNoInterestPeriodicAccrualProductWithAdvancedPaymentAllocation()
                     .interestRatePerPeriod(interestRatePerPeriod.doubleValue()).interestRateFrequencyType(YEARS)//
                     .daysInMonthType(DaysInMonthType.DAYS_30)//
@@ -5295,7 +5193,7 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                     .installmentAmountInMultiplesOf(null)//
                     .rescheduleStrategyMethod(LoanRescheduleStrategyMethod.ADJUST_LAST_UNPAID_PERIOD.getValue())//
                     .recalculationRestFrequencyType(1);//
-            PostLoanProductsResponse loanProductResponse = loanProductHelper.createLoanProduct(product);
+            PostLoanProductsResponse loanProductResponse = loanHelper.createLoanProduct(product);
             PostLoansRequest applicationRequest = applyLoanRequest(clientId, loanProductResponse.getResourceId(), operationDate, 100.0, 6);
 
             applicationRequest = applicationRequest.numberOfRepayments(6)//
@@ -5309,17 +5207,17 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                     .maxOutstandingLoanBalance(BigDecimal.valueOf(10000.0))//
             ;//
 
-            PostLoansResponse loanResponse = loanTransactionHelper.applyLoan(applicationRequest);
+            PostLoansResponse loanResponse = loanHelper.applyForLoan(applicationRequest);
 
-            loanTransactionHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest()//
+            loanHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest()//
                     .approvedLoanAmount(BigDecimal.valueOf(100))//
                     .approvedOnDate(operationDate).dateFormat(DATETIME_PATTERN).locale("en"));//
 
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest()//
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest()//
                     .transactionAmount(BigDecimal.valueOf(100.0))//
                     .actualDisbursementDate(operationDate).dateFormat(DATETIME_PATTERN).locale("en"));//
 
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 102.05, 0.0, 100.0, 0.0, null);
 
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2024, 2, 1), 16.43, 0.0, 16.43, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.58, 0.0,
@@ -5338,10 +5236,10 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             assertEquals(loanDetails.getNumberOfRepayments(), 6);
 
             updateBusinessDate("1 February 2024");
-            loanTransactionHelper.makeRepayment("1 February 2024", 17.01f, loanResponse.getLoanId().intValue());
+            transactionHelper.makeRepayment("1 February 2024", 17.01f, loanResponse.getLoanId().intValue());
 
             updateBusinessDate("14 February 2024");
-            PostCreateRescheduleLoansResponse rescheduleLoansResponse = loanRescheduleRequestHelper//
+            PostCreateRescheduleLoansResponse rescheduleLoansResponse = LoanRescheduleRequestHelper//
                     .createLoanRescheduleRequest(new PostCreateRescheduleLoansRequest()//
                             .loanId(loanDetails.getId())//
                             .rescheduleReasonId(1L)//
@@ -5349,11 +5247,11 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                             .submittedOnDate("14 February 2024")//
                             .newInterestRate(BigDecimal.valueOf(4.0)));//
 
-            loanRescheduleRequestHelper.approveLoanRescheduleRequest(rescheduleLoansResponse.getResourceId(), //
+            LoanRescheduleRequestHelper.approveLoanRescheduleRequest(rescheduleLoansResponse.getResourceId(), //
                     new PostUpdateRescheduleLoansRequest()//
                             .approvedOnDate("14 February 2024").locale("en").dateFormat(DATETIME_PATTERN));//
 
-            loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 84.5, 17.01, 83.57, 16.43, null);
 
             validateRepaymentPeriod(loanDetails, 1, LocalDate.of(2024, 2, 1), 16.43, 16.43, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.58, 0.58,
@@ -5383,11 +5281,10 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             PostLoanProductsRequest loanProduct = createOnePeriod30DaysPeriodicAccrualProductWithAdvancedPaymentAllocationAndInterestRecalculation(
                     (double) 80.0, rescheduleStrategyMethod);
 
-            final PostLoanProductsResponse loanProductResponse = loanProductHelper.createLoanProduct(loanProduct);
+            final PostLoanProductsResponse loanProductResponse = loanHelper.createLoanProduct(loanProduct);
             assertNotNull(loanProductResponse);
 
-            final GetLoanProductsProductIdResponse loanProductDetails = loanProductHelper
-                    .retrieveLoanProductById(loanProductResponse.getResourceId());
+            final GetLoanProductsProductIdResponse loanProductDetails = loanHelper.retrieveLoanProduct(loanProductResponse.getResourceId());
             assertNotNull(loanProductDetails);
             assertTrue(loanProductDetails.getIsInterestRecalculationEnabled());
             assertEquals(rescheduleStrategyMethod.longValue(),
@@ -5408,7 +5305,7 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                     (double) 80.0, rescheduleStrategyMethod);
 
             CallFailedRuntimeException callFailedRuntimeException = Assertions.assertThrows(CallFailedRuntimeException.class,
-                    () -> loanProductHelper.createLoanProduct(loanProduct));
+                    () -> loanHelper.createLoanProduct(loanProduct));
 
             Assertions.assertTrue(callFailedRuntimeException.getMessage().contains("is not supported for Progressive loan schedule type"));
         });
@@ -5428,7 +5325,7 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                     .loanScheduleType(LoanScheduleType.CUMULATIVE.toString());
 
             CallFailedRuntimeException callFailedRuntimeException = Assertions.assertThrows(CallFailedRuntimeException.class,
-                    () -> loanProductHelper.createLoanProduct(loanProduct));
+                    () -> loanHelper.createLoanProduct(loanProduct));
 
             Assertions.assertTrue(callFailedRuntimeException.getMessage()
                     .contains("Adjust last, unpaid period is only supported for Progressive loan schedule type"));
@@ -5463,19 +5360,19 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                     .installmentAmountInMultiplesOf(null)//
                     .loanScheduleType(LoanScheduleType.PROGRESSIVE.toString()) //
             ;//
-            PostLoanProductsResponse loanProductResponse = loanProductHelper.createLoanProduct(product);
+            PostLoanProductsResponse loanProductResponse = loanHelper.createLoanProduct(product);
             PostLoansRequest applicationRequest = applyLoanRequest(clientId, loanProductResponse.getResourceId(), operationDate, 400.0, 6);
 
             applicationRequest = applicationRequest.interestCalculationPeriodType(DAYS).interestRatePerPeriod(BigDecimal.ZERO)
                     .transactionProcessingStrategyCode(LoanProductTestBuilder.ADVANCED_PAYMENT_ALLOCATION_STRATEGY);
 
-            PostLoansResponse loanResponse = loanTransactionHelper.applyLoan(applicationRequest);
+            PostLoansResponse loanResponse = loanHelper.applyForLoan(applicationRequest);
             createdLoanId.set(loanResponse.getLoanId());
 
-            loanTransactionHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest()
-                    .approvedLoanAmount(BigDecimal.valueOf(400.0)).dateFormat(DATETIME_PATTERN).approvedOnDate(operationDate).locale("en"));
+            loanHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(400.0))
+                    .dateFormat(DATETIME_PATTERN).approvedOnDate(operationDate).locale("en"));
 
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate(operationDate)
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate(operationDate)
                     .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(400.0)).locale("en"));
 
             addRepaymentForLoan(createdLoanId.get(), 600.00, operationDate);
@@ -5483,7 +5380,7 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             createdLoanChargeId.set(addCharge(createdLoanId.get(), true, 30, operationDate));
 
             executeInlineCOB(createdLoanId.get());
-            final GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(createdLoanId.get());
+            final GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(createdLoanId.get());
             // Validate Loan Accrual transaction
             final GetLoansLoanIdTransactions loanTransaction = loanDetails.getTransactions().stream()
                     .filter(t -> Boolean.TRUE.equals(t.getType().getAccrual())).toList().get(0);
@@ -5493,17 +5390,16 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
 
         runAt("10 October 2024", () -> {
             PostLoansLoanIdChargesChargeIdRequest request = new PostLoansLoanIdChargesChargeIdRequest().amount(15.0).locale("en");
-            loanTransactionHelper.chargeAdjustment(createdLoanId.get(), createdLoanChargeId.get(), request);
+            chargeAdjustment(createdLoanId.get(), createdLoanChargeId.get(), request);
 
-            loanTransactionHelper.makeGoodwillCredit(createdLoanId.get(), new PostLoansLoanIdTransactionsRequest()
-                    .dateFormat(DATETIME_PATTERN).transactionDate(operationDate).locale("en").transactionAmount(15.0));
+            transactionHelper.makeGoodwillCredit(createdLoanId.get(), new PostLoansLoanIdTransactionsRequest().dateFormat(DATETIME_PATTERN)
+                    .transactionDate(operationDate).locale("en").transactionAmount(15.0));
 
-            final GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(createdLoanId.get());
+            final GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(createdLoanId.get());
             // Get the Repayment transaction
             GetLoansLoanIdTransactions loanTransaction = loanDetails.getTransactions().stream()
                     .filter(t -> Boolean.TRUE.equals(t.getType().getRepayment())).toList().get(0);
-            loanTransactionHelper.reverseRepayment(Math.toIntExact(createdLoanId.get()), Math.toIntExact(loanTransaction.getId()),
-                    operationDate);
+            transactionHelper.reverseLoanTransaction(createdLoanId.get(), loanTransaction.getId(), operationDate);
 
             // Validate Loan Accrual transaction
             loanTransaction = loanDetails.getTransactions().stream().filter(t -> Boolean.TRUE.equals(t.getType().getAccrual())).toList()
@@ -5536,7 +5432,7 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                     .installmentAmountInMultiplesOf(null)//
                     .loanScheduleType(LoanScheduleType.PROGRESSIVE.toString()) //
             ;//
-            PostLoanProductsResponse loanProductResponse = loanProductHelper.createLoanProduct(product);
+            PostLoanProductsResponse loanProductResponse = loanHelper.createLoanProduct(product);
             PostLoansRequest applicationRequest = applyLoanRequest(clientId, loanProductResponse.getResourceId(), operationDate, 400.0, 4);
             final BigDecimal interestRatePerPeriod = BigDecimal.valueOf(4.0);
             applicationRequest = applicationRequest.interestCalculationPeriodType(DAYS).interestRatePerPeriod(interestRatePerPeriod)
@@ -5544,9 +5440,9 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                     .repaymentFrequencyType(RepaymentFrequencyType.MONTHS).loanTermFrequency(4)
                     .transactionProcessingStrategyCode(LoanProductTestBuilder.ADVANCED_PAYMENT_ALLOCATION_STRATEGY);
 
-            PostLoansResponse loanResponse = loanTransactionHelper.applyLoan(applicationRequest);
+            PostLoansResponse loanResponse = loanHelper.applyForLoan(applicationRequest);
 
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             GetLoansLoanIdInterestRateFrequencyType interestRateFrequencyType = loanDetails.getInterestRateFrequencyType();
             assertNotNull(interestRateFrequencyType);
             assertEquals(interestRateFrequencyType.getId(), Long.valueOf(WHOLE_TERM));
@@ -5584,164 +5480,142 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                     .installmentAmountInMultiplesOf(null)//
                     .loanScheduleType(LoanScheduleType.PROGRESSIVE.toString()) //
             ;//
-            PostLoanProductsResponse loanProductResponse = loanProductHelper.createLoanProduct(product);
+            PostLoanProductsResponse loanProductResponse = loanHelper.createLoanProduct(product);
             PostLoansRequest applicationRequest = applyLP2ProgressiveLoanRequest(clientId, loanProductResponse.getResourceId(),
                     operationDate, 1000.0, 7.0, 6, null);
 
             applicationRequest = applicationRequest.interestCalculationPeriodType(DAYS)
                     .transactionProcessingStrategyCode(LoanProductTestBuilder.ADVANCED_PAYMENT_ALLOCATION_STRATEGY);
 
-            PostLoansResponse loanResponse = loanTransactionHelper.applyLoan(applicationRequest);
+            PostLoansResponse loanResponse = loanHelper.applyForLoan(applicationRequest);
             createdLoanId.set(loanResponse.getLoanId());
 
-            loanTransactionHelper.approveLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(1000.0)).dateFormat(DATETIME_PATTERN)
-                            .approvedOnDate(operationDate).locale("en"));
+            loanHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(1000.0))
+                    .dateFormat(DATETIME_PATTERN).approvedOnDate(operationDate).locale("en"));
 
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate(operationDate)
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate(operationDate)
                     .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(100.0)).locale("en"));
 
             // Before 1st disbursement date
-            HashMap prepayAmounts = loanTransactionHelper.getPrepayAmount(requestSpec, responseSpec, createdLoanId.intValue(),
-                    LocalDate.of(2023, 12, 31));
-            assertEquals(100.0f, prepayAmounts.get("amount"));
-            assertEquals(0.0f, prepayAmounts.get("interestPortion"));
-            assertEquals(100.0f, prepayAmounts.get("principalPortion"));
+            GetLoansLoanIdTransactionsTemplateResponse prepayAmounts = getPrepayAmount(createdLoanId.get(), LocalDate.of(2023, 12, 31));
+            assertEquals(100.0, prepayAmounts.getAmount());
+            assertEquals(0.0, prepayAmounts.getInterestPortion());
+            assertEquals(100.0, prepayAmounts.getPrincipalPortion());
             // On 1st day
-            prepayAmounts = loanTransactionHelper.getPrepayAmount(requestSpec, responseSpec, createdLoanId.intValue(),
-                    LocalDate.of(2024, 1, 1));
-            assertEquals(100.0f, prepayAmounts.get("amount"));
-            assertEquals(0.0f, prepayAmounts.get("interestPortion"));
-            assertEquals(100.0f, prepayAmounts.get("principalPortion"));
+            prepayAmounts = getPrepayAmount(createdLoanId.get(), LocalDate.of(2024, 1, 1));
+            assertEquals(100.0, prepayAmounts.getAmount());
+            assertEquals(0.0, prepayAmounts.getInterestPortion());
+            assertEquals(100.0, prepayAmounts.getPrincipalPortion());
             // On 2nd day
-            prepayAmounts = loanTransactionHelper.getPrepayAmount(requestSpec, responseSpec, createdLoanId.intValue(),
-                    LocalDate.of(2024, 1, 2));
-            assertEquals(100.02f, prepayAmounts.get("amount"));
-            assertEquals(0.02f, prepayAmounts.get("interestPortion"));
-            assertEquals(100.0f, prepayAmounts.get("principalPortion"));
+            prepayAmounts = getPrepayAmount(createdLoanId.get(), LocalDate.of(2024, 1, 2));
+            assertEquals(100.02, prepayAmounts.getAmount());
+            assertEquals(0.02, prepayAmounts.getInterestPortion());
+            assertEquals(100.0, prepayAmounts.getPrincipalPortion());
             // On due date of 1st period
-            prepayAmounts = loanTransactionHelper.getPrepayAmount(requestSpec, responseSpec, createdLoanId.intValue(),
-                    LocalDate.of(2024, 2, 1));
-            assertEquals(100.58f, prepayAmounts.get("amount"));
-            assertEquals(0.58f, prepayAmounts.get("interestPortion"));
-            assertEquals(100.0f, prepayAmounts.get("principalPortion"));
+            prepayAmounts = getPrepayAmount(createdLoanId.get(), LocalDate.of(2024, 2, 1));
+            assertEquals(100.58, prepayAmounts.getAmount());
+            assertEquals(0.58, prepayAmounts.getInterestPortion());
+            assertEquals(100.0, prepayAmounts.getPrincipalPortion());
             // On the 1st day of 2nd period
-            prepayAmounts = loanTransactionHelper.getPrepayAmount(requestSpec, responseSpec, createdLoanId.intValue(),
-                    LocalDate.of(2024, 2, 2));
-            assertEquals(100.60f, prepayAmounts.get("amount"));
-            assertEquals(0.60f, prepayAmounts.get("interestPortion"));
-            assertEquals(100.0f, prepayAmounts.get("principalPortion"));
+            prepayAmounts = getPrepayAmount(createdLoanId.get(), LocalDate.of(2024, 2, 2));
+            assertEquals(100.60, prepayAmounts.getAmount());
+            assertEquals(0.60, prepayAmounts.getInterestPortion());
+            assertEquals(100.0, prepayAmounts.getPrincipalPortion());
             // In the middle of 2nd period (15 Feb)
-            prepayAmounts = loanTransactionHelper.getPrepayAmount(requestSpec, responseSpec, createdLoanId.intValue(),
-                    LocalDate.of(2024, 2, 15));
-            assertEquals(100.86f, prepayAmounts.get("amount"));
-            assertEquals(0.86f, prepayAmounts.get("interestPortion"));
-            assertEquals(100.0f, prepayAmounts.get("principalPortion"));
+            prepayAmounts = getPrepayAmount(createdLoanId.get(), LocalDate.of(2024, 2, 15));
+            assertEquals(100.86, prepayAmounts.getAmount());
+            assertEquals(0.86, prepayAmounts.getInterestPortion());
+            assertEquals(100.0, prepayAmounts.getPrincipalPortion());
             // On the due date of 2nd period
-            prepayAmounts = loanTransactionHelper.getPrepayAmount(requestSpec, responseSpec, createdLoanId.intValue(),
-                    LocalDate.of(2024, 3, 1));
-            assertEquals(101.16f, prepayAmounts.get("amount"));
-            assertEquals(1.16f, prepayAmounts.get("interestPortion"));
-            assertEquals(100.0f, prepayAmounts.get("principalPortion"));
+            prepayAmounts = getPrepayAmount(createdLoanId.get(), LocalDate.of(2024, 3, 1));
+            assertEquals(101.16, prepayAmounts.getAmount());
+            assertEquals(1.16, prepayAmounts.getInterestPortion());
+            assertEquals(100.0, prepayAmounts.getPrincipalPortion());
         });
         String repaymentDate = "01 February 2024";
         runAt(repaymentDate, () -> {
-            loanTransactionHelper.makeLoanRepayment(createdLoanId.get(), new PostLoansLoanIdTransactionsRequest()
-                    .transactionDate(repaymentDate).dateFormat("dd MMMM yyyy").locale("en").transactionAmount(17.01));
+            transactionHelper.makeLoanRepayment(createdLoanId.get(), new PostLoansLoanIdTransactionsRequest().transactionDate(repaymentDate)
+                    .dateFormat("dd MMMM yyyy").locale("en").transactionAmount(17.01));
             // Before 1st disbursement date
-            HashMap prepayAmounts = loanTransactionHelper.getPrepayAmount(requestSpec, responseSpec, createdLoanId.intValue(),
-                    LocalDate.of(2023, 12, 31));
-            assertEquals(83.57f, prepayAmounts.get("amount"));
-            assertEquals(0.0f, prepayAmounts.get("interestPortion"));
-            assertEquals(83.57f, prepayAmounts.get("principalPortion"));
+            GetLoansLoanIdTransactionsTemplateResponse prepayAmounts = getPrepayAmount(createdLoanId.get(), LocalDate.of(2023, 12, 31));
+            assertEquals(83.57, prepayAmounts.getAmount());
+            assertEquals(0.0, prepayAmounts.getInterestPortion());
+            assertEquals(83.57, prepayAmounts.getPrincipalPortion());
             // On 1st day
-            prepayAmounts = loanTransactionHelper.getPrepayAmount(requestSpec, responseSpec, createdLoanId.intValue(),
-                    LocalDate.of(2024, 1, 1));
-            assertEquals(83.57f, prepayAmounts.get("amount"));
-            assertEquals(0.0f, prepayAmounts.get("interestPortion"));
-            assertEquals(83.57f, prepayAmounts.get("principalPortion"));
+            prepayAmounts = getPrepayAmount(createdLoanId.get(), LocalDate.of(2024, 1, 1));
+            assertEquals(83.57, prepayAmounts.getAmount());
+            assertEquals(0.0, prepayAmounts.getInterestPortion());
+            assertEquals(83.57, prepayAmounts.getPrincipalPortion());
             // On 2nd day
-            prepayAmounts = loanTransactionHelper.getPrepayAmount(requestSpec, responseSpec, createdLoanId.intValue(),
-                    LocalDate.of(2024, 1, 2));
-            assertEquals(83.57f, prepayAmounts.get("amount"));
-            assertEquals(0.00f, prepayAmounts.get("interestPortion"));
-            assertEquals(83.57f, prepayAmounts.get("principalPortion"));
+            prepayAmounts = getPrepayAmount(createdLoanId.get(), LocalDate.of(2024, 1, 2));
+            assertEquals(83.57, prepayAmounts.getAmount());
+            assertEquals(0.00, prepayAmounts.getInterestPortion());
+            assertEquals(83.57, prepayAmounts.getPrincipalPortion());
             // On due date of 1st period
-            prepayAmounts = loanTransactionHelper.getPrepayAmount(requestSpec, responseSpec, createdLoanId.intValue(),
-                    LocalDate.of(2024, 2, 1));
-            assertEquals(83.57f, prepayAmounts.get("amount"));
-            assertEquals(0.0f, prepayAmounts.get("interestPortion"));
-            assertEquals(83.57f, prepayAmounts.get("principalPortion"));
+            prepayAmounts = getPrepayAmount(createdLoanId.get(), LocalDate.of(2024, 2, 1));
+            assertEquals(83.57, prepayAmounts.getAmount());
+            assertEquals(0.0, prepayAmounts.getInterestPortion());
+            assertEquals(83.57, prepayAmounts.getPrincipalPortion());
             // On the 1st day of 2nd period
-            prepayAmounts = loanTransactionHelper.getPrepayAmount(requestSpec, responseSpec, createdLoanId.intValue(),
-                    LocalDate.of(2024, 2, 2));
-            assertEquals(83.59f, prepayAmounts.get("amount"));
-            assertEquals(0.02f, prepayAmounts.get("interestPortion"));
-            assertEquals(83.57f, prepayAmounts.get("principalPortion"));
+            prepayAmounts = getPrepayAmount(createdLoanId.get(), LocalDate.of(2024, 2, 2));
+            assertEquals(83.59, prepayAmounts.getAmount());
+            assertEquals(0.02, prepayAmounts.getInterestPortion());
+            assertEquals(83.57, prepayAmounts.getPrincipalPortion());
             // In the middle of 2nd period (15 Feb)
-            prepayAmounts = loanTransactionHelper.getPrepayAmount(requestSpec, responseSpec, createdLoanId.intValue(),
-                    LocalDate.of(2024, 2, 15));
-            assertEquals(83.81f, prepayAmounts.get("amount"));
-            assertEquals(0.24f, prepayAmounts.get("interestPortion"));
-            assertEquals(83.57f, prepayAmounts.get("principalPortion"));
+            prepayAmounts = getPrepayAmount(createdLoanId.get(), LocalDate.of(2024, 2, 15));
+            assertEquals(83.81, prepayAmounts.getAmount());
+            assertEquals(0.24, prepayAmounts.getInterestPortion());
+            assertEquals(83.57, prepayAmounts.getPrincipalPortion());
             // On the due date of 2nd period
-            prepayAmounts = loanTransactionHelper.getPrepayAmount(requestSpec, responseSpec, createdLoanId.intValue(),
-                    LocalDate.of(2024, 3, 1));
-            assertEquals(84.06f, prepayAmounts.get("amount"));
-            assertEquals(0.49f, prepayAmounts.get("interestPortion"));
-            assertEquals(83.57f, prepayAmounts.get("principalPortion"));
+            prepayAmounts = getPrepayAmount(createdLoanId.get(), LocalDate.of(2024, 3, 1));
+            assertEquals(84.06, prepayAmounts.getAmount());
+            assertEquals(0.49, prepayAmounts.getInterestPortion());
+            assertEquals(83.57, prepayAmounts.getPrincipalPortion());
         });
 
         String secondRepaymentDate = "15 February 2024";
         runAt(secondRepaymentDate, () -> {
-            loanTransactionHelper.makeLoanRepayment(createdLoanId.get(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeLoanRepayment(createdLoanId.get(), new PostLoansLoanIdTransactionsRequest()
                     .transactionDate(secondRepaymentDate).dateFormat("dd MMMM yyyy").locale("en").transactionAmount(5.0));
             // Before 1st disbursement date
-            HashMap prepayAmounts = loanTransactionHelper.getPrepayAmount(requestSpec, responseSpec, createdLoanId.intValue(),
-                    LocalDate.of(2023, 12, 31));
-            assertEquals(78.57f, prepayAmounts.get("amount"));
-            assertEquals(0.0f, prepayAmounts.get("interestPortion"));
-            assertEquals(78.57f, prepayAmounts.get("principalPortion"));
+            GetLoansLoanIdTransactionsTemplateResponse prepayAmounts = getPrepayAmount(createdLoanId.get(), LocalDate.of(2023, 12, 31));
+            assertEquals(78.57, prepayAmounts.getAmount());
+            assertEquals(0.0, prepayAmounts.getInterestPortion());
+            assertEquals(78.57, prepayAmounts.getPrincipalPortion());
             // On 1st day
-            prepayAmounts = loanTransactionHelper.getPrepayAmount(requestSpec, responseSpec, createdLoanId.intValue(),
-                    LocalDate.of(2024, 1, 1));
-            assertEquals(78.57f, prepayAmounts.get("amount"));
-            assertEquals(0.0f, prepayAmounts.get("interestPortion"));
-            assertEquals(78.57f, prepayAmounts.get("principalPortion"));
+            prepayAmounts = getPrepayAmount(createdLoanId.get(), LocalDate.of(2024, 1, 1));
+            assertEquals(78.57, prepayAmounts.getAmount());
+            assertEquals(0.0, prepayAmounts.getInterestPortion());
+            assertEquals(78.57, prepayAmounts.getPrincipalPortion());
             // On 2nd day
-            prepayAmounts = loanTransactionHelper.getPrepayAmount(requestSpec, responseSpec, createdLoanId.intValue(),
-                    LocalDate.of(2024, 1, 2));
-            assertEquals(78.57f, prepayAmounts.get("amount"));
-            assertEquals(0.00f, prepayAmounts.get("interestPortion"));
-            assertEquals(78.57f, prepayAmounts.get("principalPortion"));
+            prepayAmounts = getPrepayAmount(createdLoanId.get(), LocalDate.of(2024, 1, 2));
+            assertEquals(78.57, prepayAmounts.getAmount());
+            assertEquals(0.00, prepayAmounts.getInterestPortion());
+            assertEquals(78.57, prepayAmounts.getPrincipalPortion());
             // On due date of 1st period
-            prepayAmounts = loanTransactionHelper.getPrepayAmount(requestSpec, responseSpec, createdLoanId.intValue(),
-                    LocalDate.of(2024, 2, 1));
-            assertEquals(78.57f, prepayAmounts.get("amount"));
-            assertEquals(0.0f, prepayAmounts.get("interestPortion"));
-            assertEquals(78.57f, prepayAmounts.get("principalPortion"));
+            prepayAmounts = getPrepayAmount(createdLoanId.get(), LocalDate.of(2024, 2, 1));
+            assertEquals(78.57, prepayAmounts.getAmount());
+            assertEquals(0.0, prepayAmounts.getInterestPortion());
+            assertEquals(78.57, prepayAmounts.getPrincipalPortion());
             // On the 1st day of 2nd period
-            prepayAmounts = loanTransactionHelper.getPrepayAmount(requestSpec, responseSpec, createdLoanId.intValue(),
-                    LocalDate.of(2024, 2, 2));
-            assertEquals(78.59f, prepayAmounts.get("amount"));
-            assertEquals(0.02f, prepayAmounts.get("interestPortion"));
-            assertEquals(78.57f, prepayAmounts.get("principalPortion"));
+            prepayAmounts = getPrepayAmount(createdLoanId.get(), LocalDate.of(2024, 2, 2));
+            assertEquals(78.59, prepayAmounts.getAmount());
+            assertEquals(0.02, prepayAmounts.getInterestPortion());
+            assertEquals(78.57, prepayAmounts.getPrincipalPortion());
             // In the middle of 2nd period (15 Feb)
-            prepayAmounts = loanTransactionHelper.getPrepayAmount(requestSpec, responseSpec, createdLoanId.intValue(),
-                    LocalDate.of(2024, 2, 15));
-            assertEquals(78.81f, prepayAmounts.get("amount"));
-            assertEquals(0.24f, prepayAmounts.get("interestPortion"));
-            assertEquals(78.57f, prepayAmounts.get("principalPortion"));
+            prepayAmounts = getPrepayAmount(createdLoanId.get(), LocalDate.of(2024, 2, 15));
+            assertEquals(78.81, prepayAmounts.getAmount());
+            assertEquals(0.24, prepayAmounts.getInterestPortion());
+            assertEquals(78.57, prepayAmounts.getPrincipalPortion());
             // On the due date of 2nd period
-            prepayAmounts = loanTransactionHelper.getPrepayAmount(requestSpec, responseSpec, createdLoanId.intValue(),
-                    LocalDate.of(2024, 3, 1));
-            assertEquals(79.04f, prepayAmounts.get("amount"));
-            assertEquals(0.47f, prepayAmounts.get("interestPortion"));
-            assertEquals(78.57f, prepayAmounts.get("principalPortion"));
+            prepayAmounts = getPrepayAmount(createdLoanId.get(), LocalDate.of(2024, 3, 1));
+            assertEquals(79.04, prepayAmounts.getAmount());
+            assertEquals(0.47, prepayAmounts.getInterestPortion());
+            assertEquals(78.57, prepayAmounts.getPrincipalPortion());
 
-            loanTransactionHelper.makeLoanRepayment(createdLoanId.get(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeLoanRepayment(createdLoanId.get(), new PostLoansLoanIdTransactionsRequest()
                     .transactionDate(secondRepaymentDate).dateFormat("dd MMMM yyyy").locale("en").transactionAmount(78.81));
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(createdLoanId.get());
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(createdLoanId.get());
             assertTrue(loanDetails.getStatus().getClosedObligationsMet());
         });
 
@@ -5766,50 +5640,41 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                     .installmentAmountInMultiplesOf(null)//
                     .loanScheduleType(LoanScheduleType.PROGRESSIVE.toString()) //
             ;//
-            PostLoanProductsResponse loanProductResponse = loanProductHelper.createLoanProduct(product);
+            PostLoanProductsResponse loanProductResponse = loanHelper.createLoanProduct(product);
             PostLoansRequest applicationRequest = applyLoanRequest(clientId, loanProductResponse.getResourceId(), "01 January 2024", 400.0,
                     6);
 
             applicationRequest = applicationRequest.interestCalculationPeriodType(DAYS).interestRatePerPeriod(BigDecimal.ZERO)
                     .transactionProcessingStrategyCode(LoanProductTestBuilder.ADVANCED_PAYMENT_ALLOCATION_STRATEGY);
 
-            PostLoansResponse loanResponse = loanTransactionHelper.applyLoan(applicationRequest);
+            PostLoansResponse loanResponse = loanHelper.applyForLoan(applicationRequest);
             createdLoanId.set(loanResponse.getLoanId());
 
-            loanTransactionHelper.approveLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(400.0)).dateFormat(DATETIME_PATTERN)
-                            .approvedOnDate("01 January 2024").locale("en"));
+            loanHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(400.0))
+                    .dateFormat(DATETIME_PATTERN).approvedOnDate("01 January 2024").locale("en"));
 
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().actualDisbursementDate("01 January 2024").dateFormat(DATETIME_PATTERN)
-                            .transactionAmount(BigDecimal.valueOf(400.0)).locale("en"));
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate("01 January 2024")
+                    .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(400.0)).locale("en"));
         });
 
         runAt("02 January 2024", () -> {
             executeInlineCOB(createdLoanId.get());
 
-            final GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(createdLoanId.get());
+            final GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(createdLoanId.get());
             assertEquals(LocalDate.of(2024, 1, 1), loanDetails.getLastClosedBusinessDate());
             final String errorMessage = Utils.uniqueRandomStringGenerator("error.", 40);
             placeHardLockOnLoan(createdLoanId.get(), errorMessage);
         });
 
         runAt("03 January 2024", () -> {
-            Integer roleId = RolesHelper.createRole(requestSpec, responseSpec);
-            Map<String, Boolean> permissionMap = Map.of("REPAYMENT_LOAN", true);
-            RolesHelper.addPermissionsToRole(requestSpec, responseSpec, roleId, permissionMap);
-            final Integer staffId = StaffHelper.createStaff(this.requestSpec, this.responseSpec);
+            // A user without the loan-checker bypass permission triggers a catch-up COB before its repayment lands,
+            // which clears the hard lock and advances the loan's last closed business date.
+            FeignTransactionHelper nonBypassTransactionHelper = new FeignTransactionHelper(
+                    FeignUserHelper.getSimpleUserWithoutBypassPermissionClient());
+            nonBypassTransactionHelper.makeLoanRepayment(createdLoanId.get(), new PostLoansLoanIdTransactionsRequest()
+                    .transactionDate("03 January 2024").dateFormat(DATETIME_PATTERN).locale(LOCALE).transactionAmount(200.0));
 
-            final String operatorUser = Utils.uniqueRandomStringGenerator("user", 8);
-            UserHelper.createUser(this.requestSpec, this.responseSpec, roleId, staffId, operatorUser, UserHelper.SIMPLE_USER_PASSWORD,
-                    "resourceId");
-
-            loanTransactionHelper.makeLoanRepayment(
-                    createdLoanId.get(), new PostLoansLoanIdTransactionsRequest().transactionDate("03 January 2024")
-                            .dateFormat("dd MMMM yyyy").locale("en").transactionAmount(200.0),
-                    operatorUser, UserHelper.SIMPLE_USER_PASSWORD);
-
-            final GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(createdLoanId.get());
+            final GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(createdLoanId.get());
             assertEquals(LocalDate.of(2024, 1, 2), loanDetails.getLastClosedBusinessDate());
         });
     }
@@ -5830,7 +5695,7 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             final Integer rescheduleStrategyMethod = 4; // Adjust last, unpaid period
             PostLoanProductsRequest loanProduct = createOnePeriod30DaysPeriodicAccrualProductWithAdvancedPaymentAllocationAndInterestRecalculation(
                     (double) 80.0, rescheduleStrategyMethod);
-            final PostLoanProductsResponse loanProductResponse = loanProductHelper.createLoanProduct(loanProduct);
+            final PostLoanProductsResponse loanProductResponse = loanHelper.createLoanProduct(loanProduct);
             assertNotNull(loanProductResponse);
 
             PostLoansRequest applicationRequest = applyLoanRequest(clientId, loanProductResponse.getResourceId(), operationDate, 100.0, 6);
@@ -5846,26 +5711,26 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                     .maxOutstandingLoanBalance(BigDecimal.valueOf(10000.0))//
             ;//
 
-            PostLoansResponse loanResponse = loanTransactionHelper.applyLoan(applicationRequest);
+            PostLoansResponse loanResponse = loanHelper.applyForLoan(applicationRequest);
 
-            loanTransactionHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest()//
+            loanHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest()//
                     .approvedLoanAmount(BigDecimal.valueOf(100))//
                     .approvedOnDate(operationDate).dateFormat(DATETIME_PATTERN).locale("en"));//
 
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest()//
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest()//
                     .transactionAmount(BigDecimal.valueOf(100.0))//
                     .actualDisbursementDate(operationDate).dateFormat(DATETIME_PATTERN).locale("en"));//
 
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 125.67, 0.0, 100.0, 0.0, null);
             createdLoanId.set(loanResponse.getLoanId());
         });
 
         runAt("01 February 2024", () -> {
 
-            loanTransactionHelper.makeLoanRepayment(createdLoanId.get(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeLoanRepayment(createdLoanId.get(), new PostLoansLoanIdTransactionsRequest()
                     .transactionDate("01 February 2024").dateFormat("dd MMMM yyyy").locale("en").transactionAmount(21.0));
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(createdLoanId.get());
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(createdLoanId.get());
             validateLoanSummaryBalances(loanDetails, 104.67, 21.0, 86.11, 13.89, null);
         });
 
@@ -5873,14 +5738,13 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             String randomText = Utils.randomStringGenerator("en", 5) + Utils.randomNumberGenerator(6)
                     + Utils.randomStringGenerator("is", 5);
             String transactionExternalId = UUID.randomUUID().toString();
-            Integer chargeOffReasonId = CodeHelper.createChargeOffCodeValue(requestSpec, responseSpec, randomText, 1);
+            Long chargeOffReasonId = codeHelper.createChargeOffCodeValue(randomText, 1);
 
-            loanTransactionHelper.chargeOffLoan(createdLoanId.get(),
-                    new PostLoansLoanIdTransactionsRequest().transactionDate("01 March 2024").locale("en").dateFormat("dd MMMM yyyy")
-                            .externalId(transactionExternalId).chargeOffReasonId((long) chargeOffReasonId));
+            transactionHelper.chargeOffLoan(createdLoanId.get(), new PostLoansLoanIdTransactionsRequest().transactionDate("01 March 2024")
+                    .locale("en").dateFormat("dd MMMM yyyy").externalId(transactionExternalId).chargeOffReasonId(chargeOffReasonId));
 
             // Loan Prepayment (before) Charge-Off transaction - With Interest Recalculation
-            GetLoansLoanIdTransactionsTemplateResponse transactionBefore = loanTransactionHelper
+            GetLoansLoanIdTransactionsTemplateResponse transactionBefore = transactionHelper
                     .retrieveTransactionTemplate(createdLoanId.get(), "prepayLoan", "dd MMMM yyyy", "15 February 2024", "en");
             assertEquals(88.88, transactionBefore.getAmount());
             assertEquals(86.11, transactionBefore.getPrincipalPortion());
@@ -5889,8 +5753,8 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             assertEquals(0.00, transactionBefore.getPenaltyChargesPortion());
 
             // Loan Prepayment (after) Charge-Off transaction - WithOut Interest Recalculation
-            GetLoansLoanIdTransactionsTemplateResponse transactionAfter = loanTransactionHelper
-                    .retrieveTransactionTemplate(createdLoanId.get(), "prepayLoan", "dd MMMM yyyy", "01 March 2024", "en");
+            GetLoansLoanIdTransactionsTemplateResponse transactionAfter = transactionHelper.retrieveTransactionTemplate(createdLoanId.get(),
+                    "prepayLoan", "dd MMMM yyyy", "01 March 2024", "en");
             assertEquals(104.67, transactionAfter.getAmount());
             assertEquals(86.11, transactionAfter.getPrincipalPortion());
             assertEquals(18.56, transactionAfter.getInterestPortion());
@@ -5909,7 +5773,7 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
         final String operationDate = "23 December 2024";
         AtomicLong createdLoanId = new AtomicLong();
         runAt(operationDate, () -> {
-            Long clientId = clientHelper.createClient(ClientHelper.defaultClientCreationRequest()).getClientId();
+            Long clientId = clientHelper.createClient(ClientRequestBuilders.defaultClient()).getClientId();
             PostLoanProductsRequest product = createOnePeriod30DaysLongNoInterestPeriodicAccrualProductWithAdvancedPaymentAllocation()
                     .interestRatePerPeriod(4.0).interestCalculationPeriodType(RepaymentFrequencyType.DAYS).interestRateFrequencyType(YEARS)
                     .daysInMonthType(DaysInMonthType.ACTUAL).daysInYearType(DaysInYearType.DAYS_360).numberOfRepayments(3)//
@@ -5923,31 +5787,31 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                     .overAppliedNumber(null)//
                     .installmentAmountInMultiplesOf(null)//
             ;//
-            PostLoanProductsResponse loanProductResponse = loanProductHelper.createLoanProduct(product);
+            PostLoanProductsResponse loanProductResponse = loanHelper.createLoanProduct(product);
             PostLoansRequest applicationRequest = applyLoanRequest(clientId, loanProductResponse.getResourceId(), operationDate, 100.0, 3)
                     .interestRatePerPeriod(BigDecimal.valueOf(4.0));
 
             applicationRequest = applicationRequest.interestCalculationPeriodType(DAYS)
                     .transactionProcessingStrategyCode(LoanProductTestBuilder.ADVANCED_PAYMENT_ALLOCATION_STRATEGY);
 
-            PostLoansResponse loanResponse = loanTransactionHelper.applyLoan(applicationRequest);
+            PostLoansResponse loanResponse = loanHelper.applyForLoan(applicationRequest);
             createdLoanId.set(loanResponse.getLoanId());
 
-            loanTransactionHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest()
-                    .approvedLoanAmount(BigDecimal.valueOf(100.0)).dateFormat(DATETIME_PATTERN).approvedOnDate(operationDate).locale("en"));
+            loanHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(100.0))
+                    .dateFormat(DATETIME_PATTERN).approvedOnDate(operationDate).locale("en"));
 
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate(operationDate)
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate(operationDate)
                     .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(100.0)).locale("en"));
 
             // After Disbursement we are expecting amount in Zero
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             assertEquals(BigDecimal.ZERO, loanDetails.getSummary().getTotalUnpaidPayableDueInterest().stripTrailingZeros());
             assertEquals(BigDecimal.ZERO, loanDetails.getSummary().getTotalUnpaidPayableNotDueInterest().stripTrailingZeros());
         });
 
         runAt("23 March 2025", () -> {
             executeInlineCOB(createdLoanId.get());
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(createdLoanId.get());
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(createdLoanId.get());
             // totalUnpaidPayableDueInterest → Total outstanding interest amount on all the periods that are before
             assertEquals(loanDetails.getSummary().getInterestCharged().stripTrailingZeros(),
                     loanDetails.getSummary().getTotalUnpaidPayableDueInterest().stripTrailingZeros());
@@ -5968,7 +5832,7 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
         final String operationDate = "1 January 2024";
         AtomicLong createdLoanId = new AtomicLong();
         runAt(operationDate, () -> {
-            Long clientId = clientHelper.createClient(ClientHelper.defaultClientCreationRequest()).getClientId();
+            Long clientId = clientHelper.createClient(ClientRequestBuilders.defaultClient()).getClientId();
             PostLoanProductsRequest product = createOnePeriod30DaysLongNoInterestPeriodicAccrualProductWithAdvancedPaymentAllocation()
                     .interestRatePerPeriod(12.0).interestCalculationPeriodType(RepaymentFrequencyType.DAYS).numberOfRepayments(4)//
                     .repaymentEvery(1)//
@@ -5981,32 +5845,32 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                     .overAppliedCalculationType("flat")//
                     .overAppliedNumber(500)//
             ;//
-            PostLoanProductsResponse loanProductResponse = loanProductHelper.createLoanProduct(product);
+            PostLoanProductsResponse loanProductResponse = loanHelper.createLoanProduct(product);
             PostLoansRequest applicationRequest = applyLoanRequest(clientId, loanProductResponse.getResourceId(), operationDate, 1000.0, 4)
                     .transactionProcessingStrategyCode("advanced-payment-allocation-strategy")//
                     .interestRatePerPeriod(BigDecimal.valueOf(12.0));
 
-            PostLoansResponse loanResponse = loanTransactionHelper.applyLoan(applicationRequest);
+            PostLoansResponse loanResponse = loanHelper.applyForLoan(applicationRequest);
             createdLoanId.set(loanResponse.getLoanId());
 
-            loanTransactionHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest()
-                    .approvedLoanAmount(BigDecimal.valueOf(1300)).dateFormat(DATETIME_PATTERN).approvedOnDate(operationDate).locale("en"));
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(createdLoanId.get());
+            loanHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(1300))
+                    .dateFormat(DATETIME_PATTERN).approvedOnDate(operationDate).locale("en"));
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(createdLoanId.get());
             assertTrue(loanDetails.getStatus().getWaitingForDisbursal());
             assertEquals("1300.000000", loanDetails.getApprovedPrincipal().toString());
 
             CallFailedRuntimeException callFailedRuntimeException = Assertions.assertThrows(CallFailedRuntimeException.class,
-                    () -> loanTransactionHelper.disburseLoan(loanResponse.getLoanId(),
+                    () -> loanHelper.disburseLoan(loanResponse.getLoanId(),
                             new PostLoansLoanIdRequest().actualDisbursementDate(operationDate).dateFormat(DATETIME_PATTERN).locale("en")
                                     .transactionAmount(BigDecimal.valueOf(1550.0))));
 
             Assertions.assertTrue(callFailedRuntimeException.getMessage()
                     .contains("Loan disbursal amount can't be greater than maximum applied loan amount calculation"));
 
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate(operationDate)
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate(operationDate)
                     .dateFormat(DATETIME_PATTERN).locale("en").transactionAmount(BigDecimal.valueOf(1450.0)));
 
-            loanDetails = loanTransactionHelper.getLoanDetails(createdLoanId.get());
+            loanDetails = loanHelper.getLoanDetails(createdLoanId.get());
             assertTrue(loanDetails.getStatus().getActive());
             assertEquals("1450.000000", loanDetails.getSummary().getPrincipalOutstanding().toString());
         });
@@ -6021,7 +5885,7 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
         AtomicLong createdLoanChargeId = new AtomicLong();
         final BigDecimal interestRatePerPeriod = BigDecimal.valueOf(11.32);
         final BigDecimal principalAmount = BigDecimal.valueOf(135.94);
-        final Long delinquencyBucketId = DelinquencyBucketsHelper.createBucket(List.of(//
+        final Long delinquencyBucketId = delinquencyHelper.createBucket(List.of(//
                 Pair.of(1, 10), //
                 Pair.of(11, 30), //
                 Pair.of(31, 60), //
@@ -6032,7 +5896,7 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             final ArrayList<String> interestRefundTypes = new ArrayList<String>();
             interestRefundTypes.add("PAYOUT_REFUND");
             interestRefundTypes.add("MERCHANT_ISSUED_REFUND");
-            Long clientId = clientHelper.createClient(ClientHelper.defaultClientCreationRequest()).getClientId();
+            Long clientId = clientHelper.createClient(ClientRequestBuilders.defaultClient()).getClientId();
             PostLoanProductsRequest product = createOnePeriod30DaysLongNoInterestPeriodicAccrualProductWithAdvancedPaymentAllocation()
                     .interestRatePerPeriod(interestRatePerPeriod.doubleValue()).interestRateFrequencyType(YEARS)//
                     .daysInMonthType(DaysInMonthType.DAYS_30)//
@@ -6057,7 +5921,7 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                     .rescheduleStrategyMethod(LoanRescheduleStrategyMethod.ADJUST_LAST_UNPAID_PERIOD.getValue())//
                     .recalculationRestFrequencyType(2)//
                     .recalculationRestFrequencyInterval(1);
-            PostLoanProductsResponse loanProductResponse = loanProductHelper.createLoanProduct(product);
+            PostLoanProductsResponse loanProductResponse = loanHelper.createLoanProduct(product);
             PostLoansRequest applicationRequest = applyLoanRequest(clientId, loanProductResponse.getResourceId(), operationDate,
                     principalAmount.doubleValue(), 6).interestCalculationPeriodType(DAYS)//
                     .transactionProcessingStrategyCode(LoanProductTestBuilder.ADVANCED_PAYMENT_ALLOCATION_STRATEGY)//
@@ -6067,45 +5931,44 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                     .loanTermFrequency(6)//
                     .loanTermFrequencyType(MONTHS);
 
-            PostLoansResponse loanResponse = loanTransactionHelper.applyLoan(applicationRequest);
+            PostLoansResponse loanResponse = loanHelper.applyForLoan(applicationRequest);
             createdLoanId.set(loanResponse.getLoanId());
 
-            loanTransactionHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().approvedLoanAmount(principalAmount)
+            loanHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().approvedLoanAmount(principalAmount)
                     .dateFormat(DATETIME_PATTERN).approvedOnDate(operationDate).locale("en"));
 
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate(operationDate)
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate(operationDate)
                     .dateFormat(DATETIME_PATTERN).locale("en").transactionAmount(principalAmount));
 
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(createdLoanId.get());
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(createdLoanId.get());
             assertTrue(loanDetails.getStatus().getActive());
         });
 
         runAt("22 June 2025", () -> {
-            PostLoansLoanIdTransactionsResponse repayment = loanTransactionHelper.makeLoanRepayment(createdLoanId.get(),
-                    new PostLoansLoanIdTransactionsRequest().transactionDate("22 June 2025").dateFormat("dd MMMM yyyy").locale("en")
-                            .transactionAmount(25.0));
+            transactionHelper.makeLoanRepayment(createdLoanId.get(), new PostLoansLoanIdTransactionsRequest()
+                    .transactionDate("22 June 2025").dateFormat("dd MMMM yyyy").locale("en").transactionAmount(25.0));
         });
 
         runAt("13 July 2025", () -> {
-            PostLoansLoanIdTransactionsResponse repayment = loanTransactionHelper.makeLoanRepayment(createdLoanId.get(),
+            PostLoansLoanIdTransactionsResponse repayment = transactionHelper.makeLoanRepayment(createdLoanId.get(),
                     new PostLoansLoanIdTransactionsRequest().transactionDate("13 July 2025").dateFormat("dd MMMM yyyy").locale("en")
                             .transactionAmount(23.41));
             secondRepayment.set(repayment.getResourceId());
         });
 
         runAt("16 July 2025", () -> {
-            loanTransactionHelper.makeMerchantIssuedRefund(createdLoanId.get(), new PostLoansLoanIdTransactionsRequest()
+            transactionHelper.makeMerchantIssuedRefund(createdLoanId.get(), new PostLoansLoanIdTransactionsRequest()
                     .dateFormat(DATETIME_PATTERN).transactionDate("16 July 2025").locale("en").transactionAmount(135.94));
         });
 
         runAt("18 July 2025", () -> {
             CobHelper.fastForwardLoansLastCOBDate(createdLoanId.get(), "18 July 2025");
             verifyLastClosedBusinessDate(createdLoanId.get(), "18 July 2025");
-            loanTransactionHelper.reverseLoanTransaction(createdLoanId.get(), secondRepayment.get(),
+            transactionHelper.reverseLoanTransaction(createdLoanId.get(), secondRepayment.get(),
                     new PostLoansLoanIdTransactionsTransactionIdRequest().dateFormat(DATETIME_PATTERN).transactionDate("18 July 2025")
                             .transactionAmount(0.0).locale("en"));
 
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(createdLoanId.get());
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(createdLoanId.get());
             assertTrue(loanDetails.getStatus().getOverpaid());
             verifyTransactions(createdLoanId.get(), //
                     transaction(135.94, "Disbursement", "13 June 2025", 135.94, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
@@ -6121,7 +5984,7 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
             createdLoanChargeId.set(addCharge(createdLoanId.get(), false, 2.8, "18 July 2025"));
             LOG.info("------------------------------ REPROCESSING LOAN ---------------------------------------");
 
-            loanDetails = loanTransactionHelper.getLoanDetails(createdLoanId.get());
+            loanDetails = loanHelper.getLoanDetails(createdLoanId.get());
             assertTrue(loanDetails.getStatus().getOverpaid());
             verifyTransactions(createdLoanId.get(), //
                     transaction(135.94, "Disbursement", "13 June 2025", 135.94, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
@@ -6136,7 +5999,7 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                     transaction(2.80, "Accrual", "18 July 2025", 0.0, 0.0, 0.00, 2.80, 0.0, 0.0, 0.0));
 
             CobHelper.reprocessLoan(createdLoanId.get());
-            loanDetails = loanTransactionHelper.getLoanDetails(createdLoanId.get());
+            loanDetails = loanHelper.getLoanDetails(createdLoanId.get());
             assertTrue(loanDetails.getStatus().getOverpaid());
 
             verifyTransactions(createdLoanId.get(), //
@@ -6156,111 +6019,116 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
     // UC157: Progressive loan with Accrual Activity reverse-replay
     @Test
     public void uc157() {
-        globalConfigurationHelper.updateGlobalConfiguration(GlobalConfigurationConstants.ENABLE_AUTO_GENERATED_EXTERNAL_ID,
-                new PutGlobalConfigurationsRequest().enabled(true));
-        final String operationDate = "13 September 2025";
-        AtomicLong createdLoanId = new AtomicLong();
-        GetLoansLoanIdTransactions[] accrualActivityId = new GetLoansLoanIdTransactions[1];
-        final BigDecimal interestRatePerPeriod = BigDecimal.valueOf(11.32);
-        final BigDecimal principalAmount = BigDecimal.valueOf(135.94);
-        final Long delinquencyBucketId = DelinquencyBucketsHelper.createBucket(List.of(//
-                Pair.of(1, 10), //
-                Pair.of(11, 30), //
-                Pair.of(31, 60), //
-                Pair.of(61, null)//
-        ));
+        try {
+            globalConfigurationHelper.updateGlobalConfiguration(GlobalConfigurationConstants.ENABLE_AUTO_GENERATED_EXTERNAL_ID,
+                    new PutGlobalConfigurationsRequest().enabled(true));
+            final String operationDate = "13 September 2025";
+            AtomicLong createdLoanId = new AtomicLong();
+            GetLoansLoanIdTransactions[] accrualActivityId = new GetLoansLoanIdTransactions[1];
+            final BigDecimal interestRatePerPeriod = BigDecimal.valueOf(11.32);
+            final BigDecimal principalAmount = BigDecimal.valueOf(135.94);
+            final Long delinquencyBucketId = delinquencyHelper.createBucket(List.of(//
+                    Pair.of(1, 10), //
+                    Pair.of(11, 30), //
+                    Pair.of(31, 60), //
+                    Pair.of(61, null)//
+            ));
 
-        runAt(operationDate, () -> {
-            final ArrayList<String> interestRefundTypes = new ArrayList<String>();
-            interestRefundTypes.add("PAYOUT_REFUND");
-            interestRefundTypes.add("MERCHANT_ISSUED_REFUND");
-            Long clientId = ClientHelper.createClient(ClientHelper.defaultClientCreationRequest()).getClientId();
-            PostLoanProductsRequest product = createOnePeriod30DaysLongNoInterestPeriodicAccrualProductWithAdvancedPaymentAllocation()
-                    .interestRatePerPeriod(interestRatePerPeriod.doubleValue()).interestRateFrequencyType(YEARS)//
-                    .daysInMonthType(DaysInMonthType.DAYS_30)//
-                    .daysInYearType(DaysInYearType.DAYS_360)//
-                    .numberOfRepayments(6)//
-                    .repaymentEvery(1)//
-                    .repaymentFrequencyType(2L)//
-                    .chargeOffBehaviour("ZERO_INTEREST")//
-                    .repaymentFrequencyType(RepaymentFrequencyType.MONTHS.longValue())//
-                    .repaymentStartDateType(LoanProduct.RepaymentStartDateTypeEnum.SUBMITTED_ON_DATE.ordinal())//
-                    .enableDownPayment(false)//
-                    .enableAccrualActivityPosting(true)//
-                    .allowPartialPeriodInterestCalculation(null)//
-                    .enableAutoRepaymentForDownPayment(null)//
-                    .isInterestRecalculationEnabled(true)//
-                    .delinquencyBucketId(delinquencyBucketId.longValue())//
-                    .enableInstallmentLevelDelinquency(true)//
-                    .interestRecalculationCompoundingMethod(0)//
-                    .interestCalculationPeriodType(InterestCalculationPeriodType.DAILY)//
-                    .installmentAmountInMultiplesOf(null)//
-                    .supportedInterestRefundTypes(interestRefundTypes) //
-                    .rescheduleStrategyMethod(LoanRescheduleStrategyMethod.ADJUST_LAST_UNPAID_PERIOD.getValue())//
-                    .recalculationRestFrequencyType(2)//
-                    .recalculationRestFrequencyInterval(1)//
-                    .enableAccrualActivityPosting(true);
-            PostLoanProductsResponse loanProductResponse = loanProductHelper.createLoanProduct(product);
-            PostLoansRequest applicationRequest = applyLoanRequest(clientId, loanProductResponse.getResourceId(), operationDate,
-                    principalAmount.doubleValue(), 6).interestCalculationPeriodType(DAYS)//
-                    .transactionProcessingStrategyCode(LoanProductTestBuilder.ADVANCED_PAYMENT_ALLOCATION_STRATEGY)//
-                    .interestRatePerPeriod(interestRatePerPeriod)//
-                    .repaymentEvery(1)//
-                    .repaymentFrequencyType(MONTHS)//
-                    .loanTermFrequency(6)//
-                    .loanTermFrequencyType(MONTHS);
+            runAt(operationDate, () -> {
+                final ArrayList<String> interestRefundTypes = new ArrayList<String>();
+                interestRefundTypes.add("PAYOUT_REFUND");
+                interestRefundTypes.add("MERCHANT_ISSUED_REFUND");
+                Long clientId = clientHelper.createClient(ClientRequestBuilders.defaultClient()).getClientId();
+                PostLoanProductsRequest product = createOnePeriod30DaysLongNoInterestPeriodicAccrualProductWithAdvancedPaymentAllocation()
+                        .interestRatePerPeriod(interestRatePerPeriod.doubleValue()).interestRateFrequencyType(YEARS)//
+                        .daysInMonthType(DaysInMonthType.DAYS_30)//
+                        .daysInYearType(DaysInYearType.DAYS_360)//
+                        .numberOfRepayments(6)//
+                        .repaymentEvery(1)//
+                        .repaymentFrequencyType(2L)//
+                        .chargeOffBehaviour("ZERO_INTEREST")//
+                        .repaymentFrequencyType(RepaymentFrequencyType.MONTHS.longValue())//
+                        .repaymentStartDateType(LoanProduct.RepaymentStartDateTypeEnum.SUBMITTED_ON_DATE.ordinal())//
+                        .enableDownPayment(false)//
+                        .enableAccrualActivityPosting(true)//
+                        .allowPartialPeriodInterestCalculation(null)//
+                        .enableAutoRepaymentForDownPayment(null)//
+                        .isInterestRecalculationEnabled(true)//
+                        .delinquencyBucketId(delinquencyBucketId.longValue())//
+                        .enableInstallmentLevelDelinquency(true)//
+                        .interestRecalculationCompoundingMethod(0)//
+                        .interestCalculationPeriodType(InterestCalculationPeriodType.DAILY)//
+                        .installmentAmountInMultiplesOf(null)//
+                        .supportedInterestRefundTypes(interestRefundTypes) //
+                        .rescheduleStrategyMethod(LoanRescheduleStrategyMethod.ADJUST_LAST_UNPAID_PERIOD.getValue())//
+                        .recalculationRestFrequencyType(2)//
+                        .recalculationRestFrequencyInterval(1)//
+                        .enableAccrualActivityPosting(true);
+                PostLoanProductsResponse loanProductResponse = loanHelper.createLoanProduct(product);
+                PostLoansRequest applicationRequest = applyLoanRequest(clientId, loanProductResponse.getResourceId(), operationDate,
+                        principalAmount.doubleValue(), 6).interestCalculationPeriodType(DAYS)//
+                        .transactionProcessingStrategyCode(LoanProductTestBuilder.ADVANCED_PAYMENT_ALLOCATION_STRATEGY)//
+                        .interestRatePerPeriod(interestRatePerPeriod)//
+                        .repaymentEvery(1)//
+                        .repaymentFrequencyType(MONTHS)//
+                        .loanTermFrequency(6)//
+                        .loanTermFrequencyType(MONTHS);
 
-            PostLoansResponse loanResponse = loanTransactionHelper.applyLoan(applicationRequest);
-            createdLoanId.set(loanResponse.getLoanId());
+                PostLoansResponse loanResponse = loanHelper.applyForLoan(applicationRequest);
+                createdLoanId.set(loanResponse.getLoanId());
 
-            loanTransactionHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().approvedLoanAmount(principalAmount)
-                    .dateFormat(DATETIME_PATTERN).approvedOnDate(operationDate).locale("en"));
+                loanHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().approvedLoanAmount(principalAmount)
+                        .dateFormat(DATETIME_PATTERN).approvedOnDate(operationDate).locale("en"));
 
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate(operationDate)
-                    .dateFormat(DATETIME_PATTERN).locale("en").transactionAmount(principalAmount));
+                loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate(operationDate)
+                        .dateFormat(DATETIME_PATTERN).locale("en").transactionAmount(principalAmount));
 
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(createdLoanId.get());
-            assertTrue(loanDetails.getStatus().getActive());
-        });
+                GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(createdLoanId.get());
+                assertTrue(loanDetails.getStatus().getActive());
+            });
 
-        runAt("22 October 2025", () -> {
+            runAt("22 October 2025", () -> {
 
-            executeInlineCOB(createdLoanId.get());
-            verifyTransactions(createdLoanId.get(), //
-                    transaction(135.94, "Disbursement", "13 September 2025", 135.94, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
-                    transaction(1.28, "Accrual Activity", "13 October 2025", 0.0, 0.0, 1.28, 0.0, 0.0, 0.0, 0.0),
-                    transaction(1.61, "Accrual", "21 October 2025", 0.0, 0.0, 1.61, 0.0, 0.0, 0.0, 0.0));
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(createdLoanId.get());
-            loanDetails.getTransactions().stream().filter(t -> "loanTransactionType.accrualActivity".equals(t.getType().getCode()))
-                    .findFirst().ifPresent(t -> {
-                        accrualActivityId[0] = t;
-                    });
-            assertNotNull(accrualActivityId[0]);
-            assertNotNull(accrualActivityId[0].getExternalId());
+                executeInlineCOB(createdLoanId.get());
+                verifyTransactions(createdLoanId.get(), //
+                        transaction(135.94, "Disbursement", "13 September 2025", 135.94, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+                        transaction(1.28, "Accrual Activity", "13 October 2025", 0.0, 0.0, 1.28, 0.0, 0.0, 0.0, 0.0),
+                        transaction(1.61, "Accrual", "21 October 2025", 0.0, 0.0, 1.61, 0.0, 0.0, 0.0, 0.0));
+                GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(createdLoanId.get());
+                loanDetails.getTransactions().stream().filter(t -> "loanTransactionType.accrualActivity".equals(t.getType().getCode()))
+                        .findFirst().ifPresent(t -> {
+                            accrualActivityId[0] = t;
+                        });
+                assertNotNull(accrualActivityId[0]);
+                assertNotNull(accrualActivityId[0].getExternalId());
 
-            loanTransactionHelper.makeLoanRepayment(createdLoanId.get(), new PostLoansLoanIdTransactionsRequest() //
-                    .transactionDate("13 September 2025") //
-                    .transactionAmount(135.94) //
-                    .locale("en") //
-                    .dateFormat(DATETIME_PATTERN)); //
+                transactionHelper.makeLoanRepayment(createdLoanId.get(), new PostLoansLoanIdTransactionsRequest() //
+                        .transactionDate("13 September 2025") //
+                        .transactionAmount(135.94) //
+                        .locale("en") //
+                        .dateFormat(DATETIME_PATTERN)); //
 
-            GetLoansLoanIdTransactionsTransactionIdResponse loanTransactionDetails = loanTransactionHelper
-                    .getLoanTransactionDetails(createdLoanId.get(), accrualActivityId[0].getId());
-            assertNotNull(loanTransactionDetails.getExternalId());
-            assertEquals(LocalDate.of(2025, 10, 22), loanTransactionDetails.getReversedOnDate());
-        });
+                GetLoansLoanIdTransactionsTransactionIdResponse loanTransactionDetails = transactionHelper
+                        .getLoanTransactionDetails(createdLoanId.get(), accrualActivityId[0].getId());
+                assertNotNull(loanTransactionDetails.getExternalId());
+                assertEquals(LocalDate.of(2025, 10, 22), loanTransactionDetails.getReversedOnDate());
+            });
+        } finally {
+            globalConfigurationHelper.updateGlobalConfiguration(GlobalConfigurationConstants.ENABLE_AUTO_GENERATED_EXTERNAL_ID,
+                    new PutGlobalConfigurationsRequest().enabled(false));
+        }
     }
 
     // UC158: Repayment schedule handling for flat cumulative multi-disbursement
     @Test
     public void uc158() {
         AtomicLong loanIdRef = new AtomicLong();
-        Long clientId = clientHelper.createClient(ClientHelper.defaultClientCreationRequest()).getClientId();
+        Long clientId = clientHelper.createClient(ClientRequestBuilders.defaultClient()).getClientId();
         final BigDecimal principalAmount = BigDecimal.valueOf(2000.0);
 
         runAt("1 January 2024", () -> {
             // Create a Cumulative Multidisbursal and Flat Interest Type
-            PostLoanProductsResponse loanProductResponse = loanProductHelper.createLoanProduct(
+            PostLoanProductsResponse loanProductResponse = loanHelper.createLoanProduct(
                     createOnePeriod30DaysLongNoInterestPeriodicAccrualProduct().interestType(InterestType.FLAT).daysInMonthType(30)//
                             .transactionProcessingStrategyCode(LoanProductTestBuilder.DEFAULT_STRATEGY).interestRateFrequencyType(YEARS)
                             .daysInYearType(365).loanScheduleType(LoanScheduleType.CUMULATIVE.toString()).repaymentEvery(1)
@@ -6277,16 +6145,15 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                     .repaymentFrequencyType(MONTHS)//
                     .loanTermFrequency(3)//
                     .loanTermFrequencyType(MONTHS);
-            PostLoansResponse loanResponse = loanTransactionHelper.applyLoan(applicationRequest);
+            PostLoansResponse loanResponse = loanHelper.applyForLoan(applicationRequest);
 
-            loanTransactionHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().approvedLoanAmount(principalAmount)
+            loanHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().approvedLoanAmount(principalAmount)
                     .dateFormat(DATETIME_PATTERN).approvedOnDate("1 January 2024").locale("en"));
 
-            loanTransactionHelper.disburseLoan(loanResponse.getLoanId(),
-                    new PostLoansLoanIdRequest().actualDisbursementDate("1 January 2024").dateFormat(DATETIME_PATTERN).locale("en")
-                            .transactionAmount(BigDecimal.valueOf(1000.00)));
+            loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate("1 January 2024")
+                    .dateFormat(DATETIME_PATTERN).locale("en").transactionAmount(BigDecimal.valueOf(1000.00)));
 
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(loanResponse.getLoanId());
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(loanResponse.getLoanId());
             validateLoanSummaryBalances(loanDetails, 1017.50, 0.00, 1000.00, 0.00, null);
             validatePeriod(loanDetails, 0, LocalDate.of(2024, 1, 1), null, 1000.0, null, null, null, 0.0, 0.0, null, null, null, null, null,
                     null, null, null, null);
@@ -6302,10 +6169,10 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
         runAt("15 January 2024", () -> {
             final Long loanId = loanIdRef.get();
 
-            loanTransactionHelper.disburseLoan(loanId, new PostLoansLoanIdRequest().actualDisbursementDate("15 January 2024")
+            loanHelper.disburseLoan(loanId, new PostLoansLoanIdRequest().actualDisbursementDate("15 January 2024")
                     .dateFormat(DATETIME_PATTERN).locale("en").transactionAmount(BigDecimal.valueOf(500.0)));
 
-            GetLoansLoanIdResponse loanDetails = loanTransactionHelper.getLoanDetails(loanId);
+            GetLoansLoanIdResponse loanDetails = loanHelper.getLoanDetails(loanId);
             validateLoanSummaryBalances(loanDetails, 1526.25, 0.00, 1500.00, 0.00, null);
             validatePeriod(loanDetails, 0, LocalDate.of(2024, 1, 1), null, 1000.0, null, null, null, 0.0, 0.0, null, null, null, null, null,
                     null, null, null, null);
@@ -6326,13 +6193,13 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
         PostLoansRequest applicationRequest = applyLoanRequestProgressiveAdvancedPaymentAllocationStrategyMonthlyRepayments(clientId,
                 loanProductId, amount, numberOfRepayments, loanDisbursementDate);
 
-        PostLoansResponse loanResponse = loanTransactionHelper.applyLoan(applicationRequest);
+        PostLoansResponse loanResponse = loanHelper.applyForLoan(applicationRequest);
 
         Long loanId = loanResponse.getLoanId();
 
         assertNotNull(loanId);
 
-        loanTransactionHelper.approveLoan(loanId, new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(amount))
+        loanHelper.approveLoan(loanId, new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(amount))
                 .dateFormat(DATETIME_PATTERN).approvedOnDate(loanDisbursementDate).locale("en"));
 
         return loanId;
@@ -6373,19 +6240,19 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                 .installmentAmountInMultiplesOf(null).numberOfRepayments(3).repaymentEvery(15).enableDownPayment(true)
                 .enableAutoRepaymentForDownPayment(true).disbursedAmountPercentageForDownPayment(BigDecimal.valueOf(25)).minPrincipal(10.0)
                 .installmentAmountInMultiplesOf(1);
-        PostLoanProductsResponse loanProductResponse = loanProductHelper.createLoanProduct(product);
+        PostLoanProductsResponse loanProductResponse = loanHelper.createLoanProduct(product);
         PostLoansRequest applicationRequest = applyLoanRequest(client.getClientId(), loanProductResponse.getResourceId(), "23 March 2024",
                 10.0, 4);
 
         applicationRequest = applicationRequest.numberOfRepayments(3).loanTermFrequency(45)
                 .transactionProcessingStrategyCode(LoanProductTestBuilder.ADVANCED_PAYMENT_ALLOCATION_STRATEGY).repaymentEvery(15);
 
-        PostLoansResponse loanResponse = loanTransactionHelper.applyLoan(applicationRequest);
+        PostLoansResponse loanResponse = loanHelper.applyForLoan(applicationRequest);
 
-        loanTransactionHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(10))
+        loanHelper.approveLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().approvedLoanAmount(BigDecimal.valueOf(10))
                 .dateFormat(DATETIME_PATTERN).approvedOnDate("23 March 2024").locale("en"));
 
-        loanTransactionHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate("23 March 2024")
+        loanHelper.disburseLoan(loanResponse.getLoanId(), new PostLoansLoanIdRequest().actualDisbursementDate("23 March 2024")
                 .dateFormat(DATETIME_PATTERN).transactionAmount(BigDecimal.valueOf(10.0)).locale("en"));
 
         // verify schedule
@@ -6414,7 +6281,7 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
         advancedPaymentData.setTransactionType("DEFAULT");
         advancedPaymentData.setFutureInstallmentAllocationRule("NEXT_INSTALLMENT");
 
-        List<PaymentAllocationOrder> paymentAllocationOrders = getPaymentAllocationOrder(PaymentAllocationType.DUE_PENALTY,
+        List<PaymentAllocationOrder> paymentAllocationOrders = LoanRequestBuilders.paymentAllocationOrder(PaymentAllocationType.DUE_PENALTY,
                 PaymentAllocationType.PAST_DUE_FEE, PaymentAllocationType.PAST_DUE_PRINCIPAL, PaymentAllocationType.PAST_DUE_INTEREST,
                 PaymentAllocationType.PAST_DUE_PENALTY, PaymentAllocationType.DUE_FEE, PaymentAllocationType.DUE_PRINCIPAL,
                 PaymentAllocationType.DUE_INTEREST, PaymentAllocationType.IN_ADVANCE_PENALTY, PaymentAllocationType.IN_ADVANCE_FEE,
@@ -6424,11 +6291,11 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
         return advancedPaymentData;
     }
 
-    private static Integer createLoanProduct(final String principal, final String repaymentAfterEvery, final String numberOfRepayments,
+    private static Long createLoanProduct(final String principal, final String repaymentAfterEvery, final String numberOfRepayments,
             boolean autoPayForDownPayment, LoanScheduleType loanScheduleType, LoanScheduleProcessingType loanScheduleProcessingType,
             AdvancedPaymentData allocationRuleData, final Account... accounts) {
         LOG.info("------------------------------CREATING NEW LOAN PRODUCT ---------------------------------------");
-        final String loanProductJSON = new LoanProductTestBuilder().withMinPrincipal(principal).withPrincipal(principal)
+        final PostLoanProductsRequest loanProductRequest = new LoanProductTestBuilder().withMinPrincipal(principal).withPrincipal(principal)
                 .withRepaymentTypeAsDays().withRepaymentAfterEvery(repaymentAfterEvery).withNumberOfRepayments(numberOfRepayments)
                 .withEnableDownPayment(true, "25", autoPayForDownPayment).withinterestRatePerPeriod("0")
                 .withInterestRateFrequencyTypeAsMonths()
@@ -6437,14 +6304,14 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                 .addAdvancedPaymentAllocation(allocationRuleData).withInterestCalculationPeriodTypeAsRepaymentPeriod(true)
                 .withInterestTypeAsDecliningBalance().withMultiDisburse().withDisallowExpectedDisbursements(true)
                 .withLoanScheduleType(loanScheduleType).withLoanScheduleProcessingType(loanScheduleProcessingType).withDaysInMonth("30")
-                .withDaysInYear("365").withMoratorium("0", "0").build(null);
-        return loanTransactionHelper.getLoanProductId(loanProductJSON);
+                .withDaysInYear("365").withMoratorium("0", "0").buildRequest(null);
+        return loanHelper.createLoanProduct(loanProductRequest).getResourceId();
     }
 
-    private static Integer createLoanProduct(final String principal, final String repaymentAfterEvery, final String numberOfRepayments,
+    private static Long createLoanProduct(final String principal, final String repaymentAfterEvery, final String numberOfRepayments,
             boolean autoPayForDownPayment, LoanScheduleType loanScheduleType, final Account... accounts) {
         LOG.info("------------------------------CREATING NEW LOAN PRODUCT ---------------------------------------");
-        final String loanProductJSON = new LoanProductTestBuilder().withMinPrincipal(principal).withPrincipal(principal)
+        final PostLoanProductsRequest loanProductRequest = new LoanProductTestBuilder().withMinPrincipal(principal).withPrincipal(principal)
                 .withRepaymentTypeAsDays().withRepaymentAfterEvery(repaymentAfterEvery).withNumberOfRepayments(numberOfRepayments)
                 .withEnableDownPayment(true, "25", autoPayForDownPayment).withinterestRatePerPeriod("0")
                 .withInterestRateFrequencyTypeAsMonths()
@@ -6452,15 +6319,15 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                 .withAmortizationTypeAsEqualPrincipalPayment().withInterestTypeAsFlat().withAccountingRulePeriodicAccrual(accounts)
                 .withInterestCalculationPeriodTypeAsRepaymentPeriod(true).withInterestTypeAsDecliningBalance().withMultiDisburse()
                 .withDisallowExpectedDisbursements(true).withLoanScheduleType(loanScheduleType).withDaysInMonth("30").withDaysInYear("365")
-                .withMoratorium("0", "0").build(null);
-        return loanTransactionHelper.getLoanProductId(loanProductJSON);
+                .withMoratorium("0", "0").buildRequest(null);
+        return loanHelper.createLoanProduct(loanProductRequest).getResourceId();
     }
 
     private static ArrayList<HashMap<String, Object>> createLoanProductGetError(final String principal, final String repaymentAfterEvery,
             final String numberOfRepayments, boolean autoPayForDownPayment, LoanScheduleType loanScheduleType,
             LoanScheduleProcessingType loanScheduleProcessingType, AdvancedPaymentData allocationRuleData, final Account... accounts) {
         LOG.info("------------------------------CREATING NEW LOAN PRODUCT ---------------------------------------");
-        final String loanProductJSON = new LoanProductTestBuilder().withMinPrincipal(principal).withPrincipal(principal)
+        final PostLoanProductsRequest loanProductRequest = new LoanProductTestBuilder().withMinPrincipal(principal).withPrincipal(principal)
                 .withRepaymentTypeAsDays().withRepaymentAfterEvery(repaymentAfterEvery).withNumberOfRepayments(numberOfRepayments)
                 .withEnableDownPayment(true, "25", autoPayForDownPayment).withinterestRatePerPeriod("0")
                 .withInterestRateFrequencyTypeAsMonths()
@@ -6469,13 +6336,11 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                 .addAdvancedPaymentAllocation(allocationRuleData).withInterestCalculationPeriodTypeAsRepaymentPeriod(true)
                 .withInterestTypeAsDecliningBalance().withMultiDisburse().withDisallowExpectedDisbursements(true)
                 .withLoanScheduleType(loanScheduleType).withLoanScheduleProcessingType(loanScheduleProcessingType).withDaysInMonth("30")
-                .withDaysInYear("365").withMoratorium("0", "0").build(null);
-        LoanTransactionHelper loanTransactionHelperBadRequest = new LoanTransactionHelper(requestSpec,
-                new ResponseSpecBuilder().expectStatusCode(400).build());
-        return loanTransactionHelperBadRequest.getLoanProductError(loanProductJSON, CommonConstants.RESPONSE_ERROR);
+                .withDaysInYear("365").withMoratorium("0", "0").buildRequest(null);
+        return loanHelper.getLoanProductError(loanProductRequest, CommonConstants.RESPONSE_ERROR);
     }
 
-    private static Integer createLoanProduct(final String principal, final String repaymentAfterEvery, final String numberOfRepayments,
+    private static Long createLoanProduct(final String principal, final String repaymentAfterEvery, final String numberOfRepayments,
             boolean downPaymentEnabled, String downPaymentPercentage, boolean autoPayForDownPayment, LoanScheduleType loanScheduleType,
             LoanScheduleProcessingType loanScheduleProcessingType, final Account... accounts) {
         AdvancedPaymentData defaultAllocation = createDefaultPaymentAllocation();
@@ -6483,7 +6348,7 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
         AdvancedPaymentData merchantIssuedRefundAllocation = createPaymentAllocation("MERCHANT_ISSUED_REFUND", "REAMORTIZATION");
         AdvancedPaymentData payoutRefundAllocation = createPaymentAllocation("PAYOUT_REFUND", "NEXT_INSTALLMENT");
         LOG.info("------------------------------CREATING NEW LOAN PRODUCT ---------------------------------------");
-        final String loanProductJSON = new LoanProductTestBuilder().withMinPrincipal(principal).withPrincipal(principal)
+        final PostLoanProductsRequest loanProductRequest = new LoanProductTestBuilder().withMinPrincipal(principal).withPrincipal(principal)
                 .withRepaymentTypeAsDays().withRepaymentAfterEvery(repaymentAfterEvery).withNumberOfRepayments(numberOfRepayments)
                 .withEnableDownPayment(downPaymentEnabled, downPaymentPercentage, autoPayForDownPayment).withinterestRatePerPeriod("0")
                 .withInterestRateFrequencyTypeAsMonths()
@@ -6494,8 +6359,8 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
                 .withInterestCalculationPeriodTypeAsRepaymentPeriod(true).withInterestTypeAsDecliningBalance().withMultiDisburse()
                 .withDisallowExpectedDisbursements(true).withLoanScheduleType(loanScheduleType)
                 .withLoanScheduleProcessingType(loanScheduleProcessingType).withDaysInMonth("30").withDaysInYear("365")
-                .withMoratorium("0", "0").build(null);
-        return loanTransactionHelper.getLoanProductId(loanProductJSON);
+                .withMoratorium("0", "0").buildRequest(null);
+        return loanHelper.createLoanProduct(loanProductRequest).getResourceId();
     }
 
     private static void validatePeriod(GetLoansLoanIdResponse loanDetails, Integer index, LocalDate dueDate, LocalDate paidDate,
@@ -6522,29 +6387,29 @@ public class AdvancedPaymentAllocationLoanRepaymentScheduleTest extends BaseLoan
         assertEquals(paidLate, Utils.getDoubleValue(period.getTotalPaidLateForPeriod()));
     }
 
-    private static PostLoansResponse applyForLoanApplication(final Long clientId, final Integer loanProductId, final BigDecimal principal,
+    private static PostLoansResponse applyForLoanApplication(final Long clientId, final Long loanProductId, final BigDecimal principal,
             final int loanTermFrequency, final int repaymentAfterEvery, final int numberOfRepayments, final BigDecimal interestRate,
             final String expectedDisbursementDate, final String submittedOnDate, String transactionProcessorCode,
             String loanScheduleProcessingType) {
         LOG.info("--------------------------------APPLYING FOR LOAN APPLICATION--------------------------------");
-        return loanTransactionHelper.applyLoan(new PostLoansRequest().clientId(clientId).productId(loanProductId.longValue())
-                .expectedDisbursementDate(expectedDisbursementDate).dateFormat(DATETIME_PATTERN)
-                .transactionProcessingStrategyCode(transactionProcessorCode).locale("en").submittedOnDate(submittedOnDate)
-                .amortizationType(1).interestRatePerPeriod(interestRate).interestCalculationPeriodType(1).interestType(0)
-                .repaymentFrequencyType(0).repaymentEvery(repaymentAfterEvery).repaymentFrequencyType(0)
-                .numberOfRepayments(numberOfRepayments).loanTermFrequency(loanTermFrequency).loanTermFrequencyType(0).principal(principal)
-                .loanType("individual").loanScheduleProcessingType(loanScheduleProcessingType)
-                .maxOutstandingLoanBalance(BigDecimal.valueOf(35000)));
+        return loanHelper.applyForLoan(
+                new PostLoansRequest().clientId(clientId).productId(loanProductId).expectedDisbursementDate(expectedDisbursementDate)
+                        .dateFormat(DATETIME_PATTERN).transactionProcessingStrategyCode(transactionProcessorCode).locale("en")
+                        .submittedOnDate(submittedOnDate).amortizationType(1).interestRatePerPeriod(interestRate)
+                        .interestCalculationPeriodType(1).interestType(0).repaymentFrequencyType(0).repaymentEvery(repaymentAfterEvery)
+                        .repaymentFrequencyType(0).numberOfRepayments(numberOfRepayments).loanTermFrequency(loanTermFrequency)
+                        .loanTermFrequencyType(0).principal(principal).loanType("individual")
+                        .loanScheduleProcessingType(loanScheduleProcessingType).maxOutstandingLoanBalance(BigDecimal.valueOf(35000)));
     }
 
-    private static PostLoansResponse applyForLoanApplication(final Long clientId, final Integer loanProductId, final BigDecimal principal,
+    private static PostLoansResponse applyForLoanApplication(final Long clientId, final Long loanProductId, final BigDecimal principal,
             final int loanTermFrequency, final int repaymentAfterEvery, final int numberOfRepayments, final BigDecimal interestRate,
             final String expectedDisbursementDate, final String submittedOnDate) {
         return applyForLoanApplication(clientId, loanProductId, principal, loanTermFrequency, repaymentAfterEvery, numberOfRepayments,
                 interestRate, expectedDisbursementDate, submittedOnDate, LoanScheduleProcessingType.HORIZONTAL);
     }
 
-    private static PostLoansResponse applyForLoanApplication(final Long clientId, final Integer loanProductId, final BigDecimal principal,
+    private static PostLoansResponse applyForLoanApplication(final Long clientId, final Long loanProductId, final BigDecimal principal,
             final int loanTermFrequency, final int repaymentAfterEvery, final int numberOfRepayments, final BigDecimal interestRate,
             final String expectedDisbursementDate, final String submittedOnDate, LoanScheduleProcessingType loanScheduleProcessingType) {
         LOG.info("--------------------------------APPLYING FOR LOAN APPLICATION--------------------------------");

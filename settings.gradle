@@ -17,12 +17,20 @@
  * under the License.
  */
 
-plugins {
-    id 'com.gradle.develocity' version '3.18.2'
-    id 'com.gradle.common-custom-user-data-gradle-plugin' version '2.6.0'
+pluginManagement {
+    includeBuild('fineract-querydsl-gradle-plugin')
+    repositories {
+        gradlePluginPortal()
+        mavenCentral()
+    }
 }
 
-def isCI = System.getenv('JENKINS_URL') != null
+plugins {
+    id 'com.gradle.develocity' version '4.5.1'
+    id 'com.gradle.common-custom-user-data-gradle-plugin' version '2.8.0'
+}
+
+def isCI = System.getenv('GITHUB_ACTIONS') != null
 
 develocity {
     projectId = "fineract"
@@ -63,17 +71,20 @@ include ':fineract-branch'
 include ':fineract-document'
 include ':fineract-investor'
 include ':fineract-rates'
+include ':fineract-fund'
 include ':fineract-charge'
 include ':fineract-tax'
 include ':fineract-loan-origination'
 include ':fineract-loan'
 include ':fineract-savings'
+include ':fineract-shares'
+include ':fineract-account-transfer'
 include ':fineract-report'
-include ':fineract-mix'
 include ':fineract-war'
 include ':integration-tests'
 include ':twofactor-tests'
 include ':oauth2-tests'
+include ':oauth2-twofactor-tests'
 include ':fineract-client'
 include ':fineract-client-feign'
 include ':fineract-doc'
@@ -83,6 +94,7 @@ include ':fineract-e2e-tests-runner'
 include 'fineract-progressive-loan'
 include 'fineract-progressive-loan-embeddable-schedule-generator'
 include 'fineract-working-capital-loan'
+include 'fineract-querydsl'
 // NOTE: custom Docker image with all custom modules included
 include ':custom:docker'
 // NOTE: dynamically load custom modules with pattern "custom -> company -> category -> module"
@@ -91,7 +103,7 @@ file("${rootDir}/custom").eachDir { companyDir ->
         file("${rootDir}/custom/${companyDir.name}").eachDir { categoryDir ->
             if('build' != categoryDir.name) {
                 file("${rootDir}/custom/${companyDir.name}/${categoryDir.name}").eachDir { moduleDir ->
-                    if('build' != moduleDir.name) {
+                    if('build' != moduleDir.name && file("${moduleDir}/build.gradle").exists()) {
                         include ":custom:${companyDir.name}:${categoryDir.name}:${moduleDir.name}"
                     }
                 }

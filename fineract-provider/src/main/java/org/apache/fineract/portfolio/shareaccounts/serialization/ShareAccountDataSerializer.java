@@ -56,6 +56,8 @@ import org.apache.fineract.portfolio.charge.domain.ChargeTimeType;
 import org.apache.fineract.portfolio.client.domain.Client;
 import org.apache.fineract.portfolio.client.domain.ClientRepositoryWrapper;
 import org.apache.fineract.portfolio.common.domain.PeriodFrequencyType;
+import org.apache.fineract.portfolio.paymentdetail.PaymentDetailConstants;
+import org.apache.fineract.portfolio.paymentdetail.domain.PaymentDetail;
 import org.apache.fineract.portfolio.savings.DepositAccountType;
 import org.apache.fineract.portfolio.savings.domain.SavingsAccount;
 import org.apache.fineract.portfolio.savings.domain.SavingsAccountRepositoryWrapper;
@@ -100,13 +102,29 @@ public class ShareAccountDataSerializer {
     private static final Set<String> activateParameters = new HashSet<>(Arrays.asList(ShareAccountApiConstants.locale_paramname,
             ShareAccountApiConstants.dateformat_paramname, ShareAccountApiConstants.activatedate_paramname));
 
-    private static final Set<String> closeParameters = new HashSet<>(
-            Arrays.asList(ShareAccountApiConstants.locale_paramname, ShareAccountApiConstants.dateformat_paramname,
-                    ShareAccountApiConstants.closeddate_paramname, ShareAccountApiConstants.note_paramname));
-
     private static final Set<String> addtionalSharesParameters = new HashSet<>(Arrays.asList(ShareAccountApiConstants.locale_paramname,
             ShareAccountApiConstants.requesteddate_paramname, ShareAccountApiConstants.requestedshares_paramname,
             ShareAccountApiConstants.purchasedprice_paramname, ShareAccountApiConstants.dateformat_paramname));
+
+    private static final Set<String> paymentDetailStringParameters = new HashSet<>(
+            Arrays.asList(PaymentDetailConstants.accountNumberParamName, PaymentDetailConstants.checkNumberParamName,
+                    PaymentDetailConstants.routingCodeParamName, PaymentDetailConstants.receiptNumberParamName,
+                    PaymentDetailConstants.bankNumberParamName));
+
+    private static final Set<String> createParameters = withPaymentDetailParameters(ShareAccountApiConstants.supportedParameters);
+
+    private static final Set<String> purchaseAndRedeemSharesParameters = withPaymentDetailParameters(addtionalSharesParameters);
+
+    private static final Set<String> closeParameters = withPaymentDetailParameters(
+            new HashSet<>(Arrays.asList(ShareAccountApiConstants.locale_paramname, ShareAccountApiConstants.dateformat_paramname,
+                    ShareAccountApiConstants.closeddate_paramname, ShareAccountApiConstants.note_paramname)));
+
+    private static Set<String> withPaymentDetailParameters(final Set<String> parameters) {
+        final Set<String> withPaymentDetail = new HashSet<>(parameters);
+        withPaymentDetail.add(PaymentDetailConstants.paymentTypeParamName);
+        withPaymentDetail.addAll(paymentDetailStringParameters);
+        return withPaymentDetail;
+    }
 
     @Autowired
     public ShareAccountDataSerializer(final PlatformSecurityContext platformSecurityContext, final FromJsonHelper fromApiJsonHelper,
@@ -128,7 +146,7 @@ public class ShareAccountDataSerializer {
             throw new InvalidJsonException();
         }
         final Type typeOfMap = new TypeToken<Map<String, Object>>() {}.getType();
-        this.fromApiJsonHelper.checkForUnsupportedParameters(typeOfMap, jsonCommand.json(), ShareAccountApiConstants.supportedParameters);
+        this.fromApiJsonHelper.checkForUnsupportedParameters(typeOfMap, jsonCommand.json(), createParameters);
 
         final List<ApiParameterError> dataValidationErrors = new ArrayList<>();
         final DataValidatorBuilder baseDataValidator = new DataValidatorBuilder(dataValidationErrors).resource("sharesaccount");
@@ -184,6 +202,8 @@ public class ShareAccountDataSerializer {
 
         Integer lockinPeriod = this.fromApiJsonHelper.extractIntegerNamed(ShareAccountApiConstants.lockinperiod_paramname, element, locale);
         PeriodFrequencyType lockPeriodEnum = extractPeriodType(ShareAccountApiConstants.lockperiodfrequencytype_paramname, element);
+
+        validatePaymentDetails(baseDataValidator, element);
 
         if (!dataValidationErrors.isEmpty()) {
             throw new PlatformApiDataValidationException(dataValidationErrors);
@@ -242,9 +262,10 @@ public class ShareAccountDataSerializer {
         LocalDate currentDate = DateUtils.getBusinessLocalDate();
         for (ShareAccountCharge charge : charges) {
             if (charge.isActive() && charge.isShareAccountActivation()) {
-                charge.deriveChargeAmount(totalChargeAmount, account.getCurrency());
+                BigDecimal amount = charge.deriveChargeAmount(totalChargeAmount, account.getCurrency());
+                validateChargeAmountNotZero(amount);
                 ShareAccountTransaction chargeTransaction = ShareAccountTransaction.createChargeTransaction(currentDate, charge);
-                ShareAccountChargePaidBy paidBy = new ShareAccountChargePaidBy(chargeTransaction, charge, charge.percentageOrAmount());
+                ShareAccountChargePaidBy paidBy = new ShareAccountChargePaidBy(chargeTransaction, charge, amount);
                 chargeTransaction.addShareAccountChargePaidBy(paidBy);
                 account.addChargeTransaction(chargeTransaction);
             }
@@ -255,6 +276,7 @@ public class ShareAccountDataSerializer {
             for (ShareAccountCharge charge : charges) {
                 if (charge.isActive() && charge.isSharesPurchaseCharge()) {
                     BigDecimal amount = charge.deriveChargeAmount(pending.amount(), account.getCurrency());
+                    validateChargeAmountNotZero(amount);
                     ShareAccountChargePaidBy paidBy = new ShareAccountChargePaidBy(pending, charge, amount);
                     pending.addShareAccountChargePaidBy(paidBy);
                     totalChargeAmount = totalChargeAmount.add(amount);
@@ -319,6 +341,7 @@ public class ShareAccountDataSerializer {
         }
 
         LocalDate existingApplicationDate = null;
+        PaymentDetail existingPaymentDetail = null;
         List<ShareAccountTransaction> purchaseTransactionsList = new ArrayList<>();
         Set<ShareAccountCharge> chargesList = new HashSet<>();
 
@@ -332,8 +355,10 @@ public class ShareAccountDataSerializer {
                     transaction.setActive(false);
                     if (!transaction.isChargeTransaction()) {
                         existingApplicationDate = transaction.getPurchasedDate();
+                        existingPaymentDetail = transaction.getPaymentDetail();
                         ShareAccountTransaction newtransaction = new ShareAccountTransaction(transaction.getPurchasedDate(),
                                 transaction.getTotalShares(), transaction.getPurchasePrice());
+                        newtransaction.setPaymentDetail(existingPaymentDetail);
                         purchaseTransactionsList.add(newtransaction);
                     }
                 }
@@ -356,7 +381,8 @@ public class ShareAccountDataSerializer {
 
         if (this.fromApiJsonHelper.parameterExists(ShareAccountApiConstants.requestedshares_paramname, element)) {
             Long requestedShares = this.fromApiJsonHelper.extractLongNamed(ShareAccountApiConstants.requestedshares_paramname, element);
-            baseDataValidator.reset().parameter(ShareAccountApiConstants.requestedshares_paramname).value(requestedShares).notNull();
+            baseDataValidator.reset().parameter(ShareAccountApiConstants.requestedshares_paramname).value(requestedShares).notNull()
+                    .longGreaterThanZero();
             LocalDate applicationDate = null;
             purchaseTransactionsList.clear();
             if (this.fromApiJsonHelper.parameterExists(ShareAccountApiConstants.applicationdate_param, element)) {
@@ -367,6 +393,7 @@ public class ShareAccountDataSerializer {
             }
             BigDecimal unitPrice = shareProduct.deriveMarketPrice(applicationDate);
             ShareAccountTransaction transaction = new ShareAccountTransaction(applicationDate, requestedShares, unitPrice);
+            transaction.setPaymentDetail(existingPaymentDetail);
             purchaseTransactionsList.add(transaction);
             actualChanges.put(ShareAccountApiConstants.requestedshares_paramname, "Transaction");
 
@@ -554,7 +581,7 @@ public class ShareAccountDataSerializer {
         }
         account.undoApprove();
         updateTotalChargeDerivedForUndoApproval(account);
-        actualChanges.put(ShareAccountApiConstants.charges_paramname, Boolean.TRUE);
+        actualChanges.put(ShareAccountApiConstants.charges_paramname, true);
         return actualChanges;
     }
 
@@ -592,7 +619,7 @@ public class ShareAccountDataSerializer {
         AppUser rejectedUser = this.platformSecurityContext.authenticatedUser();
         LocalDate rejectedDate = DateUtils.getBusinessLocalDate();
         account.reject(rejectedDate, rejectedUser);
-        actualChanges.put(ShareAccountApiConstants.charges_paramname, Boolean.TRUE);
+        actualChanges.put(ShareAccountApiConstants.charges_paramname, true);
         return actualChanges;
     }
 
@@ -688,7 +715,7 @@ public class ShareAccountDataSerializer {
             throw new InvalidJsonException();
         }
         final Type typeOfMap = new TypeToken<Map<String, Object>>() {}.getType();
-        this.fromApiJsonHelper.checkForUnsupportedParameters(typeOfMap, jsonCommand.json(), addtionalSharesParameters);
+        this.fromApiJsonHelper.checkForUnsupportedParameters(typeOfMap, jsonCommand.json(), purchaseAndRedeemSharesParameters);
         final List<ApiParameterError> dataValidationErrors = new ArrayList<>();
         final DataValidatorBuilder baseDataValidator = new DataValidatorBuilder(dataValidationErrors).resource("sharesaccount");
         JsonElement element = jsonCommand.parsedJson();
@@ -698,7 +725,8 @@ public class ShareAccountDataSerializer {
         LocalDate requestedDate = this.fromApiJsonHelper.extractLocalDateNamed(ShareAccountApiConstants.requesteddate_paramname, element);
         baseDataValidator.reset().parameter(ShareAccountApiConstants.requesteddate_paramname).value(requestedDate).notNull();
         final Long sharesRequested = this.fromApiJsonHelper.extractLongNamed(ShareAccountApiConstants.requestedshares_paramname, element);
-        baseDataValidator.reset().parameter(ShareAccountApiConstants.requestedshares_paramname).value(sharesRequested).notNull();
+        baseDataValidator.reset().parameter(ShareAccountApiConstants.requestedshares_paramname).value(sharesRequested).notNull()
+                .longGreaterThanZero();
         ShareProduct shareProduct = account.getShareProduct();
         if (sharesRequested != null) {
             Long totalSharesAfterapproval = account.getTotalApprovedShares() + sharesRequested;
@@ -715,6 +743,7 @@ public class ShareAccountDataSerializer {
             baseDataValidator.reset().parameter(ShareAccountApiConstants.requesteddate_paramname).value(requestedDate)
                     .failWithCodeNoParameterAddedToErrorCode("purchase.transaction.date.cannot.be.before.existing.transactions");
         }
+        validatePaymentDetails(baseDataValidator, element);
 
         if (!dataValidationErrors.isEmpty()) {
             throw new PlatformApiDataValidationException(dataValidationErrors);
@@ -865,7 +894,7 @@ public class ShareAccountDataSerializer {
             throw new InvalidJsonException();
         }
         final Type typeOfMap = new TypeToken<Map<String, Object>>() {}.getType();
-        this.fromApiJsonHelper.checkForUnsupportedParameters(typeOfMap, jsonCommand.json(), addtionalSharesParameters);
+        this.fromApiJsonHelper.checkForUnsupportedParameters(typeOfMap, jsonCommand.json(), purchaseAndRedeemSharesParameters);
         final List<ApiParameterError> dataValidationErrors = new ArrayList<>();
         final DataValidatorBuilder baseDataValidator = new DataValidatorBuilder(dataValidationErrors).resource("sharesaccount");
         JsonElement element = jsonCommand.parsedJson();
@@ -881,6 +910,7 @@ public class ShareAccountDataSerializer {
             baseDataValidator.reset().parameter(ShareAccountApiConstants.requesteddate_paramname).value(requestedDate)
                     .failWithCodeNoParameterAddedToErrorCode("redeem.transaction.date.cannot.be.before.existing.transactions");
         }
+        validatePaymentDetails(baseDataValidator, element);
         if (!dataValidationErrors.isEmpty()) {
             throw new PlatformApiDataValidationException(dataValidationErrors);
         }
@@ -892,6 +922,23 @@ public class ShareAccountDataSerializer {
 
         handleRedeemSharesChargeTransactions(account, transaction);
         return actualChanges;
+    }
+
+    private void validatePaymentDetails(final DataValidatorBuilder baseDataValidator, final JsonElement element) {
+        final Long paymentTypeId = this.fromApiJsonHelper.extractLongNamed(PaymentDetailConstants.paymentTypeParamName, element);
+        baseDataValidator.reset().parameter(PaymentDetailConstants.paymentTypeParamName).value(paymentTypeId).ignoreIfNull()
+                .longGreaterThanZero();
+        boolean hasPaymentDetailValues = false;
+        for (final String parameterName : paymentDetailStringParameters) {
+            final String value = this.fromApiJsonHelper.extractStringNamed(parameterName, element);
+            baseDataValidator.reset().parameter(parameterName).value(value).ignoreIfNull().notExceedingLengthOf(50);
+            if (StringUtils.isNotBlank(value)) {
+                hasPaymentDetailValues = true;
+            }
+        }
+        if (hasPaymentDetailValues) {
+            baseDataValidator.reset().parameter(PaymentDetailConstants.paymentTypeParamName).value(paymentTypeId).notNull();
+        }
     }
 
     private void validateRedeemRequest(final ShareAccount account, ShareAccountTransaction redeemTransaction,
@@ -961,6 +1008,8 @@ public class ShareAccountDataSerializer {
         if (periodType != null) {
             switch (periodType) {
                 case INVALID: // It never comes in to this state.
+                    // SEMI_MONTHLY is a loan repayment frequency and is never a share account lock-in period.
+                case SEMI_MONTHLY:
                 break;
                 case DAYS:
                     lockinDate = purchaseDate.plusDays(lockinPeriod);
@@ -1018,6 +1067,7 @@ public class ShareAccountDataSerializer {
         JsonElement element = jsonCommand.parsedJson();
         LocalDate closedDate = this.fromApiJsonHelper.extractLocalDateNamed(ShareAccountApiConstants.closeddate_paramname, element);
         baseDataValidator.reset().parameter(ShareAccountApiConstants.approveddate_paramname).value(closedDate).notNull();
+        validatePaymentDetails(baseDataValidator, element);
         if (!dataValidationErrors.isEmpty()) {
             throw new PlatformApiDataValidationException(dataValidationErrors);
         }
@@ -1042,5 +1092,14 @@ public class ShareAccountDataSerializer {
         handleRedeemSharesChargeTransactions(account, transaction);
         actualChanges.put(ShareAccountApiConstants.requestedshares_paramname, transaction);
         return actualChanges;
+    }
+
+    private void validateChargeAmountNotZero(BigDecimal amount) {
+        if (amount.compareTo(BigDecimal.ZERO) <= 0) {
+            List<ApiParameterError> errors = new ArrayList<>();
+            errors.add(ApiParameterError.parameterError("error.msg.share.charge.amount.rounded.to.zero",
+                    "This charge cannot be added because the calculated amount becomes zero after rounding.", "amount"));
+            throw new PlatformApiDataValidationException(errors);
+        }
     }
 }

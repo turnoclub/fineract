@@ -24,7 +24,11 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -38,11 +42,12 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import org.apache.fineract.accounting.journalentry.service.JournalEntryWritePlatformService;
+import java.util.Set;
 import org.apache.fineract.infrastructure.businessdate.domain.BusinessDateType;
 import org.apache.fineract.infrastructure.configuration.domain.ConfigurationDomainService;
 import org.apache.fineract.infrastructure.core.api.JsonCommand;
 import org.apache.fineract.infrastructure.core.data.CommandProcessingResult;
+import org.apache.fineract.infrastructure.core.domain.ActionContext;
 import org.apache.fineract.infrastructure.core.domain.ExternalId;
 import org.apache.fineract.infrastructure.core.domain.FineractPlatformTenant;
 import org.apache.fineract.infrastructure.core.exception.ErrorHandler;
@@ -51,10 +56,12 @@ import org.apache.fineract.infrastructure.core.service.ExternalIdFactory;
 import org.apache.fineract.infrastructure.core.service.ThreadLocalContextUtil;
 import org.apache.fineract.infrastructure.dataqueries.service.EntityDatatableChecksWritePlatformService;
 import org.apache.fineract.infrastructure.event.business.service.BusinessEventNotifierService;
+import org.apache.fineract.infrastructure.security.exception.NoAuthorizationException;
 import org.apache.fineract.infrastructure.security.service.PlatformSecurityContext;
 import org.apache.fineract.organisation.holiday.domain.HolidayRepositoryWrapper;
 import org.apache.fineract.organisation.monetary.domain.MonetaryCurrency;
 import org.apache.fineract.organisation.monetary.domain.MoneyHelper;
+import org.apache.fineract.organisation.office.domain.Office;
 import org.apache.fineract.organisation.staff.domain.StaffRepositoryWrapper;
 import org.apache.fineract.organisation.workingdays.domain.WorkingDaysRepositoryWrapper;
 import org.apache.fineract.portfolio.account.domain.StandingInstructionRepository;
@@ -63,8 +70,11 @@ import org.apache.fineract.portfolio.account.service.AccountTransfersReadPlatfor
 import org.apache.fineract.portfolio.charge.domain.ChargeRepositoryWrapper;
 import org.apache.fineract.portfolio.note.domain.NoteRepository;
 import org.apache.fineract.portfolio.paymentdetail.service.PaymentDetailWritePlatformService;
+import org.apache.fineract.portfolio.savings.SavingsAccountTransactionType;
 import org.apache.fineract.portfolio.savings.data.SavingsAccountChargeDataValidator;
+import org.apache.fineract.portfolio.savings.data.SavingsAccountData;
 import org.apache.fineract.portfolio.savings.data.SavingsAccountDataValidator;
+import org.apache.fineract.portfolio.savings.data.SavingsAccountTransactionData;
 import org.apache.fineract.portfolio.savings.data.SavingsAccountTransactionDataValidator;
 import org.apache.fineract.portfolio.savings.domain.DepositAccountOnHoldTransactionRepository;
 import org.apache.fineract.portfolio.savings.domain.GSIMRepositoy;
@@ -75,6 +85,7 @@ import org.apache.fineract.portfolio.savings.domain.SavingsAccountChargeReposito
 import org.apache.fineract.portfolio.savings.domain.SavingsAccountRepositoryWrapper;
 import org.apache.fineract.portfolio.savings.domain.SavingsAccountTransaction;
 import org.apache.fineract.portfolio.savings.domain.SavingsAccountTransactionRepository;
+import org.apache.fineract.portfolio.savings.exception.InsufficientAccountBalanceException;
 import org.apache.fineract.portfolio.savings.exception.SavingsAccountTransactionNotFoundException;
 import org.apache.fineract.useradministration.domain.AppUser;
 import org.apache.fineract.useradministration.domain.AppUserRepositoryWrapper;
@@ -82,6 +93,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.Mockito;
@@ -92,6 +105,13 @@ import org.mockito.quality.Strictness;
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
 class SavingsAccountWritePlatformServiceJpaRepositoryImplTest {
+
+    private static final Long INTEREST_ON_SAVINGS_GL_ACCOUNT_ID = 101L;
+    private static final Long SAVINGS_CONTROL_GL_ACCOUNT_ID = 102L;
+    private static final Long INTEREST_PAYABLE_GL_ACCOUNT_ID = 103L;
+    private static final Long INCOME_FROM_INTEREST_GL_ACCOUNT_ID = 105L;
+    private static final Long OVERDRAFT_PORTFOLIO_GL_ACCOUNT_ID = 106L;
+    private static final Long INTEREST_RECEIVABLE_GL_ACCOUNT_ID = 107L;
 
     @Mock
     private PlatformSecurityContext context;
@@ -111,8 +131,6 @@ class SavingsAccountWritePlatformServiceJpaRepositoryImplTest {
     private SavingsAccountChargeDataValidator savingsAccountChargeDataValidator;
     @Mock
     private PaymentDetailWritePlatformService paymentDetailWritePlatformService;
-    @Mock
-    private JournalEntryWritePlatformService journalEntryWritePlatformService;
     @Mock
     private SavingsAccountDomainService savingsAccountDomainService;
     @Mock
@@ -146,6 +164,12 @@ class SavingsAccountWritePlatformServiceJpaRepositoryImplTest {
     @Mock
     private SavingsAccountInterestPostingService savingsAccountInterestPostingService;
     @Mock
+    private SavingsAccountPostInterestService savingsAccountPostInterestService;
+    @Mock
+    private SavingsAccountInterestCalculationService savingsAccountInterestCalculationService;
+    @Mock
+    private SavingsAccountActivationService savingsAccountActivationService;
+    @Mock
     private ExternalIdFactory externalIdFactory;
     @Mock
     private ErrorHandler errorHandler;
@@ -154,18 +178,70 @@ class SavingsAccountWritePlatformServiceJpaRepositoryImplTest {
     private SavingsAccountWritePlatformServiceJpaRepositoryImpl service;
 
     private Method validateTransactionsForTransfer;
+    private Method undoWithdrawalFee;
+    private Method getLastChargePayment;
 
     @BeforeEach
     void setUp() throws Exception {
         validateTransactionsForTransfer = SavingsAccountWritePlatformServiceJpaRepositoryImpl.class
                 .getDeclaredMethod("validateTransactionsForTransfer", SavingsAccount.class, LocalDate.class);
         validateTransactionsForTransfer.setAccessible(true);
+        undoWithdrawalFee = SavingsAccountWritePlatformServiceJpaRepositoryImpl.class.getDeclaredMethod("undoWithdrawalFee",
+                SavingsAccount.class, SavingsAccountTransaction.class);
+        undoWithdrawalFee.setAccessible(true);
+        getLastChargePayment = SavingsAccountWritePlatformServiceJpaRepositoryImpl.class.getDeclaredMethod("getLastChargePayment",
+                List.class);
+        getLastChargePayment.setAccessible(true);
     }
 
     @AfterEach
     void tearDown() {
         ThreadLocalContextUtil.reset();
         MoneyHelper.clearCache();
+    }
+
+    @Test
+    void applyChargeDueOnHeldAccount_insufficientBalance_skipsWithoutTouchingTheAccount() {
+        ThreadLocalContextUtil.setTenant(new FineractPlatformTenant(1L, "default", "Default", "Asia/Kolkata", null));
+        ThreadLocalContextUtil.setActionContext(ActionContext.DEFAULT);
+        ThreadLocalContextUtil.setBusinessDates(new HashMap<>(Map.of(BusinessDateType.BUSINESS_DATE, LocalDate.of(2024, 2, 2))));
+        SavingsAccount account = mock(SavingsAccount.class);
+        when(account.getId()).thenReturn(1L);
+        SavingsAccountCharge charge = dueChargeOf(account, LocalDate.of(2024, 1, 31), new BigDecimal("100"));
+        doThrow(new InsufficientAccountBalanceException("transactionAmount", BigDecimal.ZERO, null, new BigDecimal("100"))).when(account)
+                .validateAccountBalanceDoesNotViolateOverdraft(any(), any());
+
+        service.applyChargeDue(account, charge);
+
+        // skipped before the payment is applied: nothing on the entity, nothing persisted
+        verify(account, never()).payCharge(any(), any(), any(), any(), anyBoolean(), any());
+        verify(savingAccountRepositoryWrapper, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void applyChargeDueOnHeldAccount_chargeOfAnotherAccount_isRejectedBeforeAnyPayment() {
+        ThreadLocalContextUtil.setTenant(new FineractPlatformTenant(1L, "default", "Default", "Asia/Kolkata", null));
+        ThreadLocalContextUtil.setActionContext(ActionContext.DEFAULT);
+        ThreadLocalContextUtil.setBusinessDates(new HashMap<>(Map.of(BusinessDateType.BUSINESS_DATE, LocalDate.of(2024, 2, 2))));
+        SavingsAccount account = mock(SavingsAccount.class);
+        when(account.getId()).thenReturn(1L);
+        SavingsAccount otherAccount = mock(SavingsAccount.class);
+        SavingsAccountCharge charge = dueChargeOf(otherAccount, LocalDate.of(2024, 1, 31), new BigDecimal("100"));
+
+        assertThatThrownBy(() -> service.applyChargeDue(account, charge)).isInstanceOf(IllegalArgumentException.class);
+
+        verify(otherAccount, never()).payCharge(any(), any(), any(), any(), anyBoolean(), any());
+        verify(savingAccountRepositoryWrapper, never()).saveAndFlush(any());
+    }
+
+    private static SavingsAccountCharge dueChargeOf(SavingsAccount account, LocalDate dueDate, BigDecimal outstanding) {
+        SavingsAccountCharge charge = mock(SavingsAccountCharge.class);
+        when(charge.getId()).thenReturn(7L);
+        when(charge.savingsAccount()).thenReturn(account);
+        when(charge.isNotFullyPaid()).thenReturn(true);
+        when(charge.getDueDate()).thenReturn(dueDate);
+        when(charge.amoutOutstanding()).thenReturn(outstanding);
+        return charge;
     }
 
     @Test
@@ -244,6 +320,19 @@ class SavingsAccountWritePlatformServiceJpaRepositoryImplTest {
     }
 
     @Test
+    void getLastChargePayment_backdatedLaterPayment_picksHighestId() throws Exception {
+        final SavingsAccountTransaction laterBackdated = mock(SavingsAccountTransaction.class);
+        when(laterBackdated.getId()).thenReturn(2L);
+        when(laterBackdated.getTransactionDate()).thenReturn(LocalDate.of(2026, 10, 10));
+        final SavingsAccountTransaction earlier = mock(SavingsAccountTransaction.class);
+        when(earlier.getId()).thenReturn(1L);
+        when(earlier.getTransactionDate()).thenReturn(LocalDate.of(2026, 10, 20));
+
+        assertThat(getLastChargePayment.invoke(service, List.of(laterBackdated, earlier))).isSameAs(laterBackdated);
+        assertThat(getLastChargePayment.invoke(service, List.of())).isNull();
+    }
+
+    @Test
     void holdAmount_shouldUpdateTransactionExternalId() {
         Long savingsId = 1L;
         LocalDate transactionDate = LocalDate.of(2024, 4, 2);
@@ -260,7 +349,7 @@ class SavingsAccountWritePlatformServiceJpaRepositoryImplTest {
 
         when(context.authenticatedUser()).thenReturn(submittedBy);
         when(savingAccountAssembler.getPivotConfigStatus()).thenReturn(false);
-        when(savingAccountAssembler.assembleFrom(savingsId, false)).thenReturn(account);
+        when(savingAccountAssembler.assembleFromInUserScope(savingsId, false)).thenReturn(account);
         when(command.localDateValueOfParameterNamed("transactionDate")).thenReturn(transactionDate);
         when(command.bigDecimalValueOfParameterNamed("transactionAmount")).thenReturn(amount);
         when(command.booleanPrimitiveValueOfParameterNamed("lienAllowed")).thenReturn(false);
@@ -282,6 +371,7 @@ class SavingsAccountWritePlatformServiceJpaRepositoryImplTest {
         service.holdAmount(savingsId, command);
 
         verify(transaction).updateExternalId(externalId);
+        verify(transaction).setRunningBalance(argThat(balance -> balance.getAmount().compareTo(BigDecimal.valueOf(100)) == 0));
         verify(savingsAccountTransactionRepository).saveAndFlush(transaction);
     }
 
@@ -305,7 +395,7 @@ class SavingsAccountWritePlatformServiceJpaRepositoryImplTest {
         when(savingsAccountTransactionDataValidator.validateReleaseAmountAndAssembleForm(holdTransaction)).thenReturn(releaseTransaction);
         when(externalIdFactory.createFromCommand(command, "externalId")).thenReturn(externalId);
         when(savingAccountAssembler.getPivotConfigStatus()).thenReturn(false);
-        when(savingAccountAssembler.assembleFrom(savingsId, false)).thenReturn(account);
+        when(savingAccountAssembler.assembleFromInUserScope(savingsId, false)).thenReturn(account);
         when(account.getClient()).thenReturn(null);
         when(account.group()).thenReturn(null);
         when(account.getCurrency()).thenReturn(currency);
@@ -323,6 +413,7 @@ class SavingsAccountWritePlatformServiceJpaRepositoryImplTest {
 
         verify(savingsAccountTransactionDataValidator).validateReleaseAmount(command);
         verify(releaseTransaction).updateExternalId(externalId);
+        verify(releaseTransaction).setRunningBalance(argThat(balance -> balance.getAmount().compareTo(BigDecimal.valueOf(100)) == 0));
         verify(savingsAccountTransactionRepository).saveAndFlush(releaseTransaction);
         verify(holdTransaction).updateReleaseId(88L);
     }
@@ -339,6 +430,59 @@ class SavingsAccountWritePlatformServiceJpaRepositoryImplTest {
 
         assertThatThrownBy(() -> service.releaseAmount(savingsId, holdTransactionId, command))
                 .isInstanceOf(SavingsAccountTransactionNotFoundException.class);
+    }
+
+    @Test
+    void undoTransaction_shouldCheckUserScopeWhenCalledByUser() {
+        Long savingsId = 1L;
+        Long transactionId = 7L;
+
+        when(savingAccountAssembler.assembleFromInUserScope(savingsId, false)).thenReturn(mock(SavingsAccount.class));
+
+        assertThatThrownBy(() -> service.undoTransaction(savingsId, transactionId, false))
+                .isInstanceOf(SavingsAccountTransactionNotFoundException.class);
+        verify(savingAccountAssembler).assembleFromInUserScope(savingsId, false);
+        verify(savingAccountAssembler, never()).assembleFrom(savingsId, false);
+    }
+
+    @Test
+    void undoTransaction_shouldSkipUserScopeForAccountTransferReversal() {
+        Long savingsId = 1L;
+        Long transactionId = 7L;
+
+        when(savingAccountAssembler.assembleFrom(savingsId, false)).thenReturn(mock(SavingsAccount.class));
+
+        assertThatThrownBy(() -> service.undoTransaction(savingsId, transactionId, true))
+                .isInstanceOf(SavingsAccountTransactionNotFoundException.class);
+        verify(savingAccountAssembler).assembleFrom(savingsId, false);
+        verify(savingAccountAssembler, never()).assembleFromInUserScope(anyLong(), anyBoolean());
+    }
+
+    @Test
+    void activate_shouldRejectUserOutsideAccountOfficeHierarchy() {
+        Long savingsId = 1L;
+        JsonCommand command = mock(JsonCommand.class);
+
+        when(savingAccountAssembler.assembleFromInUserScope(savingsId, false))
+                .thenThrow(new NoAuthorizationException("The user doesn't have enough permissions to access the resource."));
+
+        assertThatThrownBy(() -> service.activate(savingsId, command)).isInstanceOf(NoAuthorizationException.class);
+        verify(savingAccountAssembler, never()).assembleFrom(anyLong(), anyBoolean());
+        verify(savingAccountRepositoryWrapper, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void blockAccount_shouldLoadSavingsAccountInUserScope() {
+        Long savingsId = 1L;
+        SavingsAccount account = mock(SavingsAccount.class);
+        JsonCommand command = mock(JsonCommand.class);
+        when(savingAccountAssembler.assembleFromInUserScope(savingsId, false)).thenReturn(account);
+        when(account.block()).thenThrow(new IllegalStateException("Stop after loading the account"));
+
+        assertThatThrownBy(() -> service.blockAccount(savingsId, command)).isInstanceOf(IllegalStateException.class);
+
+        verify(savingAccountAssembler).assembleFromInUserScope(savingsId, false);
+        verify(savingAccountAssembler, never()).assembleFrom(savingsId, false);
     }
 
     @Test
@@ -360,7 +504,7 @@ class SavingsAccountWritePlatformServiceJpaRepositoryImplTest {
         when(command.localDateValueOfParameterNamed("transactionDate")).thenReturn(transactionDate);
         when(externalIdFactory.createFromCommand(command, "externalId")).thenReturn(externalId);
         when(savingAccountAssembler.getPivotConfigStatus()).thenReturn(false);
-        when(savingAccountAssembler.assembleFrom(savingsId, false)).thenReturn(account);
+        when(savingAccountAssembler.assembleFromInUserScope(savingsId, false)).thenReturn(account);
         when(account.getClient()).thenReturn(null);
         when(account.group()).thenReturn(null);
         when(account.getTransactions()).thenReturn(transactions);
@@ -385,13 +529,38 @@ class SavingsAccountWritePlatformServiceJpaRepositoryImplTest {
         Mockito.doAnswer(invocation -> {
             transactions.add(postingTransaction);
             return null;
-        }).when(account).postInterest(any(), any(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), anyBoolean());
+        }).when(savingsAccountPostInterestService).postInterest(any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(),
+                anyBoolean());
 
         service.postInterest(command);
 
         verify(savingsAccountTransactionDataValidator).validatePostInterest(command);
         verify(postingTransaction).updateExternalId(externalId);
         verify(savingsAccountTransactionRepository).save(postingTransaction);
+    }
+
+    @Test
+    void calculateInterest_shouldPersistBeforePostingReplacementAwareJournalEntries() {
+        final Long savingsId = 1L;
+        final LocalDate businessDate = LocalDate.of(2024, 4, 5);
+        final SavingsAccount account = mock(SavingsAccount.class);
+
+        setupTenantContext(businessDate);
+        when(savingAccountAssembler.getPivotConfigStatus()).thenReturn(false);
+        when(savingAccountAssembler.assembleFromInUserScope(savingsId, false)).thenReturn(account);
+        when(account.findExistingTransactionIds()).thenReturn(Set.of(10L));
+        when(account.findExistingReversedTransactionIds()).thenReturn(Set.of(11L));
+        when(account.officeId()).thenReturn(1L);
+        when(account.clientId()).thenReturn(2L);
+        when(account.groupId()).thenReturn(3L);
+        when(configurationDomainService.isSavingsInterestPostingAtCurrentPeriodEnd()).thenReturn(false);
+        when(configurationDomainService.retrieveFinancialYearBeginningMonth()).thenReturn(1);
+
+        service.calculateInterest(savingsId);
+
+        final var inOrder = Mockito.inOrder(savingAccountRepositoryWrapper, savingsAccountDomainService);
+        inOrder.verify(savingAccountRepositoryWrapper).saveAndFlush(account);
+        inOrder.verify(savingsAccountDomainService).postJournalEntries(account, Set.of(10L), Set.of(11L), false);
     }
 
     private void setupTenantContext(final LocalDate businessDate) {
@@ -421,6 +590,9 @@ class SavingsAccountWritePlatformServiceJpaRepositoryImplTest {
         SavingsAccount savingsAccount = mock(SavingsAccount.class);
         when(savingsAccount.getId()).thenReturn(savingsAccountId);
         when(savingsAccount.officeId()).thenReturn(1L);
+        Office office = mock(Office.class);
+        when(office.getHierarchy()).thenReturn(".");
+        when(savingsAccount.office()).thenReturn(office);
         when(savingsAccount.clientId()).thenReturn(1L);
         when(savingsAccount.groupId()).thenReturn(1L);
         when(savingsAccount.findExistingTransactionIds()).thenReturn(new HashSet<>());
@@ -453,5 +625,187 @@ class SavingsAccountWritePlatformServiceJpaRepositoryImplTest {
 
         // Then
         assertThat(result.getTransactionId()).isEqualTo(expectedTransactionId.toString());
+    }
+
+    @Test
+    void undoWithdrawalFee_feeSavedBeforeTheWithdrawal_isFoundByRefNo() throws Exception {
+        SavingsAccount savingsAccount = mock(SavingsAccount.class);
+        when(savingsAccount.getId()).thenReturn(1L);
+        SavingsAccountTransaction withdrawal = transaction(14L, "ref-1", savingsAccount, false);
+        SavingsAccountTransaction fee = transaction(13L, "ref-1", savingsAccount, true);
+        when(savingsAccountTransactionRepository.findByRefNo("ref-1")).thenReturn(List.of(fee, withdrawal));
+
+        undoWithdrawalFee.invoke(service, savingsAccount, withdrawal);
+
+        verify(savingsAccount).undoTransaction(13L);
+        verify(savingsAccount, never()).undoTransaction(14L);
+        verify(savingsAccountTransactionRepository, never()).findOneByIdAndSavingsAccountId(anyLong(), anyLong());
+    }
+
+    @Test
+    void undoWithdrawalFee_ignoresFeesOfOtherAccountsAndReversedFees() throws Exception {
+        SavingsAccount savingsAccount = mock(SavingsAccount.class);
+        when(savingsAccount.getId()).thenReturn(1L);
+        SavingsAccount otherAccount = mock(SavingsAccount.class);
+        when(otherAccount.getId()).thenReturn(2L);
+        SavingsAccountTransaction withdrawal = transaction(20L, "ref-2", savingsAccount, false);
+        SavingsAccountTransaction otherAccountFee = transaction(21L, "ref-2", otherAccount, true);
+        SavingsAccountTransaction reversedFee = transaction(19L, "ref-2", savingsAccount, false);
+        when(savingsAccountTransactionRepository.findByRefNo("ref-2")).thenReturn(List.of(withdrawal, otherAccountFee, reversedFee));
+
+        undoWithdrawalFee.invoke(service, savingsAccount, withdrawal);
+
+        verify(savingsAccount, never()).undoTransaction(anyLong());
+    }
+
+    @Test
+    void undoWithdrawalFee_withoutRefNo_usesTheNextTransaction() throws Exception {
+        SavingsAccount savingsAccount = mock(SavingsAccount.class);
+        when(savingsAccount.getId()).thenReturn(1L);
+        SavingsAccountTransaction withdrawal = transaction(30L, null, savingsAccount, false);
+        SavingsAccountTransaction fee = transaction(31L, null, savingsAccount, true);
+        when(savingsAccountTransactionRepository.findOneByIdAndSavingsAccountId(31L, 1L)).thenReturn(fee);
+
+        undoWithdrawalFee.invoke(service, savingsAccount, withdrawal);
+
+        verify(savingsAccount).undoTransaction(31L);
+        verify(savingsAccountTransactionRepository, never()).findByRefNo(any());
+    }
+
+    private static SavingsAccountTransaction transaction(Long id, String refNo, SavingsAccount savingsAccount,
+            boolean withdrawalFeeAndNotReversed) {
+        SavingsAccountTransaction transaction = mock(SavingsAccountTransaction.class);
+        when(transaction.getId()).thenReturn(id);
+        when(transaction.getRefNo()).thenReturn(refNo);
+        when(transaction.getSavingsAccount()).thenReturn(savingsAccount);
+        when(transaction.isWithdrawalFeeAndNotReversed()).thenReturn(withdrawalFeeAndNotReversed);
+        return transaction;
+    }
+
+    @Test
+    void selectAccountId_interestPosting_leavesTheAccountsToTheSharedRules() {
+        final SavingsAccountTransactionData transaction = transactionOfType(SavingsAccountTransactionType.INTEREST_POSTING);
+
+        service.selectAccountId(transaction, savingsAccountWithGlAccounts(true));
+        service.selectAccountId(transaction, savingsAccountWithGlAccounts(false));
+
+        verify(transaction, never()).setAccountDebit(any());
+        verify(transaction, never()).setAccountCredit(any());
+    }
+
+    @Test
+    void selectAccountId_cashBasedOverdraftInterestOnNegativeBalance_debitsOverdraftPortfolio() {
+        final SavingsAccountTransactionData transaction = transactionOfType(SavingsAccountTransactionType.OVERDRAFT_INTEREST);
+        when(transaction.getRunningBalance()).thenReturn(new BigDecimal("-100"));
+
+        service.selectAccountId(transaction, savingsAccountWithGlAccounts(true));
+
+        verify(transaction).setAccountDebit(OVERDRAFT_PORTFOLIO_GL_ACCOUNT_ID);
+        verify(transaction).setAccountCredit(INCOME_FROM_INTEREST_GL_ACCOUNT_ID);
+    }
+
+    @Test
+    void selectAccountId_cashBasedOverdraftInterestOnPositiveBalance_debitsSavingsControl() {
+        final SavingsAccountTransactionData transaction = transactionOfType(SavingsAccountTransactionType.OVERDRAFT_INTEREST);
+        when(transaction.getRunningBalance()).thenReturn(new BigDecimal("100"));
+
+        service.selectAccountId(transaction, savingsAccountWithGlAccounts(true));
+
+        verify(transaction).setAccountDebit(SAVINGS_CONTROL_GL_ACCOUNT_ID);
+        verify(transaction).setAccountCredit(INCOME_FROM_INTEREST_GL_ACCOUNT_ID);
+    }
+
+    @Test
+    void selectAccountId_accrualOverdraftInterest_creditsInterestReceivable() {
+        final SavingsAccountTransactionData transaction = transactionOfType(SavingsAccountTransactionType.OVERDRAFT_INTEREST);
+        when(transaction.getRunningBalance()).thenReturn(new BigDecimal("-100"));
+
+        service.selectAccountId(transaction, savingsAccountWithGlAccounts(false));
+
+        verify(transaction).setAccountDebit(OVERDRAFT_PORTFOLIO_GL_ACCOUNT_ID);
+        verify(transaction).setAccountCredit(INTEREST_RECEIVABLE_GL_ACCOUNT_ID);
+    }
+
+    @ParameterizedTest(name = "backdatedTxnsAllowedTill={0}")
+    @ValueSource(booleans = { false, true })
+    void postInterestForJob_newPosting_getsGlAccountsWithAndWithoutPivotDateConfig(final boolean backdatedTxnsAllowedTill) {
+        setupTenantContext(LocalDate.of(2025, 4, 1));
+        final SavingsAccountData account = savingsAccountWithGlAccounts(false);
+        final SavingsAccountTransactionData existingDeposit = transactionOfType(SavingsAccountTransactionType.DEPOSIT);
+        when(existingDeposit.getId()).thenReturn(1L);
+        // the job books overdraft interest from the accounts chosen here; an interest posting is booked from
+        // SavingsInterestPostingLegs and gets none (selectAccountId_interestPosting_leavesTheAccountsToTheSharedRules)
+        final SavingsAccountTransactionData newPosting = transactionOfType(SavingsAccountTransactionType.OVERDRAFT_INTEREST);
+        when(newPosting.getId()).thenReturn(null);
+        when(newPosting.getRunningBalance()).thenReturn(new BigDecimal("-100"));
+        when(account.getNominalAnnualInterestRate()).thenReturn(new BigDecimal("5"));
+        when(account.getSavingsAccountTransactionData()).thenReturn(List.of(existingDeposit, newPosting));
+        when(configurationDomainService.retrieveFinancialYearBeginningMonth()).thenReturn(1);
+        when(savingsAccountInterestPostingService.postInterest(any(), any(), anyBoolean(), anyBoolean(), any(), any(),
+                Mockito.eq(backdatedTxnsAllowedTill), Mockito.same(account))).thenReturn(account);
+
+        service.postInterest(account, false, null, backdatedTxnsAllowedTill);
+
+        verify(newPosting).setAccountDebit(OVERDRAFT_PORTFOLIO_GL_ACCOUNT_ID);
+        verify(newPosting).setAccountCredit(INTEREST_RECEIVABLE_GL_ACCOUNT_ID);
+        verify(existingDeposit, never()).setAccountDebit(any());
+        verify(existingDeposit, never()).setAccountCredit(any());
+    }
+
+    private static SavingsAccountTransactionData transactionOfType(final SavingsAccountTransactionType type) {
+        final SavingsAccountTransactionData transaction = mock(SavingsAccountTransactionData.class);
+        when(transaction.getTransactionType()).thenReturn(SavingsEnumerations.transactionType(type));
+        return transaction;
+    }
+
+    private static SavingsAccountData savingsAccountWithGlAccounts(final boolean cashBasedAccounting) {
+        final SavingsAccountData account = mock(SavingsAccountData.class);
+        when(account.isCashBasedAccountingEnabledOnSavingsProduct()).thenReturn(cashBasedAccounting);
+        when(account.getGlAccountIdForInterestOnSavings()).thenReturn(INTEREST_ON_SAVINGS_GL_ACCOUNT_ID);
+        when(account.getGlAccountIdForSavingsControl()).thenReturn(SAVINGS_CONTROL_GL_ACCOUNT_ID);
+        when(account.getGlAccountIdForInterestPayable()).thenReturn(INTEREST_PAYABLE_GL_ACCOUNT_ID);
+        when(account.getGlAccountIdForIncomeFromInterest()).thenReturn(INCOME_FROM_INTEREST_GL_ACCOUNT_ID);
+        when(account.getGlAccountIdForOverdraftPorfolio()).thenReturn(OVERDRAFT_PORTFOLIO_GL_ACCOUNT_ID);
+        when(account.getGlAccountIdForInterestReceivable()).thenReturn(INTEREST_RECEIVABLE_GL_ACCOUNT_ID);
+        return account;
+    }
+
+    @Test
+    void applyChargeDueShouldCollectOneRecurringInstallmentAndReturnTheNextDueDate() {
+        Long savingsAccountId = 1L;
+        Long chargeId = 2L;
+        LocalDate businessDate = LocalDate.of(2026, 9, 17);
+        LocalDate firstDueDate = LocalDate.of(2026, 9, 1);
+        LocalDate nextDueDate = LocalDate.of(2026, 9, 8);
+        setupTenantContext(businessDate);
+
+        SavingsAccount account = mock(SavingsAccount.class);
+        SavingsAccountCharge charge = mock(SavingsAccountCharge.class);
+        SavingsAccountTransaction transaction = mock(SavingsAccountTransaction.class);
+        MonetaryCurrency currency = new MonetaryCurrency("USD", 2, 0);
+
+        when(savingsAccountChargeRepository.findOneWithNotFoundDetection(chargeId, savingsAccountId)).thenReturn(charge);
+        when(charge.savingsAccount()).thenReturn(account);
+        when(charge.isNotFullyPaid()).thenReturn(true);
+        when(charge.getDueDate()).thenReturn(firstDueDate, nextDueDate);
+        when(charge.amoutOutstanding()).thenReturn(BigDecimal.valueOf(100));
+        when(account.getId()).thenReturn(savingsAccountId);
+        when(account.getCurrency()).thenReturn(currency);
+        when(account.getOnHoldFunds()).thenReturn(BigDecimal.ZERO);
+        when(account.findExistingTransactionIds()).thenReturn(Collections.emptySet());
+        when(account.findExistingReversedTransactionIds()).thenReturn(Collections.emptySet());
+        when(account.isBeforeLastPostingPeriod(any(LocalDate.class), anyBoolean())).thenReturn(false);
+        when(account.payCharge(any(), any(), any(), any(), anyBoolean(), any())).thenReturn(transaction);
+        when(account.deriveAccountingBridgeData(any(), any(), any(), anyBoolean(), anyBoolean())).thenReturn(Collections.emptyMap());
+        when(savingsAccountTransactionRepository.findBySavingsAccountIdAndLessThanDateOfAndReversedIsFalse(anyLong(), any(), any()))
+                .thenReturn(Collections.emptyList());
+        when(configurationDomainService.isSavingsInterestPostingAtCurrentPeriodEnd()).thenReturn(false);
+        when(configurationDomainService.retrieveFinancialYearBeginningMonth()).thenReturn(1);
+
+        LocalDate result = service.applyChargeDue(chargeId, savingsAccountId);
+
+        assertThat(result).isEqualTo(nextDueDate);
+        verify(account, times(1)).payCharge(any(), any(), any(), any(), anyBoolean(), any());
+        verify(savingAccountRepositoryWrapper).saveAndFlush(account);
     }
 }

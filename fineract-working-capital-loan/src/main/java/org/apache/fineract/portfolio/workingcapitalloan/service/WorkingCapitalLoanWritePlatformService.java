@@ -35,13 +35,25 @@ public interface WorkingCapitalLoanWritePlatformService {
 
     CommandProcessingResult makeRepayment(Long loanId, JsonCommand command);
 
-    CommandProcessingResult makeDiscountFee(Long resourceId, JsonCommand command);
+    CommandProcessingResult makeDiscountFee(Long loanId, JsonCommand command);
+
+    CommandProcessingResult makeDiscountFeeForDisbursement(Long loanId, Long disbursementTransactionId, JsonCommand command);
 
     CommandProcessingResult makeDiscountFeeAdjustment(Long loanId, JsonCommand command);
+
+    CommandProcessingResult makeDiscountFeeAdjustmentForDiscountFee(Long loanId, Long discountFeeTransactionId, JsonCommand command);
+
+    CommandProcessingResult undoTransaction(Long loanId, Long transactionId, JsonCommand command);
+
+    CommandProcessingResult adjustTransaction(Long loanId, Long transactionId, JsonCommand command);
+
+    CommandProcessingResult adjustByDeltaTransaction(Long loanId, Long transactionId, JsonCommand command);
 
     CommandProcessingResult creditBalanceRefund(Long loanId, JsonCommand command);
 
     CommandProcessingResult makeGoodwillCredit(Long loanId, JsonCommand command);
+
+    CommandProcessingResult makePayoutRefund(Long loanId, JsonCommand command);
 
     CommandProcessingResult updatePeriodPaymentRate(Long loanId, JsonCommand command);
 }

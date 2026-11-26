@@ -18,165 +18,128 @@
  */
 package org.apache.fineract.integrationtests;
 
-import static org.apache.fineract.infrastructure.core.domain.AuditableFieldsConstants.CREATED_BY;
-import static org.apache.fineract.infrastructure.core.domain.AuditableFieldsConstants.CREATED_DATE;
-import static org.apache.fineract.infrastructure.core.domain.AuditableFieldsConstants.LAST_MODIFIED_BY;
-import static org.apache.fineract.infrastructure.core.domain.AuditableFieldsConstants.LAST_MODIFIED_DATE;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import io.restassured.builder.RequestSpecBuilder;
-import io.restassured.builder.ResponseSpecBuilder;
-import io.restassured.http.ContentType;
-import io.restassured.specification.RequestSpecification;
-import io.restassured.specification.ResponseSpecification;
+import java.math.BigDecimal;
 import java.time.OffsetDateTime;
-import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
+import org.apache.fineract.client.feign.FineractFeignClient;
+import org.apache.fineract.client.models.LoanAuditFieldsData;
+import org.apache.fineract.client.models.PostLoansRequest;
 import org.apache.fineract.infrastructure.core.service.DateUtils;
-import org.apache.fineract.integrationtests.common.ClientHelper;
+import org.apache.fineract.integrationtests.client.feign.FeignLoanTestBase;
+import org.apache.fineract.integrationtests.client.feign.helpers.FeignStaffHelper;
+import org.apache.fineract.integrationtests.client.feign.helpers.FeignTransactionHelper;
+import org.apache.fineract.integrationtests.client.feign.helpers.FeignUserHelper;
+import org.apache.fineract.integrationtests.client.feign.modules.LoanRequestBuilders;
+import org.apache.fineract.integrationtests.client.feign.modules.LoanTestData;
+import org.apache.fineract.integrationtests.common.FineractFeignClientHelper;
 import org.apache.fineract.integrationtests.common.Utils;
 import org.apache.fineract.integrationtests.common.accounting.Account;
-import org.apache.fineract.integrationtests.common.accounting.AccountHelper;
-import org.apache.fineract.integrationtests.common.loans.LoanApplicationTestBuilder;
 import org.apache.fineract.integrationtests.common.loans.LoanProductTestBuilder;
-import org.apache.fineract.integrationtests.common.loans.LoanStatusChecker;
-import org.apache.fineract.integrationtests.common.loans.LoanTestLifecycleExtension;
-import org.apache.fineract.integrationtests.common.loans.LoanTransactionHelper;
-import org.apache.fineract.integrationtests.common.organisation.StaffHelper;
-import org.apache.fineract.integrationtests.useradministration.users.UserHelper;
+import org.apache.fineract.portfolio.loanaccount.domain.LoanStatus;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-@ExtendWith(LoanTestLifecycleExtension.class)
-public class LoanTransactionAuditingIntegrationTest {
+public class LoanTransactionAuditingIntegrationTest extends FeignLoanTestBase {
 
     private static final Logger LOG = LoggerFactory.getLogger(LoanTransactionAuditingIntegrationTest.class);
-    private ResponseSpecification responseSpec;
-    private RequestSpecification requestSpec;
-    private LoanTransactionHelper loanTransactionHelper;
-    private AccountHelper accountHelper;
+    private static final String NEW_USER_PASSWORD = "A1b2c3d4e5f$";
+    private static Long clientId;
 
     @BeforeEach
     public void setup() {
-        Utils.initializeRESTAssured();
-        this.requestSpec = new RequestSpecBuilder().setContentType(ContentType.JSON).build();
-        this.requestSpec.header("Authorization", "Basic " + Utils.loginIntoServerAndGetBase64EncodedAuthenticationKey());
-
-        this.responseSpec = new ResponseSpecBuilder().expectStatusCode(200).build();
-        this.loanTransactionHelper = new LoanTransactionHelper(this.requestSpec, this.responseSpec);
-        this.accountHelper = new AccountHelper(this.requestSpec, this.responseSpec);
+        clientId = createClient("10 July 2022");
+        Assertions.assertNotNull(clientHelper.getClient(clientId));
     }
 
     @Test
     public void checkAuditDates() throws InterruptedException {
-        final Integer staffId = StaffHelper.createStaff(this.requestSpec, this.responseSpec);
+        final Long staffId = new FeignStaffHelper(FineractFeignClientHelper.getFineractFeignClient()).createStaff().getResourceId();
         String username = Utils.uniqueRandomStringGenerator("user", 8);
-        final Integer userId = (Integer) UserHelper.createUser(this.requestSpec, this.responseSpec, 1, staffId, username, "A1b2c3d4e5f$",
-                "resourceId");
+        final Long userId = FeignUserHelper.createUser(1L, staffId, username, NEW_USER_PASSWORD).getResourceId();
 
-        LOG.info("-------------------------Creating Client---------------------------");
-
-        final Integer clientID = ClientHelper.createClient(requestSpec, responseSpec);
-        ClientHelper.verifyClientCreatedOnServer(requestSpec, responseSpec, clientID);
         LOG.info("-------------------------Creating Loan---------------------------");
-        final Account assetAccount = this.accountHelper.createAssetAccount();
-        final Account incomeAccount = this.accountHelper.createIncomeAccount();
-        final Account expenseAccount = this.accountHelper.createExpenseAccount();
-        final Account overpaymentAccount = this.accountHelper.createLiabilityAccount();
 
-        final Integer loanProductID = createLoanProduct("0", "0", LoanProductTestBuilder.DEFAULT_STRATEGY, "2", assetAccount, incomeAccount,
-                expenseAccount, overpaymentAccount);
-
-        final Integer loanID = applyForLoanApplicationWithPaymentStrategyAndPastMonth(clientID, loanProductID, Collections.emptyList(),
-                null, "10000", LoanApplicationTestBuilder.DEFAULT_STRATEGY, "10 July 2022", "12 July 2022");
-        Assertions.assertNotNull(loanID);
-        HashMap loanStatusHashMap = LoanStatusChecker.getStatusOfLoan(this.requestSpec, this.responseSpec, loanID);
-        LoanStatusChecker.verifyLoanIsPending(loanStatusHashMap);
+        final Long loanProductId = createLoanProduct("0", "0", LoanProductTestBuilder.DEFAULT_STRATEGY, "2");
+        final Long loanId = applyForLoanApplication(clientId, loanProductId, 10000.0, "10 July 2022", "12 July 2022");
+        Assertions.assertNotNull(loanId);
+        verifyLoanStatus(loanId, LoanStatus.SUBMITTED_AND_PENDING_APPROVAL);
 
         LOG.info("-----------------------------------APPROVE LOAN-----------------------------------------");
-        loanStatusHashMap = this.loanTransactionHelper.approveLoan("11 July 2022", loanID);
-        LoanStatusChecker.verifyLoanIsApproved(loanStatusHashMap);
-        loanStatusHashMap = this.loanTransactionHelper.disburseLoanWithNetDisbursalAmount("11 July 2022", loanID, "10000");
-        LoanStatusChecker.verifyLoanIsActive(loanStatusHashMap);
+        approveLoan(loanId, approveLoanRequest(10000.0, "11 July 2022"));
+        verifyLoanStatus(loanId, LoanStatus.APPROVED);
+        disburseLoanWithNetDisbursalAmount(loanId, "11 July 2022", "10000");
+        verifyLoanStatus(loanId, LoanStatus.ACTIVE);
 
         OffsetDateTime now = Utils.getAuditDateTimeToCompare();
-        HashMap repaymentDetails = this.loanTransactionHelper.makeRepayment("11 July 2022", 100.0f, loanID);
-        Integer transactionId = (Integer) repaymentDetails.get("resourceId");
-        HashMap auditFieldsResponse = LoanTransactionHelper.getLoanTransactionAuditFields(requestSpec, responseSpec, loanID, transactionId,
-                "");
+        makeLoanRepayment(loanId, "Repayment", "11 July 2022", 100.0);
 
-        OffsetDateTime createdDate = OffsetDateTime.parse((String) auditFieldsResponse.get(CREATED_DATE),
-                DateTimeFormatter.ISO_OFFSET_DATE_TIME);
-        OffsetDateTime lastModifiedDate = OffsetDateTime.parse((String) auditFieldsResponse.get(LAST_MODIFIED_DATE),
-                DateTimeFormatter.ISO_OFFSET_DATE_TIME);
+        // Get the transaction id from the loan details
+        var loanDetails = getLoanDetails(loanId);
+        Long transactionId = loanDetails.getTransactions().stream()
+                .filter(t -> "Repayment".equalsIgnoreCase(t.getType().getValue()) && !Boolean.TRUE.equals(t.getManuallyReversed()))
+                .findFirst().orElseThrow().getId();
+
+        LoanAuditFieldsData auditFieldsResponse = getAuditFields(loanId, transactionId);
+
+        OffsetDateTime createdDate = auditFieldsResponse.getCreatedDate();
+        OffsetDateTime lastModifiedDate = auditFieldsResponse.getLastModifiedDate();
 
         LOG.info("-------------------------Check Audit dates---------------------------");
-        assertEquals(1, auditFieldsResponse.get(CREATED_BY));
-        assertEquals(1, auditFieldsResponse.get(LAST_MODIFIED_BY));
+        assertEquals(1L, auditFieldsResponse.getCreatedBy());
+        assertEquals(1L, auditFieldsResponse.getLastModifiedBy());
         assertTrue(DateUtils.isEqual(now, createdDate, ChronoUnit.MINUTES));
         assertTrue(DateUtils.isEqual(now, lastModifiedDate, ChronoUnit.MINUTES));
 
         Thread.sleep(2000);
 
-        this.requestSpec = new RequestSpecBuilder().setContentType(ContentType.JSON).build();
-        this.requestSpec.header("Authorization",
-                "Basic " + Utils.loginIntoServerAndGetBase64EncodedAuthenticationKey(username, "A1b2c3d4e5f$"));
-        this.loanTransactionHelper = new LoanTransactionHelper(this.requestSpec, this.responseSpec);
+        // Reverse using a different user
+        FineractFeignClient asNewUser = FineractFeignClientHelper.createNewFineractFeignClient(username, NEW_USER_PASSWORD);
+        FeignTransactionHelper newUserTransactionHelper = new FeignTransactionHelper(asNewUser);
 
         OffsetDateTime now2 = Utils.getAuditDateTimeToCompare();
-        this.loanTransactionHelper.reverseRepayment(loanID, transactionId, "11 July 2022");
+        newUserTransactionHelper.reverseLoanTransaction(loanId, transactionId, "11 July 2022");
 
-        auditFieldsResponse = LoanTransactionHelper.getLoanTransactionAuditFields(requestSpec, responseSpec, loanID, transactionId, "");
+        auditFieldsResponse = getAuditFields(loanId, transactionId);
 
-        OffsetDateTime createdDate2 = OffsetDateTime.parse((String) auditFieldsResponse.get(CREATED_DATE),
-                DateTimeFormatter.ISO_OFFSET_DATE_TIME);
-        lastModifiedDate = OffsetDateTime.parse((String) auditFieldsResponse.get(LAST_MODIFIED_DATE),
-                DateTimeFormatter.ISO_OFFSET_DATE_TIME);
+        OffsetDateTime createdDate2 = auditFieldsResponse.getCreatedDate();
+        lastModifiedDate = auditFieldsResponse.getLastModifiedDate();
 
         LOG.info("-------------------------Check Audit dates---------------------------");
-        assertEquals(1, auditFieldsResponse.get(CREATED_BY));
+        assertEquals(1L, auditFieldsResponse.getCreatedBy());
         assertTrue(DateUtils.isEqual(now, createdDate2, ChronoUnit.MINUTES));
         assertTrue(DateUtils.isEqual(createdDate, createdDate2));
 
-        assertEquals(userId, auditFieldsResponse.get(LAST_MODIFIED_BY));
+        assertEquals(userId, auditFieldsResponse.getLastModifiedBy());
         assertTrue(DateUtils.isEqual(now2, lastModifiedDate, ChronoUnit.MINUTES));
     }
 
-    private Integer applyForLoanApplicationWithPaymentStrategyAndPastMonth(final Integer clientID, final Integer loanProductID,
-            List<HashMap> charges, final String savingsId, String principal, final String repaymentStrategy, final String submittedOnDate,
-            final String disbursementDate) {
-        LOG.info("--------------------------------APPLYING FOR LOAN APPLICATION--------------------------------");
-
-        final String loanApplicationJSON = new LoanApplicationTestBuilder() //
-                .withPrincipal(principal) //
-                .withLoanTermFrequency("6") //
-                .withLoanTermFrequencyAsMonths() //
-                .withNumberOfRepayments("6") //
-                .withRepaymentEveryAfter("1") //
-                .withRepaymentFrequencyTypeAsMonths() //
-                .withInterestRatePerPeriod("2") //
-                .withAmortizationTypeAsEqualInstallments() //
-                .withInterestTypeAsFlatBalance() //
-                .withInterestCalculationPeriodTypeSameAsRepaymentPeriod() //
-                .withExpectedDisbursementDate(disbursementDate) //
-                .withSubmittedOnDate(submittedOnDate) //
-                .withRepaymentStrategy(repaymentStrategy) //
-                .withCharges(charges).build(clientID.toString(), loanProductID.toString(), savingsId);
-        return this.loanTransactionHelper.getLoanId(loanApplicationJSON);
+    private LoanAuditFieldsData getAuditFields(Long loanId, Long transactionId) {
+        return ok(() -> fineractClient().defaultApi().getLoanTransactionAuditFields(loanId, transactionId));
     }
 
-    private Integer createLoanProduct(final String inMultiplesOf, final String digitsAfterDecimal, final String repaymentStrategy,
-            final String accountingRule, final Account... accounts) {
-        LOG.info("------------------------------CREATING NEW LOAN PRODUCT ---------------------------------------");
-        final String loanProductJSON = new LoanProductTestBuilder() //
+    private Long applyForLoanApplication(final Long clientId, final Long loanProductId, Double principal, final String submittedOnDate,
+            final String disbursementDate) {
+        final PostLoansRequest application = LoanRequestBuilders.applyLoan(clientId, loanProductId, submittedOnDate, principal, 6)//
+                .expectedDisbursementDate(disbursementDate)//
+                .interestRatePerPeriod(BigDecimal.valueOf(2))//
+                .interestType(LoanTestData.InterestType.FLAT);
+        return loanHelper.applyForLoan(application).getLoanId();
+    }
+
+    private Long createLoanProduct(final String inMultiplesOf, final String digitsAfterDecimal, final String repaymentStrategy,
+            final String accountingRule) {
+        final Account assetAccount = getAccounts().getLoansReceivableAccount();
+        final Account incomeAccount = getAccounts().getInterestIncomeAccount();
+        final Account expenseAccount = getAccounts().getChargeOffExpenseAccount();
+        final Account overpaymentAccount = getAccounts().getOverpaymentAccount();
+
+        return createLoanProduct(new LoanProductTestBuilder() //
                 .withPrincipal("10000000.00") //
                 .withNumberOfRepayments("24") //
                 .withRepaymentAfterEvery("1") //
@@ -186,8 +149,8 @@ public class LoanTransactionAuditingIntegrationTest {
                 .withRepaymentStrategy(repaymentStrategy) //
                 .withAmortizationTypeAsEqualPrincipalPayment() //
                 .withInterestTypeAsDecliningBalance() //
-                .currencyDetails(digitsAfterDecimal, inMultiplesOf).withAccounting(accountingRule, accounts).build(null);
-        return this.loanTransactionHelper.getLoanProductId(loanProductJSON);
+                .currencyDetails(digitsAfterDecimal, inMultiplesOf)
+                .withAccounting(accountingRule, new Account[] { assetAccount, incomeAccount, expenseAccount, overpaymentAccount })
+                .buildRequest(null));
     }
-
 }

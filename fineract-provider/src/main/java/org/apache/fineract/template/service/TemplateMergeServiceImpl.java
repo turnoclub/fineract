@@ -18,18 +18,17 @@
  */
 package org.apache.fineract.template.service;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.mustachejava.DefaultMustacheFactory;
 import com.github.mustachejava.Mustache;
 import com.github.mustachejava.MustacheFactory;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.StringReader;
+import java.io.Reader;
 import java.io.StringWriter;
 import java.net.Authenticator;
 import java.net.HttpURLConnection;
 import java.net.PasswordAuthentication;
-import java.net.URL;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyManagementException;
 import java.security.KeyStoreException;
@@ -51,6 +50,7 @@ import org.apache.fineract.template.exception.TemplateForbiddenException;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
+import tools.jackson.databind.ObjectMapper;
 
 @Slf4j
 @RequiredArgsConstructor
@@ -65,7 +65,7 @@ public class TemplateMergeServiceImpl implements TemplateMergeService {
         scopes.put("static", TemplateFunctions.INSTANCE);
 
         var mf = new DefaultMustacheFactory();
-        var mustache = mf.compile(new StringReader(template.getText()), template.getName());
+        var mustache = mf.compile(Reader.of(template.getText()), template.getName());
 
         compiledMapFromMappers(asMap(template.getMappers()), scopes);
 
@@ -82,7 +82,7 @@ public class TemplateMergeServiceImpl implements TemplateMergeService {
 
         if (data != null) {
             for (final Map.Entry<String, String> entry : data.entrySet()) {
-                final Mustache mappersMustache = mf.compile(new StringReader(entry.getValue()), "");
+                final Mustache mappersMustache = mf.compile(Reader.of(entry.getValue()), "");
                 final StringWriter stringWriter = new StringWriter();
 
                 mappersMustache.execute(stringWriter, scopes);
@@ -169,7 +169,7 @@ public class TemplateMergeServiceImpl implements TemplateMergeService {
 
         HttpURLConnection connection = null;
         try {
-            connection = (HttpURLConnection) new URL(url).openConnection();
+            connection = (HttpURLConnection) URI.create(url).toURL().openConnection();
             if (authToken != null) {
                 connection.setRequestProperty("Authorization", "Basic " + authToken);// NOSONAR
             }

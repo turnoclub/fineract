@@ -34,6 +34,7 @@ import org.apache.fineract.infrastructure.core.domain.ExternalId;
 import org.apache.fineract.infrastructure.core.service.DateUtils;
 import org.apache.fineract.infrastructure.core.service.ExternalIdFactory;
 import org.apache.fineract.infrastructure.core.service.MathUtil;
+import org.apache.fineract.infrastructure.core.service.TransactionBoundApplicationEventPublisher;
 import org.apache.fineract.infrastructure.event.business.domain.loan.LoanBalanceChangedBusinessEvent;
 import org.apache.fineract.infrastructure.event.business.domain.loan.transaction.LoanCapitalizedIncomeAdjustmentTransactionCreatedBusinessEvent;
 import org.apache.fineract.infrastructure.event.business.domain.loan.transaction.LoanCapitalizedIncomeTransactionCreatedBusinessEvent;
@@ -52,33 +53,32 @@ import org.apache.fineract.portfolio.note.data.NoteCreateRequest;
 import org.apache.fineract.portfolio.note.domain.NoteType;
 import org.apache.fineract.portfolio.paymentdetail.domain.PaymentDetail;
 import org.apache.fineract.portfolio.paymentdetail.service.PaymentDetailWritePlatformService;
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.transaction.annotation.Transactional;
 
 @Slf4j
 @RequiredArgsConstructor
 public class CapitalizedIncomeWritePlatformServiceImpl implements CapitalizedIncomePlatformService {
 
-    private final ProgressiveLoanTransactionValidator loanTransactionValidator;
-    private final LoanAssembler loanAssembler;
-    private final LoanTransactionRepository loanTransactionRepository;
-    private final PaymentDetailWritePlatformService paymentDetailWritePlatformService;
-    private final LoanJournalEntryPoster journalEntryPoster;
-    private final ExternalIdFactory externalIdFactory;
-    private final LoanCapitalizedIncomeBalanceRepository capitalizedIncomeBalanceRepository;
-    private final ReprocessLoanTransactionsService reprocessLoanTransactionsService;
-    private final LoanBalanceService loanBalanceService;
-    private final LoanLifecycleStateMachine loanLifecycleStateMachine;
-    private final BusinessEventNotifierService businessEventNotifierService;
-    private final CodeValueRepository codeValueRepository;
-    private final LoanScheduleService loanScheduleService;
-    private final ApplicationEventPublisher eventPublisher;
+    protected final ProgressiveLoanTransactionValidator loanTransactionValidator;
+    protected final LoanAssembler loanAssembler;
+    protected final LoanTransactionRepository loanTransactionRepository;
+    protected final PaymentDetailWritePlatformService paymentDetailWritePlatformService;
+    protected final LoanJournalEntryPoster journalEntryPoster;
+    protected final ExternalIdFactory externalIdFactory;
+    protected final LoanCapitalizedIncomeBalanceRepository capitalizedIncomeBalanceRepository;
+    protected final ReprocessLoanTransactionsService reprocessLoanTransactionsService;
+    protected final LoanBalanceService loanBalanceService;
+    protected final LoanLifecycleStateMachine loanLifecycleStateMachine;
+    protected final BusinessEventNotifierService businessEventNotifierService;
+    protected final CodeValueRepository codeValueRepository;
+    protected final LoanScheduleService loanScheduleService;
+    protected final TransactionBoundApplicationEventPublisher eventPublisher;
 
     @Transactional
     @Override
     public CommandProcessingResult addCapitalizedIncome(final Long loanId, final JsonCommand command) {
         loanTransactionValidator.validateCapitalizedIncome(command, loanId);
-        final Loan loan = loanAssembler.assembleFrom(loanId);
+        final Loan loan = loanAssembler.assembleFromInUserScope(loanId);
         final Map<String, Object> changes = new LinkedHashMap<>();
         // Create payment details
         final PaymentDetail paymentDetail = this.paymentDetailWritePlatformService.createAndPersistPaymentDetail(command, changes);
@@ -134,7 +134,7 @@ public class CapitalizedIncomeWritePlatformServiceImpl implements CapitalizedInc
     public CommandProcessingResult capitalizedIncomeAdjustment(final Long loanId, final Long capitalizedIncomeTransactionId,
             final JsonCommand command) {
         loanTransactionValidator.validateCapitalizedIncomeAdjustment(command, loanId, capitalizedIncomeTransactionId);
-        final Loan loan = loanAssembler.assembleFrom(loanId);
+        final Loan loan = loanAssembler.assembleFromInUserScope(loanId);
         final Map<String, Object> changes = new LinkedHashMap<>();
         // Create payment details
         final PaymentDetail paymentDetail = this.paymentDetailWritePlatformService.createAndPersistPaymentDetail(command, changes);

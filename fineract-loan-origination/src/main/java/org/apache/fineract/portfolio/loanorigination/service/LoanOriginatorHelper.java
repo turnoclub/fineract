@@ -26,7 +26,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.fineract.infrastructure.codes.domain.CodeValue;
 import org.apache.fineract.infrastructure.codes.domain.CodeValueRepositoryWrapper;
-import org.apache.fineract.infrastructure.configuration.domain.GlobalConfigurationProperty;
+import org.apache.fineract.infrastructure.configuration.data.GlobalConfigurationPropertyData;
 import org.apache.fineract.infrastructure.configuration.domain.GlobalConfigurationRepositoryWrapper;
 import org.apache.fineract.infrastructure.configuration.exception.GlobalConfigurationPropertyNotFoundException;
 import org.apache.fineract.infrastructure.core.domain.ExternalId;
@@ -62,8 +62,25 @@ public class LoanOriginatorHelper {
             if (!isOriginatorCreationDuringLoanApplicationEnabled()) {
                 throw new LoanOriginatorCreationNotAllowedException(data.getExternalId());
             }
-            return createNewOriginator(data, externalId).getId();
+            return createNewOriginator(data, externalId, "during loan application").getId();
         });
+    }
+
+    /**
+     * Finds an active originator by external ID, or creates it for a loan disbursement without checking the
+     * application-time originator creation feature flag.
+     *
+     * @param data
+     *            originator request data containing the external ID and optional metadata for creation
+     * @return the existing or newly created originator ID
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public Long findOrCreateOriginatorIdForLoanDisbursement(final LoanApplicationOriginatorData data) {
+        final ExternalId externalId = new ExternalId(data.getExternalId());
+        return loanOriginatorRepository.findByExternalId(externalId).map(existing -> {
+            validateActive(existing);
+            return existing.getId();
+        }).orElseGet(() -> createNewOriginator(data, externalId, "during loan disbursement").getId());
     }
 
     private void validateActive(final LoanOriginator originator) {
@@ -74,7 +91,7 @@ public class LoanOriginatorHelper {
 
     private boolean isOriginatorCreationDuringLoanApplicationEnabled() {
         try {
-            final GlobalConfigurationProperty config = globalConfigurationRepository
+            final GlobalConfigurationPropertyData config = globalConfigurationRepository
                     .findOneByNameWithNotFoundDetection(ENABLE_ORIGINATOR_CREATION_DURING_LOAN_APPLICATION);
             return config.isEnabled();
         } catch (final GlobalConfigurationPropertyNotFoundException e) {
@@ -83,8 +100,9 @@ public class LoanOriginatorHelper {
         }
     }
 
-    private LoanOriginator createNewOriginator(final LoanApplicationOriginatorData data, final ExternalId externalId) {
-        log.info("Creating new originator with externalId: {} during loan application", data.getExternalId());
+    private LoanOriginator createNewOriginator(final LoanApplicationOriginatorData data, final ExternalId externalId,
+            final String context) {
+        log.info("Creating new originator with externalId: {} {}", data.getExternalId(), context);
 
         final CodeValue originatorType = resolveCodeValue(data.getTypeId(), ORIGINATOR_TYPE_CODE_NAME);
         final CodeValue channelType = resolveCodeValue(data.getChannelTypeId(), CHANNEL_TYPE_CODE_NAME);

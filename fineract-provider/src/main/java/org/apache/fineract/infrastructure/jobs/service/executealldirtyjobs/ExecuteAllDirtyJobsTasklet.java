@@ -19,15 +19,16 @@
 package org.apache.fineract.infrastructure.jobs.service.executealldirtyjobs;
 
 import java.util.List;
+import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import org.apache.fineract.infrastructure.core.config.FineractProperties;
 import org.apache.fineract.infrastructure.jobs.domain.ScheduledJobDetail;
 import org.apache.fineract.infrastructure.jobs.domain.ScheduledJobDetailRepository;
 import org.apache.fineract.infrastructure.jobs.service.JobRegisterService;
-import org.springframework.batch.core.StepContribution;
 import org.springframework.batch.core.scope.context.ChunkContext;
+import org.springframework.batch.core.step.StepContribution;
 import org.springframework.batch.core.step.tasklet.Tasklet;
-import org.springframework.batch.repeat.RepeatStatus;
+import org.springframework.batch.infrastructure.repeat.RepeatStatus;
 import org.springframework.stereotype.Component;
 
 @RequiredArgsConstructor
@@ -44,7 +45,7 @@ public class ExecuteAllDirtyJobsTasklet implements Tasklet {
 
         for (ScheduledJobDetail scheduledJobDetail : jobDetails) {
             if (scheduledJobDetail.getNodeId().toString().equals(fineractProperties.getNodeId())) {
-                jobRegisterService.executeJobWithParameters(scheduledJobDetail.getId(), null);
+                jobRegisterService.executeJobWithParameters(scheduledJobDetail.getId(), Set.of());
             }
         }
         return RepeatStatus.FINISHED;

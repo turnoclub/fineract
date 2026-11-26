@@ -38,11 +38,11 @@ import org.apache.fineract.accounting.journalentry.data.ChargeTaxPaymentDTO;
 import org.apache.fineract.accounting.journalentry.data.GLAccountBalanceHolder;
 import org.apache.fineract.accounting.journalentry.data.LoanDTO;
 import org.apache.fineract.accounting.journalentry.data.LoanTransactionDTO;
+import org.apache.fineract.accounting.journalentry.data.LoanTransactionTypeDTO;
 import org.apache.fineract.accounting.producttoaccountmapping.domain.ProductToGLAccountMapping;
 import org.apache.fineract.infrastructure.core.service.MathUtil;
 import org.apache.fineract.organisation.office.domain.Office;
 import org.apache.fineract.portfolio.PortfolioProductType;
-import org.apache.fineract.portfolio.loanaccount.data.LoanTransactionEnumData;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -63,7 +63,7 @@ public class AccrualBasedAccountingProcessorForLoan implements AccountingProcess
             final Office office = officeById.computeIfAbsent(officeId, this.helper::getOfficeById);
             final LocalDate transactionDate = loanTransactionDTO.getTransactionDate();
             this.helper.checkForBranchClosures(latestGLClosure, transactionDate);
-            final LoanTransactionEnumData transactionType = loanTransactionDTO.getTransactionType();
+            final LoanTransactionTypeDTO transactionType = loanTransactionDTO.getTransactionType();
 
             if (loanTransactionDTO.isReversed()) {
                 journalEntryWritePlatformService.createJournalEntryForReversedLoanTransaction(transactionDate,
@@ -132,7 +132,14 @@ public class AccrualBasedAccountingProcessorForLoan implements AccountingProcess
             }
             // Logic for Interest Payment Waiver
             else if (transactionType.isInterestPaymentWaiver() || transactionType.isInterestRefund()) {
-                createJournalEntriesForInterestPaymentWaiverOrInterestRefund(loanDTO, loanTransactionDTO, office);
+                createJournalEntriesForIncomeReducingCredit(loanDTO, loanTransactionDTO, office,
+                        AccrualAccountsForLoan.INTEREST_ON_LOANS.getValue(),
+                        AccrualAccountsForLoan.INCOME_FROM_CHARGE_OFF_INTEREST.getValue());
+            }
+            // Logic for Fee Refund
+            else if (transactionType.isFeeRefund()) {
+                createJournalEntriesForIncomeReducingCredit(loanDTO, loanTransactionDTO, office,
+                        AccrualAccountsForLoan.INCOME_FROM_FEES.getValue(), AccrualAccountsForLoan.INCOME_FROM_CHARGE_OFF_FEES.getValue());
             }
             // Handle Capitalized Income
             if (transactionType.isCapitalizedIncome()) {
@@ -565,7 +572,7 @@ public class AccrualBasedAccountingProcessorForLoan implements AccountingProcess
         final AccrualAccountsForLoan debitAccountType = loanDTO.isMerchantBuyDownFee() ? AccrualAccountsForLoan.BUY_DOWN_EXPENSE
                 : AccrualAccountsForLoan.FUND_SOURCE;
         if (MathUtil.isGreaterThanZero(amount)) {
-            // Mirror of Buy Down Fee entries (as per PS-2574 requirements)
+            // Mirror of Buy Down Fee entries
             // Debit: Deferred Income Liability, Credit: Buy Down Expense (merchant)
             // Debit: Deferred Income Liability, Credit: Fund Source (non merchant)
             this.helper.createJournalEntriesForLoan(office, currencyCode, AccrualAccountsForLoan.DEFERRED_INCOME_LIABILITY.getValue(),
@@ -790,8 +797,13 @@ public class AccrualBasedAccountingProcessorForLoan implements AccountingProcess
         }
     }
 
-    private void createJournalEntriesForInterestPaymentWaiverOrInterestRefund(LoanDTO loanDTO, LoanTransactionDTO loanTransactionDTO,
-            Office office) {
+    /**
+     * Interest payment waiver, interest refund and fee refund reduce the income (debit) and the receivables /
+     * overpayment (credit), or the charge-off income on a charged-off loan. Both accounts depend on the transaction
+     * type.
+     */
+    private void createJournalEntriesForIncomeReducingCredit(final LoanDTO loanDTO, final LoanTransactionDTO loanTransactionDTO,
+            final Office office, final Integer debitAccountType, final Integer chargeOffCreditAccountType) {
         final Long loanProductId = loanDTO.getLoanProductId();
         final Long loanId = loanDTO.getLoanId();
         final String currencyCode = loanDTO.getCurrencyCode();
@@ -812,61 +824,56 @@ public class AccrualBasedAccountingProcessorForLoan implements AccountingProcess
             // ChargeOFF
             // principal payment
             if (MathUtil.isGreaterThanZero(principalAmount)) {
-                populateCreditDebitMaps(loanProductId, principalAmount, paymentTypeId,
-                        AccrualAccountsForLoan.INCOME_FROM_CHARGE_OFF_INTEREST.getValue(),
-                        AccrualAccountsForLoan.INTEREST_ON_LOANS.getValue(), glAccountBalanceHolder);
+                populateCreditDebitMaps(loanProductId, principalAmount, paymentTypeId, chargeOffCreditAccountType, debitAccountType,
+                        glAccountBalanceHolder);
             }
             // interest payment
             if (MathUtil.isGreaterThanZero(interestAmount)) {
-                populateCreditDebitMaps(loanProductId, interestAmount, paymentTypeId,
-                        AccrualAccountsForLoan.INCOME_FROM_CHARGE_OFF_INTEREST.getValue(),
-                        AccrualAccountsForLoan.INTEREST_ON_LOANS.getValue(), glAccountBalanceHolder);
+                populateCreditDebitMaps(loanProductId, interestAmount, paymentTypeId, chargeOffCreditAccountType, debitAccountType,
+                        glAccountBalanceHolder);
             }
             // handle fees payment
             if (MathUtil.isGreaterThanZero(feesAmount)) {
-                populateCreditDebitMaps(loanProductId, feesAmount, paymentTypeId,
-                        AccrualAccountsForLoan.INCOME_FROM_CHARGE_OFF_INTEREST.getValue(),
-                        AccrualAccountsForLoan.INTEREST_ON_LOANS.getValue(), glAccountBalanceHolder);
+                populateCreditDebitMaps(loanProductId, feesAmount, paymentTypeId, chargeOffCreditAccountType, debitAccountType,
+                        glAccountBalanceHolder);
             }
 
             // handle penalty payment
             if (MathUtil.isGreaterThanZero(penaltiesAmount)) {
-                populateCreditDebitMaps(loanProductId, penaltiesAmount, paymentTypeId,
-                        AccrualAccountsForLoan.INCOME_FROM_CHARGE_OFF_INTEREST.getValue(),
-                        AccrualAccountsForLoan.INTEREST_ON_LOANS.getValue(), glAccountBalanceHolder);
-            }
-            // handle overpayment
-            if (MathUtil.isGreaterThanZero(overPayment)) {
-                populateCreditDebitMaps(loanProductId, overPayment, paymentTypeId, AccrualAccountsForLoan.OVERPAYMENT.getValue(),
-                        AccrualAccountsForLoan.INTEREST_ON_LOANS.getValue(), glAccountBalanceHolder);
-            }
-        } else {
-            // principal payment
-            if (MathUtil.isGreaterThanZero(principalAmount)) {
-                populateCreditDebitMaps(loanProductId, principalAmount, paymentTypeId, AccrualAccountsForLoan.LOAN_PORTFOLIO.getValue(),
-                        AccrualAccountsForLoan.INTEREST_ON_LOANS.getValue(), glAccountBalanceHolder);
-            }
-            // interest payment
-            if (MathUtil.isGreaterThanZero(interestAmount)) {
-                populateCreditDebitMaps(loanProductId, interestAmount, paymentTypeId, AccrualAccountsForLoan.INTEREST_RECEIVABLE.getValue(),
-                        AccrualAccountsForLoan.INTEREST_ON_LOANS.getValue(), glAccountBalanceHolder);
-            }
-            // handle fees payment
-            if (MathUtil.isGreaterThanZero(feesAmount)) {
-                populateCreditDebitMaps(loanProductId, feesAmount, paymentTypeId, AccrualAccountsForLoan.FEES_RECEIVABLE.getValue(),
-                        AccrualAccountsForLoan.INTEREST_ON_LOANS.getValue(), glAccountBalanceHolder);
-            }
-
-            // handle penalty payment
-            if (MathUtil.isGreaterThanZero(penaltiesAmount)) {
-                populateCreditDebitMaps(loanProductId, penaltiesAmount, paymentTypeId,
-                        AccrualAccountsForLoan.PENALTIES_RECEIVABLE.getValue(), AccrualAccountsForLoan.INTEREST_ON_LOANS.getValue(),
+                populateCreditDebitMaps(loanProductId, penaltiesAmount, paymentTypeId, chargeOffCreditAccountType, debitAccountType,
                         glAccountBalanceHolder);
             }
             // handle overpayment
             if (MathUtil.isGreaterThanZero(overPayment)) {
                 populateCreditDebitMaps(loanProductId, overPayment, paymentTypeId, AccrualAccountsForLoan.OVERPAYMENT.getValue(),
-                        AccrualAccountsForLoan.INTEREST_ON_LOANS.getValue(), glAccountBalanceHolder);
+                        debitAccountType, glAccountBalanceHolder);
+            }
+        } else {
+            // principal payment
+            if (MathUtil.isGreaterThanZero(principalAmount)) {
+                populateCreditDebitMaps(loanProductId, principalAmount, paymentTypeId, AccrualAccountsForLoan.LOAN_PORTFOLIO.getValue(),
+                        debitAccountType, glAccountBalanceHolder);
+            }
+            // interest payment
+            if (MathUtil.isGreaterThanZero(interestAmount)) {
+                populateCreditDebitMaps(loanProductId, interestAmount, paymentTypeId, AccrualAccountsForLoan.INTEREST_RECEIVABLE.getValue(),
+                        debitAccountType, glAccountBalanceHolder);
+            }
+            // handle fees payment
+            if (MathUtil.isGreaterThanZero(feesAmount)) {
+                populateCreditDebitMaps(loanProductId, feesAmount, paymentTypeId, AccrualAccountsForLoan.FEES_RECEIVABLE.getValue(),
+                        debitAccountType, glAccountBalanceHolder);
+            }
+
+            // handle penalty payment
+            if (MathUtil.isGreaterThanZero(penaltiesAmount)) {
+                populateCreditDebitMaps(loanProductId, penaltiesAmount, paymentTypeId,
+                        AccrualAccountsForLoan.PENALTIES_RECEIVABLE.getValue(), debitAccountType, glAccountBalanceHolder);
+            }
+            // handle overpayment
+            if (MathUtil.isGreaterThanZero(overPayment)) {
+                populateCreditDebitMaps(loanProductId, overPayment, paymentTypeId, AccrualAccountsForLoan.OVERPAYMENT.getValue(),
+                        debitAccountType, glAccountBalanceHolder);
             }
         }
         // create credit entries
@@ -1093,9 +1100,9 @@ public class AccrualBasedAccountingProcessorForLoan implements AccountingProcess
         }
 
         if (MathUtil.isGreaterThanZero(totalDebitAmount)) {
-            Long chargeId = loanTransactionDTO.getLoanChargeData().getChargeId();
+            Long chargeId = loanTransactionDTO.getLoanChargeDTO().getChargeId();
             Integer accountMappingTypeId;
-            if (loanTransactionDTO.getLoanChargeData().isPenalty()) {
+            if (loanTransactionDTO.getLoanChargeDTO().isPenalty()) {
                 accountMappingTypeId = AccrualAccountsForLoan.INCOME_FROM_PENALTIES.getValue();
             } else {
                 accountMappingTypeId = AccrualAccountsForLoan.INCOME_FROM_FEES.getValue();
@@ -1193,9 +1200,9 @@ public class AccrualBasedAccountingProcessorForLoan implements AccountingProcess
         }
 
         if (MathUtil.isGreaterThanZero(totalDebitAmount)) {
-            Long chargeId = loanTransactionDTO.getLoanChargeData().getChargeId();
+            Long chargeId = loanTransactionDTO.getLoanChargeDTO().getChargeId();
             Integer accountMappingTypeId;
-            if (loanTransactionDTO.getLoanChargeData().isPenalty()) {
+            if (loanTransactionDTO.getLoanChargeDTO().isPenalty()) {
                 accountMappingTypeId = AccrualAccountsForLoan.INCOME_FROM_PENALTIES.getValue();
             } else {
                 accountMappingTypeId = AccrualAccountsForLoan.INCOME_FROM_FEES.getValue();
@@ -1228,12 +1235,16 @@ public class AccrualBasedAccountingProcessorForLoan implements AccountingProcess
 
         final BigDecimal principalCredited = Objects.isNull(loanTransactionDTO.getPrincipal()) ? BigDecimal.ZERO
                 : loanTransactionDTO.getPrincipal();
+        final BigDecimal interestCredited = Objects.isNull(loanTransactionDTO.getInterest()) ? BigDecimal.ZERO
+                : loanTransactionDTO.getInterest();
         final BigDecimal feeCredited = Objects.isNull(loanTransactionDTO.getFees()) ? BigDecimal.ZERO : loanTransactionDTO.getFees();
         final BigDecimal penaltyCredited = Objects.isNull(loanTransactionDTO.getPenalties()) ? BigDecimal.ZERO
                 : loanTransactionDTO.getPenalties();
 
         final BigDecimal principalPaid = Objects.isNull(loanTransactionDTO.getPrincipalPaid()) ? BigDecimal.ZERO
                 : loanTransactionDTO.getPrincipalPaid();
+        final BigDecimal interestPaid = Objects.isNull(loanTransactionDTO.getInterestPaid()) ? BigDecimal.ZERO
+                : loanTransactionDTO.getInterestPaid();
         final BigDecimal feePaid = Objects.isNull(loanTransactionDTO.getFeePaid()) ? BigDecimal.ZERO : loanTransactionDTO.getFeePaid();
         final BigDecimal penaltyPaid = Objects.isNull(loanTransactionDTO.getPenaltyPaid()) ? BigDecimal.ZERO
                 : loanTransactionDTO.getPenaltyPaid();
@@ -1256,6 +1267,14 @@ public class AccrualBasedAccountingProcessorForLoan implements AccountingProcess
                     transactionId, transactionDate, principalPaid.subtract(principalCredited));
         }
 
+        if (interestCredited.compareTo(interestPaid) > 0) {
+            helper.createDebitJournalEntryForLoan(office, currencyCode, getInterestAccount(loanDTO), loanProductId, paymentTypeId, loanId,
+                    transactionId, transactionDate, interestCredited.subtract(interestPaid));
+        } else if (interestCredited.compareTo(interestPaid) < 0) {
+            helper.createCreditJournalEntryForLoan(office, currencyCode, getInterestAccount(loanDTO), loanProductId, paymentTypeId, loanId,
+                    transactionId, transactionDate, interestPaid.subtract(interestCredited));
+        }
+
         if (feeCredited.compareTo(feePaid) > 0) {
             helper.createDebitJournalEntryForLoan(office, currencyCode, getFeeAccount(loanDTO), loanProductId, paymentTypeId, loanId,
                     transactionId, transactionDate, feeCredited.subtract(feePaid));
@@ -1271,6 +1290,14 @@ public class AccrualBasedAccountingProcessorForLoan implements AccountingProcess
             helper.createCreditJournalEntryForLoan(office, currencyCode, getPenaltyAccount(loanDTO), loanProductId, paymentTypeId, loanId,
                     transactionId, transactionDate, penaltyPaid.subtract(penaltyCredited));
         }
+    }
+
+    private Integer getInterestAccount(LoanDTO loanDTO) {
+        Integer account = AccrualAccountsForLoan.INTEREST_RECEIVABLE.getValue();
+        if (loanDTO.isMarkedAsChargeOff()) {
+            account = AccrualAccountsForLoan.INCOME_FROM_CHARGE_OFF_INTEREST.getValue();
+        }
+        return account;
     }
 
     private Integer getFeeAccount(LoanDTO loanDTO) {
@@ -2021,7 +2048,7 @@ public class AccrualBasedAccountingProcessorForLoan implements AccountingProcess
         // transaction properties
         final String transactionId = loanTransactionDTO.getTransactionId();
         final LocalDate transactionDate = loanTransactionDTO.getTransactionDate();
-        final LoanTransactionEnumData transactionType = loanTransactionDTO.getTransactionType();
+        final LoanTransactionTypeDTO transactionType = loanTransactionDTO.getTransactionType();
         final BigDecimal interestAmount = loanTransactionDTO.getInterest();
         final BigDecimal feesAmount = loanTransactionDTO.getFees();
         final BigDecimal penaltiesAmount = loanTransactionDTO.getPenalties();
@@ -2169,7 +2196,6 @@ public class AccrualBasedAccountingProcessorForLoan implements AccountingProcess
     }
 
     private void createJournalEntriesForRefundForActiveLoan(LoanDTO loanDTO, LoanTransactionDTO loanTransactionDTO, Office office) {
-        // TODO Auto-generated method stub
         // loan properties
         final Long loanProductId = loanDTO.getLoanProductId();
         final Long loanId = loanDTO.getLoanId();
@@ -2195,7 +2221,7 @@ public class AccrualBasedAccountingProcessorForLoan implements AccountingProcess
 
         if (MathUtil.isGreaterThanZero(interestAmount)) {
             totalDebitAmount = totalDebitAmount.add(interestAmount);
-            this.helper.createDebitJournalEntryForLoan(office, currencyCode, AccrualAccountsForLoan.INTEREST_ON_LOANS.getValue(),
+            this.helper.createDebitJournalEntryForLoan(office, currencyCode, AccrualAccountsForLoan.INTEREST_RECEIVABLE.getValue(),
                     loanProductId, paymentTypeId, loanId, transactionId, transactionDate, interestAmount);
         }
 
@@ -2210,7 +2236,7 @@ public class AccrualBasedAccountingProcessorForLoan implements AccountingProcess
                                 : chargePaymentDTO.getAmount(),
                         chargePaymentDTO.getLoanChargeId()));
             }
-            this.helper.createDebitJournalEntryForLoanCharges(office, currencyCode, AccrualAccountsForLoan.INCOME_FROM_FEES.getValue(),
+            this.helper.createDebitJournalEntryForLoanCharges(office, currencyCode, AccrualAccountsForLoan.FEES_RECEIVABLE.getValue(),
                     loanProductId, loanId, transactionId, transactionDate, feesAmount, chargePaymentDTOs);
         }
 
@@ -2224,7 +2250,7 @@ public class AccrualBasedAccountingProcessorForLoan implements AccountingProcess
                                 : chargePaymentDTO.getAmount(),
                         chargePaymentDTO.getLoanChargeId()));
             }
-            this.helper.createDebitJournalEntryForLoanCharges(office, currencyCode, AccrualAccountsForLoan.INCOME_FROM_PENALTIES.getValue(),
+            this.helper.createDebitJournalEntryForLoanCharges(office, currencyCode, AccrualAccountsForLoan.PENALTIES_RECEIVABLE.getValue(),
                     loanProductId, loanId, transactionId, transactionDate, penaltiesAmount, chargePaymentDTOs);
         }
 

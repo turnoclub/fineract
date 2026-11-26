@@ -33,6 +33,7 @@ import lombok.Setter;
 import org.apache.fineract.infrastructure.core.data.EnumOptionData;
 import org.apache.fineract.infrastructure.core.domain.AbstractAuditableWithUTCDateTimeCustom;
 import org.apache.fineract.infrastructure.core.domain.ExternalId;
+import org.apache.fineract.infrastructure.core.service.MathUtil;
 import org.apache.fineract.portfolio.charge.domain.Charge;
 import org.apache.fineract.portfolio.charge.domain.ChargeCalculationType;
 import org.apache.fineract.portfolio.charge.domain.ChargeCalculationTypeConverter;
@@ -80,6 +81,12 @@ public class WorkingCapitalLoanCharge extends AbstractAuditableWithUTCDateTimeCu
     @Column(name = "amount_paid", scale = 6, precision = 19)
     private BigDecimal amountPaid;
 
+    @Column(name = "amount_written_off", scale = 6, precision = 19, nullable = false)
+    private BigDecimal amountWrittenOff = BigDecimal.ZERO;
+
+    @Column(name = "amount_waived", scale = 6, precision = 19, nullable = false)
+    private BigDecimal amountWaived = BigDecimal.ZERO;
+
     @Column(name = "is_penalty", nullable = false)
     private boolean penaltyCharge = false;
 
@@ -101,14 +108,15 @@ public class WorkingCapitalLoanCharge extends AbstractAuditableWithUTCDateTimeCu
                 getChargePaymentMode().getCode(), String.valueOf(getChargePaymentMode().getValue()));
 
         return WorkingCapitalLoanChargeData.builder().id(getId()).chargeId(getCharge().getId()).name(getCharge().getName())
-                .currency(getCharge().toData().getCurrency()).amount(amount).amountPaid(amountPaid)
-                .amountOutstanding(getAmountOutstanding()).chargeTimeType(chargeTimeTypeData).submittedOnDate(submittedOnDate)
-                .dueDate(dueDate).chargeCalculationType(chargeCalculationTypeData).penalty(penaltyCharge)
-                .chargePaymentMode(chargePaymentModeData).paid(paid).loanId(loan.getId()).externalId(externalId).build();
+                .currency(getCharge().toData().getCurrency()).amount(amount).amountPaid(amountPaid).amountWrittenOff(amountWrittenOff)
+                .amountWaived(amountWaived).amountOutstanding(getAmountOutstanding()).chargeTimeType(chargeTimeTypeData)
+                .submittedOnDate(submittedOnDate).dueDate(dueDate).chargeCalculationType(chargeCalculationTypeData).penalty(penaltyCharge)
+                .chargePaymentMode(chargePaymentModeData).paid(paid).loanId(loan.getId()).externalId(externalId)
+                .externalLoanId(loan.getExternalId()).build();
     }
 
     public BigDecimal getAmountOutstanding() {
-        return getAmount().min(getAmountPaid());
+        return MathUtil.subtract(getAmount(), getAmountPaid(), getAmountWrittenOff(), getAmountWaived());
     }
 
     public static WorkingCapitalLoanCharge build(WorkingCapitalLoan loan, ExternalId externalId, Charge charge, BigDecimal amount,
@@ -127,6 +135,8 @@ public class WorkingCapitalLoanCharge extends AbstractAuditableWithUTCDateTimeCu
         res.setSubmittedOnDate(submittedOnDate);
         res.setAmount(amount);
         res.setAmountPaid(BigDecimal.ZERO);
+        res.setAmountWrittenOff(BigDecimal.ZERO);
+        res.setAmountWaived(BigDecimal.ZERO);
         return res;
     }
 }

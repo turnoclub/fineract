@@ -22,6 +22,7 @@ import static org.apache.fineract.client.feign.util.FeignCalls.fail;
 import static org.apache.fineract.client.feign.util.FeignCalls.ok;
 import static org.assertj.core.api.Assertions.assertThat;
 
+import io.cucumber.datatable.DataTable;
 import io.cucumber.java.en.Then;
 import io.cucumber.java.en.When;
 import java.math.BigDecimal;
@@ -78,7 +79,7 @@ public class WorkingCapitalDelinquencyConfigStepDef extends AbstractStepDef {
         DelinquencyBucketRequest delinquencyBucketRequest = new DelinquencyBucketRequest() //
                 .name("DB-WCL-" + Utils.randomStringGenerator(12)) //
                 .bucketType(DelinquencyBucketType.WORKING_CAPITAL.toString())//
-                .ranges(List.of(1L)) //
+                .ranges(workingCapitalRequestFactory.seededWorkingCapitalDelinquencyRangeIds()) //
                 .minimumPaymentPeriodAndRule(new MinimumPaymentPeriodAndRule() //
                         .frequency(1) //
                         .minimumPaymentType(DelinquencyMinimumPayment.PERCENTAGE.name()) //
@@ -90,6 +91,26 @@ public class WorkingCapitalDelinquencyConfigStepDef extends AbstractStepDef {
         assertThat(ok.getResourceId()).isNotNull();
         TestContext.GLOBAL.set(TestContextKey.DELINQUENCY_BUCKET_ID, ok.getResourceId());
         TestContext.GLOBAL.set(TestContextKey.DELINQUENCY_BUCKET_CREATE_REQUEST, delinquencyBucketRequest);
+    }
+
+    @When("Admin creates WC Delinquency Bucket With Values:")
+    public void adminCreatesWCDelinquencyBucketWithCustomValues(final DataTable table) {
+        Map<String, String> data = table.asMaps().getFirst();
+        DelinquencyBucketRequest delinquencyBucketRequest = new DelinquencyBucketRequest() //
+                .name("DB-WCL-" + Utils.randomStringGenerator(12)) //
+                .bucketType(DelinquencyBucketType.WORKING_CAPITAL.toString())//
+                .ranges(workingCapitalRequestFactory.seededWorkingCapitalDelinquencyRangeIds()) //
+                .minimumPaymentPeriodAndRule(new MinimumPaymentPeriodAndRule() //
+                        .frequency(Integer.parseInt(data.get("frequency"))) //
+                        .minimumPaymentType(data.get("minimumPaymentType")) //
+                        .frequencyType(data.get("frequencyType")) //
+                        .minimumPayment(BigDecimal.valueOf(Double.parseDouble(data.get("minimumPayment"))))); //
+        PostDelinquencyBucketResponse ok = ok(
+                () -> fineractFeignClient.delinquencyRangeAndBucketsManagement().createBucket(delinquencyBucketRequest));
+        assertThat(ok).isNotNull();
+        assertThat(ok.getResourceId()).isNotNull();
+        testContext().set(TestContextKey.DELINQUENCY_BUCKET_ID, ok.getResourceId());
+        testContext().set(TestContextKey.DELINQUENCY_BUCKET_CREATE_REQUEST, delinquencyBucketRequest);
     }
 
     @When("Admin creates WC Delinquency Bucket With Values for update")
@@ -267,32 +288,17 @@ public class WorkingCapitalDelinquencyConfigStepDef extends AbstractStepDef {
         assert minimumPaymentPeriodAndRuleRequest != null;
 
         switch (fieldName) {
-            case "name":
-                delinquencyBucketRequest.setName(fieldValue);
-            break;
-            case "ranges":
-                delinquencyBucketRequest.setRanges(valueArrayList);
-            break;
-            case "bucketType":
-                delinquencyBucketRequest.setBucketType(fieldValue);
-            break;
-            case "minimumPaymentPeriodAndRule":
+            case "name" -> delinquencyBucketRequest.setName(fieldValue);
+            case "ranges" -> delinquencyBucketRequest.setRanges(valueArrayList);
+            case "bucketType" -> delinquencyBucketRequest.setBucketType(fieldValue);
+            case "minimumPaymentPeriodAndRule" ->
                 delinquencyBucketRequest.setMinimumPaymentPeriodAndRule(fieldValue == null ? null : minimumPaymentPeriodAndRuleRequest);
-            break;
-            case "frequency":
-                minimumPaymentPeriodAndRuleRequest.setFrequency(valueInt);
-            break;
-            case "frequencyType":
-                minimumPaymentPeriodAndRuleRequest.setFrequencyType(fieldValue);
-            break;
-            case "minimumPayment":
-                minimumPaymentPeriodAndRuleRequest.setMinimumPayment(valueBigDecimal);
-            break;
-            case "minimumPaymentType":
-                minimumPaymentPeriodAndRuleRequest.setMinimumPaymentType(fieldValue);
-            break;
-            default:
-            break;
+            case "frequency" -> minimumPaymentPeriodAndRuleRequest.setFrequency(valueInt);
+            case "frequencyType" -> minimumPaymentPeriodAndRuleRequest.setFrequencyType(fieldValue);
+            case "minimumPayment" -> minimumPaymentPeriodAndRuleRequest.setMinimumPayment(valueBigDecimal);
+            case "minimumPaymentType" -> minimumPaymentPeriodAndRuleRequest.setMinimumPaymentType(fieldValue);
+            default -> {
+            }
         }
         return delinquencyBucketRequest;
     }
@@ -357,6 +363,53 @@ public class WorkingCapitalDelinquencyConfigStepDef extends AbstractStepDef {
                 .contains(ErrorMessageHelper.workingCapitalDelinquencyBucketLinkedToLoanProductFailure(id)) //
                 .doesNotContain("Cannot delete or update a parent row") //
                 .doesNotContain("m_wc_loan_product");
+    }
+
+    @When("Admin updates WC Delinquency Bucket name without bucketType")
+    public void adminUpdatesWCDelinquencyBucketNameWithoutBucketType() {
+        final Long id = TestContext.GLOBAL.get(TestContextKey.DELINQUENCY_BUCKET_ID);
+        final DelinquencyBucketResponse existing = ok(() -> fineractFeignClient.delinquencyRangeAndBucketsManagement().getBucket(id));
+        assert existing.getRanges() != null;
+        final DelinquencyBucketRequest updateRequest = new DelinquencyBucketRequest() //
+                .name(existing.getName() + "-renamed") //
+                .ranges(existing.getRanges().stream().map(DelinquencyRangeResponse::getId).toList());
+        ok(() -> fineractFeignClient.delinquencyRangeAndBucketsManagement().updateBucket(id, updateRequest));
+        TestContext.GLOBAL.set(TestContextKey.DELINQUENCY_BUCKET_UPDATE_REQUEST, updateRequest);
+    }
+
+    @Then("Check Delinquency Bucket still has bucketType {string}")
+    public void checkDelinquencyBucketStillHasBucketType(final String expectedBucketType) {
+        final Long id = TestContext.GLOBAL.get(TestContextKey.DELINQUENCY_BUCKET_ID);
+        final DelinquencyBucketResponse bucket = ok(() -> fineractFeignClient.delinquencyRangeAndBucketsManagement().getBucket(id));
+        assertThat(bucket.getBucketType()).as("bucketType").isNotNull();
+        assertThat(bucket.getBucketType().getId()).as("bucketType id").isEqualTo(expectedBucketType);
+        log.info("Verified delinquency bucket {} still has bucketType {}", id, expectedBucketType);
+    }
+
+    @Then("Admin failed to update WC Delinquency Bucket bucketType to {string} while assigned to a Working Capital Loan Product")
+    public void adminFailedToUpdateWCDelinquencyBucketTypeWhileAssigned(final String newBucketType) {
+        verifyDelinquencyBucketTypeUpdateRejectedAsLinked(TestContext.GLOBAL.get(TestContextKey.DELINQUENCY_BUCKET_ID), newBucketType);
+    }
+
+    @Then("Admin failed to update WC Delinquency Bucket bucketType to {string} while overridden on a Working Capital Loan")
+    public void adminFailedToUpdateWCDelinquencyBucketTypeWhileOverriddenOnLoan(final String newBucketType) {
+        verifyDelinquencyBucketTypeUpdateRejectedAsLinked(testContext().get(TestContextKey.DELINQUENCY_BUCKET_ID), newBucketType);
+    }
+
+    private void verifyDelinquencyBucketTypeUpdateRejectedAsLinked(final Long id, final String newBucketType) {
+        final DelinquencyBucketResponse existing = ok(() -> fineractFeignClient.delinquencyRangeAndBucketsManagement().getBucket(id));
+        assert existing.getRanges() != null;
+        final DelinquencyBucketRequest updateRequest = new DelinquencyBucketRequest() //
+                .name(existing.getName()) //
+                .bucketType(newBucketType) //
+                .ranges(existing.getRanges().stream().map(DelinquencyRangeResponse::getId).toList());
+        final CallFailedRuntimeException exception = fail(
+                () -> fineractFeignClient.delinquencyRangeAndBucketsManagement().updateBucket(id, updateRequest));
+
+        assertThat(exception.getStatus()).as(ErrorMessageHelper.incorrectExpectedValueInResponse()).isEqualTo(403);
+        assertThat(exception.getUserMessageGlobalisationCode()).isEqualTo(ErrorMessageHelper.DATA_INTEGRITY_ISSUE_ENTITY_LINKED_CODE);
+        assertThat(exception.getDeveloperMessage()) //
+                .contains(ErrorMessageHelper.workingCapitalDelinquencyBucketLinkedToLoanProductFailure(id));
     }
 
 }

@@ -18,6 +18,7 @@
  */
 package org.apache.fineract.test.stepdef.loan;
 
+import static org.apache.fineract.client.feign.util.FeignCalls.fail;
 import static org.apache.fineract.client.feign.util.FeignCalls.ok;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -27,6 +28,7 @@ import io.cucumber.java.en.Then;
 import io.cucumber.java.en.When;
 import java.io.IOException;
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Map;
@@ -34,7 +36,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.fineract.avro.loan.v1.LoanChargeDataV1;
 import org.apache.fineract.client.feign.FeignException;
 import org.apache.fineract.client.feign.FineractFeignClient;
+import org.apache.fineract.client.feign.util.CallFailedRuntimeException;
 import org.apache.fineract.client.models.GetLoansLoanIdChargesChargeIdResponse;
+import org.apache.fineract.client.models.GetLoansLoanIdLoanChargeData;
 import org.apache.fineract.client.models.GetLoansLoanIdResponse;
 import org.apache.fineract.client.models.GetLoansLoanIdTransactions;
 import org.apache.fineract.client.models.PostLoansLoanIdChargesChargeIdRequest;
@@ -51,11 +55,16 @@ import org.apache.fineract.test.factory.LoanChargeRequestFactory;
 import org.apache.fineract.test.helper.ErrorMessageHelper;
 import org.apache.fineract.test.helper.ErrorResponse;
 import org.apache.fineract.test.messaging.EventAssertion;
+import org.apache.fineract.test.messaging.EventMessage;
 import org.apache.fineract.test.messaging.event.EventCheckHelper;
+import org.apache.fineract.test.messaging.event.loan.charge.AbstractLoanChargeEvent;
 import org.apache.fineract.test.messaging.event.loan.charge.LoanAddChargeEvent;
+import org.apache.fineract.test.messaging.event.loan.charge.LoanDeleteChargeEvent;
+import org.apache.fineract.test.messaging.event.loan.charge.LoanUpdateChargeEvent;
 import org.apache.fineract.test.messaging.store.EventStore;
 import org.apache.fineract.test.stepdef.AbstractStepDef;
 import org.apache.fineract.test.support.TestContextKey;
+import org.junit.jupiter.api.Assertions;
 import org.springframework.beans.factory.annotation.Autowired;
 
 @Slf4j
@@ -94,11 +103,29 @@ public class LoanChargeStepDef extends AbstractStepDef {
                 .dueDate(transactionDate).amount(transactionAmount);
 
         PostLoansLoanIdChargesResponse loanChargeResponse = ok(
-                () -> fineractClient.loanCharges().executeLoanCharge(loanId, loanIdChargesRequest, Map.<String, Object>of()));
+                () -> fineractClient.loanCharges().createOrPayLoanCharge(loanId, loanIdChargesRequest, Map.<String, Object>of()));
         testContext().set(TestContextKey.ADD_DUE_DATE_CHARGE_RESPONSE, loanChargeResponse);
         testContext().set(TestContextKey.ADD_NSF_FEE_RESPONSE, loanChargeResponse);
 
         addChargeEventCheck(loanChargeResponse);
+    }
+
+    @Then("Admin failed to add {string} due date charge with {string} due date and {double} EUR transaction amount and got an error {string}")
+    public void addChargeDueDateFails(String chargeType, String transactionDate, double transactionAmount, String errorMessage) {
+        final PostLoansResponse loanResponse = testContext().get(TestContextKey.LOAN_CREATE_RESPONSE);
+        Assertions.assertNotNull(loanResponse);
+        final long loanId = loanResponse.getLoanId();
+
+        final ChargeProductType chargeProductType = ChargeProductType.valueOf(chargeType);
+        final Long chargeTypeId = chargeProductResolver.resolve(chargeProductType);
+
+        final PostLoansLoanIdChargesRequest loanIdChargesRequest = LoanChargeRequestFactory.defaultLoanChargeRequest()
+                .chargeId(chargeTypeId).dueDate(transactionDate).amount(transactionAmount);
+
+        final CallFailedRuntimeException exception = fail(
+                () -> fineractClient.loanCharges().createOrPayLoanCharge(loanId, loanIdChargesRequest, Map.<String, Object>of()));
+        assertThat(exception.getMessage()).as(ErrorMessageHelper.wrongErrorMessage(exception.getMessage(), errorMessage))
+                .contains(errorMessage);
     }
 
     @When("Admin adds {string} charge with {double} % of transaction amount")
@@ -119,7 +146,7 @@ public class LoanChargeStepDef extends AbstractStepDef {
                 .amount(transactionPercentageAmount);
 
         PostLoansLoanIdChargesResponse loanChargeResponse = ok(
-                () -> fineractClient.loanCharges().executeLoanCharge(loanId, loanIdChargesRequest, Map.<String, Object>of()));
+                () -> fineractClient.loanCharges().createOrPayLoanCharge(loanId, loanIdChargesRequest, Map.<String, Object>of()));
         testContext().set(TestContextKey.ADD_DUE_DATE_CHARGE_RESPONSE, loanChargeResponse);
     }
 
@@ -143,7 +170,7 @@ public class LoanChargeStepDef extends AbstractStepDef {
                 .chargeId(chargeTypeId).amount(amount);
 
         final PostLoansLoanIdChargesResponse loanChargeResponse = ok(
-                () -> fineractClient.loanCharges().executeLoanCharge(loanId, loanIdChargesRequest, Map.<String, Object>of()));
+                () -> fineractClient.loanCharges().createOrPayLoanCharge(loanId, loanIdChargesRequest, Map.<String, Object>of()));
         testContext().set(TestContextKey.ADD_INSTALLMENT_FEE_CHARGE_RESPONSE, loanChargeResponse);
     }
 
@@ -160,7 +187,7 @@ public class LoanChargeStepDef extends AbstractStepDef {
                 .chargeId(chargeTypeId).amount(amount);
 
         try {
-            fineractClient.loanCharges().executeLoanCharge(loanId, loanIdChargesRequest, Map.<String, Object>of());
+            fineractClient.loanCharges().createOrPayLoanCharge(loanId, loanIdChargesRequest, Map.<String, Object>of());
             throw new AssertionError("Expected FeignException but request succeeded");
         } catch (FeignException e) {
             final ErrorResponse errorDetails = ErrorResponse.fromFeignException(e);
@@ -185,7 +212,7 @@ public class LoanChargeStepDef extends AbstractStepDef {
                 .dueDate(transactionDate).amount(transactionAmount);
 
         try {
-            fineractClient.loanCharges().executeLoanCharge(loanId, loanIdChargesRequest, Map.<String, Object>of());
+            fineractClient.loanCharges().createOrPayLoanCharge(loanId, loanIdChargesRequest, Map.<String, Object>of());
             throw new AssertionError("Expected FeignException but request succeeded");
         } catch (FeignException e) {
             ErrorResponse errorDetails = ErrorResponse.fromFeignException(e);
@@ -205,7 +232,7 @@ public class LoanChargeStepDef extends AbstractStepDef {
                 .dueDate(date).dateFormat(DEFAULT_DATE_FORMAT).locale(locale);
 
         PostLoansLoanIdChargesResponse loanChargeResponse = ok(
-                () -> fineractClient.loanCharges().executeLoanCharge(loanId, loanIdChargesRequest, Map.<String, Object>of()));
+                () -> fineractClient.loanCharges().createOrPayLoanCharge(loanId, loanIdChargesRequest, Map.<String, Object>of()));
         testContext().set(TestContextKey.ADD_PROCESSING_FEE_RESPONSE, loanChargeResponse);
         eventCheckHelper.loanBalanceChangedEventCheck(loanId);
     }
@@ -220,7 +247,7 @@ public class LoanChargeStepDef extends AbstractStepDef {
                 .dueDate(date).dateFormat(DEFAULT_DATE_FORMAT).locale(locale);
 
         PostLoansLoanIdChargesResponse loanChargeResponse = ok(
-                () -> fineractClient.loanCharges().executeLoanCharge(loanId, loanIdChargesRequest, Map.<String, Object>of()));
+                () -> fineractClient.loanCharges().createOrPayLoanCharge(loanId, loanIdChargesRequest, Map.<String, Object>of()));
         testContext().set(TestContextKey.ADD_PROCESSING_FEE_RESPONSE, loanChargeResponse);
     }
 
@@ -234,7 +261,7 @@ public class LoanChargeStepDef extends AbstractStepDef {
                 .dateFormat(DEFAULT_DATE_FORMAT);
 
         PostLoansLoanIdChargesResponse loanChargeResponse = ok(
-                () -> fineractClient.loanCharges().executeLoanCharge(loanId, loanIdChargesRequest, Map.<String, Object>of()));
+                () -> fineractClient.loanCharges().createOrPayLoanCharge(loanId, loanIdChargesRequest, Map.<String, Object>of()));
         testContext().set(TestContextKey.ADD_NSF_FEE_RESPONSE, loanChargeResponse);
         eventCheckHelper.loanBalanceChangedEventCheck(loanId);
     }
@@ -250,6 +277,36 @@ public class LoanChargeStepDef extends AbstractStepDef {
         PostLoansLoanIdChargesChargeIdRequest waiveRequest = new PostLoansLoanIdChargesChargeIdRequest();
 
         PostLoansLoanIdChargesChargeIdResponse waiveResponse = ok(() -> fineractClient.loanCharges()
+                .executeLoanChargeOnExistingCharge(loanId, chargeId, waiveRequest, Map.<String, Object>of("command", "waive")));
+        testContext().set(TestContextKey.WAIVE_CHARGE_RESPONSE, waiveResponse);
+    }
+
+    @And("Admin waives the last unpaid {string} type charge which is due on {string}")
+    public void waiveUnpaidChargeByTypeAndDueDate(String chargeTypeEnum, String date) {
+        final PostLoansResponse loanResponse = testContext().get(TestContextKey.LOAN_CREATE_RESPONSE);
+        Assertions.assertNotNull(loanResponse);
+        final long loanId = loanResponse.getLoanId();
+
+        final ChargeProductType chargeType = ChargeProductType.valueOf(chargeTypeEnum);
+        final Long chargeProductId = chargeProductResolver.resolve(chargeType);
+        final DateTimeFormatter formatter = DateTimeFormatter.ofPattern(DEFAULT_DATE_FORMAT);
+
+        final GetLoansLoanIdResponse loanDetails = ok(
+                () -> fineractClient.loans().retrieveOneLoan(loanId, Map.<String, Object>of("associations", "charges")));
+        Assertions.assertNotNull(loanDetails.getCharges());
+        final List<GetLoansLoanIdLoanChargeData> matchingCharges = loanDetails.getCharges().stream()//
+                .filter(c -> chargeProductId.equals(c.getChargeId()))//
+                .filter(c -> c.getDueDate() != null && date.equals(formatter.format(c.getDueDate())))//
+                .filter(c -> c.getAmountOutstanding() != null && c.getAmountOutstanding().compareTo(BigDecimal.ZERO) > 0)//
+                .toList();
+        if (matchingCharges.isEmpty()) {
+            throw new IllegalStateException(
+                    "Unpaid [%s] charge due on [%s] not found on loan [%s]".formatted(chargeTypeEnum, date, loanId));
+        }
+        final Long chargeId = matchingCharges.getLast().getId();
+
+        final PostLoansLoanIdChargesChargeIdRequest waiveRequest = new PostLoansLoanIdChargesChargeIdRequest();
+        final PostLoansLoanIdChargesChargeIdResponse waiveResponse = ok(() -> fineractClient.loanCharges()
                 .executeLoanChargeOnExistingCharge(loanId, chargeId, waiveRequest, Map.<String, Object>of("command", "waive")));
         testContext().set(TestContextKey.WAIVE_CHARGE_RESPONSE, waiveResponse);
     }
@@ -275,7 +332,7 @@ public class LoanChargeStepDef extends AbstractStepDef {
         long loanId = loanResponse.getLoanId();
 
         GetLoansLoanIdResponse loanDetails = ok(
-                () -> fineractClient.loans().retrieveLoan(loanId, Map.<String, Object>of("associations", "transactions")));
+                () -> fineractClient.loans().retrieveOneLoan(loanId, Map.<String, Object>of("associations", "transactions")));
         List<GetLoansLoanIdTransactions> transactions = loanDetails.getTransactions();
 
         final Long transactionId = transactions.stream().filter(t -> "loanTransactionType.waiveCharges".equals(t.getType().getCode()))
@@ -283,35 +340,95 @@ public class LoanChargeStepDef extends AbstractStepDef {
 
         PutChargeTransactionChangesRequest undoWaiveRequest = new PutChargeTransactionChangesRequest();
         PutChargeTransactionChangesResponse undoWaiveResponse = ok(
-                () -> fineractClient.loanTransactions().undoWaiveCharge(loanId, transactionId, undoWaiveRequest));
+                () -> fineractClient.loanTransactions().undoWaiveChargeLoanTransaction(loanId, transactionId, undoWaiveRequest));
         testContext().set(TestContextKey.UNDO_WAIVE_RESPONSE, undoWaiveResponse);
-    }
-
-    @Then("Charge is successfully added to the loan")
-    public void loanChargeStatus() throws IOException {
-        PostLoansLoanIdChargesResponse response = testContext().get(TestContextKey.ADD_NSF_FEE_RESPONSE);
-
-        assertThat(response).as("Charge response should not be null").isNotNull();
-        assertThat(response.getResourceId()).as("Charge resource ID should be present").isNotNull();
     }
 
     @Then("Charge is successfully added to the loan with {float} EUR")
     public void checkLoanChargeAmount(float chargeAmount) throws IOException {
         PostLoansLoanIdChargesResponse response = testContext().get(TestContextKey.ADD_PROCESSING_FEE_RESPONSE);
         GetLoansLoanIdChargesChargeIdResponse loanChargeAmount = ok(
-                () -> fineractClient.loanCharges().retrieveLoanCharge(response.getLoanId(), Long.valueOf(response.getResourceId())));
+                () -> fineractClient.loanCharges().retrieveOneLoanCharge(response.getLoanId(), Long.valueOf(response.getResourceId())));
         assertThat(loanChargeAmount.getAmount()).as("Charge amount is wrong").isEqualByComparingTo(Double.valueOf(chargeAmount));
+    }
+
+    @Then("LoanAddChargeBusinessEvent is raised for the {string} charge due on {string}")
+    public void checkLoanAddChargeBusinessEventForChargeDueOn(String chargeName, String dueDate) {
+        // Charges created by the system (e.g. down payment fee of a later tranche) must raise the same event as a
+        // manual add
+        checkChargeEventOfActiveCharge(LoanAddChargeEvent.class, chargeName, dueDate);
+    }
+
+    @Then("LoanUpdateChargeBusinessEvent is raised for the {string} charge due on {string}")
+    public void checkLoanUpdateChargeBusinessEventForChargeDueOn(final String chargeName, final String dueDate) {
+        checkChargeEventOfActiveCharge(LoanUpdateChargeEvent.class, chargeName, dueDate);
+    }
+
+    @Then("LoanDeleteChargeBusinessEvent is raised for the {string} charge due on {string}")
+    public void checkLoanDeleteChargeBusinessEventForChargeDueOn(final String chargeName, final String dueDate) {
+        final List<LoanChargeDataV1> addedCharges = addedChargesOfLoan(chargeName, dueDate);
+
+        eventAssertion.assertEventRaised(LoanDeleteChargeEvent.class, addedCharges.getLast().getId());
+    }
+
+    @Then("LoanDeleteChargeBusinessEvent is raised for the {string} charge due on {string} with {double} EUR amount")
+    public void checkLoanDeleteChargeBusinessEventForChargeDueOnWithAmount(final String chargeName, final String dueDate,
+            final double amount) {
+        // a replaced down payment fee and the fee replacing it share the name and due date, the amount tells them apart
+        final List<LoanChargeDataV1> addedCharges = addedChargesOfLoan(chargeName, dueDate).stream()
+                .filter(charge -> charge.getAmount().compareTo(BigDecimal.valueOf(amount)) == 0).toList();
+        assertThat(addedCharges).as("%s charges due on %s with %s EUR amount", chargeName, dueDate, amount).hasSize(1);
+
+        eventAssertion.assertEventRaised(LoanDeleteChargeEvent.class, addedCharges.getFirst().getId());
+    }
+
+    // The API does not return a deactivated or deleted charge and the delete event carries only its id, so the charges
+    // are taken from the events raised when they were created
+    private List<LoanChargeDataV1> addedChargesOfLoan(final String chargeName, final String dueDate) {
+        final PostLoansResponse loanResponse = testContext().get(TestContextKey.LOAN_CREATE_RESPONSE);
+        final long loanId = loanResponse.getLoanId();
+        final String eventDueDate = LocalDate.parse(dueDate, DateTimeFormatter.ofPattern(DEFAULT_DATE_FORMAT))
+                .format(DateTimeFormatter.ofPattern(DATE_FORMAT_EVENTS));
+        final List<LoanChargeDataV1> addedCharges = eventStore
+                .<LoanChargeDataV1, LoanAddChargeEvent>findReceivedAndVerifiedByType(new LoanAddChargeEvent()).stream()
+                .map(EventMessage::getData).filter(data -> Long.valueOf(loanId).equals(data.getLoanId())
+                        && chargeName.equals(data.getName()) && eventDueDate.equals(data.getDueDate()))
+                .toList();
+        if (addedCharges.isEmpty()) {
+            throw new IllegalStateException(
+                    "No LoanAddChargeBusinessEvent of loan %s for the %s charge due on %s".formatted(loanId, chargeName, dueDate));
+        }
+        return addedCharges;
+    }
+
+    private void checkChargeEventOfActiveCharge(final Class<? extends AbstractLoanChargeEvent> eventClazz, final String chargeName,
+            final String dueDate) {
+        PostLoansResponse loanResponse = testContext().get(TestContextKey.LOAN_CREATE_RESPONSE);
+        long loanId = loanResponse.getLoanId();
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern(DEFAULT_DATE_FORMAT);
+        GetLoansLoanIdResponse loanDetails = ok(() -> fineractClient.loans().retrieveOneLoan(loanId,
+                Map.of("staffInSelectedOfficeOnly", "false", "associations", "charges")));
+        GetLoansLoanIdLoanChargeData charge = loanDetails.getCharges().stream()
+                .filter(c -> chargeName.equals(c.getName()) && dueDate.equals(formatter.format(c.getDueDate()))).findFirst()
+                .orElseThrow(() -> new IllegalStateException("Loan %s has no %s charge due on %s".formatted(loanId, chargeName, dueDate)));
+
+        eventAssertion.assertEvent(eventClazz, charge.getId()).extractingData(LoanChargeDataV1::getName).isEqualTo(chargeName)
+                .extractingData(LoanChargeDataV1::getLoanId).isEqualTo(loanId);
     }
 
     private void addChargeEventCheck(PostLoansLoanIdChargesResponse loanChargeResponse) throws IOException {
         DateTimeFormatter formatter = DateTimeFormatter.ofPattern(DATE_FORMAT_EVENTS);
-        GetLoansLoanIdChargesChargeIdResponse chargeDetails = ok(
-                () -> fineractClient.loanCharges().retrieveLoanCharge(loanChargeResponse.getLoanId(), loanChargeResponse.getResourceId()));
+        GetLoansLoanIdChargesChargeIdResponse chargeDetails = ok(() -> fineractClient.loanCharges()
+                .retrieveOneLoanCharge(loanChargeResponse.getLoanId(), loanChargeResponse.getResourceId()));
         GetLoansLoanIdChargesChargeIdResponse body = chargeDetails;
 
-        eventAssertion.assertEvent(LoanAddChargeEvent.class, loanChargeResponse.getResourceId()).extractingData(LoanChargeDataV1::getName)
-                .isEqualTo(body.getName()).extractingBigDecimal(LoanChargeDataV1::getAmount).isEqualTo(BigDecimal.valueOf(body.getAmount()))
-                .extractingData(LoanChargeDataV1::getDueDate).isEqualTo(formatter.format(body.getDueDate()));
+        EventAssertion.EventAssertionBuilder<LoanChargeDataV1> assertionBuilder = eventAssertion
+                .assertEvent(LoanAddChargeEvent.class, loanChargeResponse.getResourceId()).extractingData(LoanChargeDataV1::getName)
+                .isEqualTo(body.getName()).extractingBigDecimal(LoanChargeDataV1::getAmount)
+                .isEqualTo(BigDecimal.valueOf(body.getAmount()));
+        if (body.getDueDate() != null) {
+            assertionBuilder.extractingData(LoanChargeDataV1::getDueDate).isEqualTo(formatter.format(body.getDueDate()));
+        }
     }
 
     @Then("Loan charge transaction with the following data results a {int} error and {string} error message")
@@ -341,7 +458,7 @@ public class LoanChargeStepDef extends AbstractStepDef {
                 .dueDate(transactionDate).amount(transactionAmount);
 
         try {
-            fineractClient.loanCharges().executeLoanCharge(loanId, loanIdChargesRequest, Map.<String, Object>of());
+            fineractClient.loanCharges().createOrPayLoanCharge(loanId, loanIdChargesRequest, Map.<String, Object>of());
             throw new AssertionError("Expected FeignException but request succeeded");
         } catch (FeignException e) {
             ErrorResponse errorResponse = ErrorResponse.fromFeignException(e);

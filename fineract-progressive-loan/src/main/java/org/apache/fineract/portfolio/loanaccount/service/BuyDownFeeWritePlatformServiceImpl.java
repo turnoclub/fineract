@@ -33,6 +33,7 @@ import org.apache.fineract.infrastructure.core.data.CommandProcessingResultBuild
 import org.apache.fineract.infrastructure.core.domain.ExternalId;
 import org.apache.fineract.infrastructure.core.service.ExternalIdFactory;
 import org.apache.fineract.infrastructure.core.service.MathUtil;
+import org.apache.fineract.infrastructure.core.service.TransactionBoundApplicationEventPublisher;
 import org.apache.fineract.infrastructure.event.business.domain.loan.transaction.LoanBuyDownFeeAdjustmentTransactionCreatedBusinessEvent;
 import org.apache.fineract.infrastructure.event.business.domain.loan.transaction.LoanBuyDownFeeTransactionCreatedBusinessEvent;
 import org.apache.fineract.infrastructure.event.business.service.BusinessEventNotifierService;
@@ -53,23 +54,22 @@ import org.apache.fineract.portfolio.note.data.NoteCreateRequest;
 import org.apache.fineract.portfolio.note.domain.NoteType;
 import org.apache.fineract.portfolio.paymentdetail.domain.PaymentDetail;
 import org.apache.fineract.portfolio.paymentdetail.service.PaymentDetailWritePlatformService;
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.transaction.annotation.Transactional;
 
 @Slf4j
 @RequiredArgsConstructor
 public class BuyDownFeeWritePlatformServiceImpl implements BuyDownFeePlatformService {
 
-    private final ProgressiveLoanTransactionValidator loanTransactionValidator;
-    private final LoanAssembler loanAssembler;
-    private final LoanTransactionRepository loanTransactionRepository;
-    private final PaymentDetailWritePlatformService paymentDetailWritePlatformService;
-    private final LoanJournalEntryPoster loanJournalEntryPoster;
-    private final ExternalIdFactory externalIdFactory;
-    private final LoanBuyDownFeeBalanceRepository loanBuyDownFeeBalanceRepository;
-    private final BusinessEventNotifierService businessEventNotifierService;
-    private final CodeValueRepository codeValueRepository;
-    private final ApplicationEventPublisher eventPublisher;
+    protected final ProgressiveLoanTransactionValidator loanTransactionValidator;
+    protected final LoanAssembler loanAssembler;
+    protected final LoanTransactionRepository loanTransactionRepository;
+    protected final PaymentDetailWritePlatformService paymentDetailWritePlatformService;
+    protected final LoanJournalEntryPoster loanJournalEntryPoster;
+    protected final ExternalIdFactory externalIdFactory;
+    protected final LoanBuyDownFeeBalanceRepository loanBuyDownFeeBalanceRepository;
+    protected final BusinessEventNotifierService businessEventNotifierService;
+    protected final CodeValueRepository codeValueRepository;
+    protected final TransactionBoundApplicationEventPublisher eventPublisher;
 
     @Transactional
     @Override
@@ -77,7 +77,7 @@ public class BuyDownFeeWritePlatformServiceImpl implements BuyDownFeePlatformSer
 
         this.loanTransactionValidator.validateBuyDownFee(command, loanId);
 
-        final Loan loan = this.loanAssembler.assembleFrom(loanId);
+        final Loan loan = this.loanAssembler.assembleFromInUserScope(loanId);
         checkClientOrGroupActive(loan);
 
         final Map<String, Object> changes = new LinkedHashMap<>();
@@ -132,7 +132,7 @@ public class BuyDownFeeWritePlatformServiceImpl implements BuyDownFeePlatformSer
     @Transactional
     public CommandProcessingResult buyDownFeeAdjustment(final Long loanId, final Long buyDownFeeTransactionId, final JsonCommand command) {
         this.loanTransactionValidator.validateBuyDownFeeAdjustment(command, loanId, buyDownFeeTransactionId);
-        final Loan loan = this.loanAssembler.assembleFrom(loanId);
+        final Loan loan = this.loanAssembler.assembleFromInUserScope(loanId);
         checkClientOrGroupActive(loan);
 
         final Map<String, Object> changes = new LinkedHashMap<>();

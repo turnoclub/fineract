@@ -21,13 +21,23 @@ package org.apache.fineract.portfolio.loanaccount.service;
 import java.time.LocalDate;
 import org.apache.fineract.portfolio.loanaccount.domain.Loan;
 import org.apache.fineract.portfolio.loanaccount.domain.LoanTransaction;
-import org.springframework.lang.NonNull;
+import org.jspecify.annotations.NonNull;
 
 public interface LoanBuyDownFeeAmortizationProcessingService {
 
     void processBuyDownFeeAmortizationTillDate(@NonNull Loan loan, @NonNull LocalDate tillDate, boolean addJournal);
 
     void processBuyDownFeeAmortizationOnLoanClosure(@NonNull Loan loan, boolean addJournal);
+
+    void processBuyDownFeeAmortizationOnLoanSale(@NonNull Loan loan, @NonNull LocalDate transactionDate, boolean addJournal);
+
+    /**
+     * Immediately recognizes the unrecognized balance of the buy-down fee (or fee adjustment) that triggered the call.
+     * Only that related balance is touched so already-deferred balances on the same loan keep amortizing daily. Reuses
+     * the same recognition path as sale/closure, scoped to the related balance.
+     */
+    void processBuyDownFeeAmortizationImmediately(@NonNull Loan loan, @NonNull LoanTransaction buyDownFeeRelatedTransaction,
+            @NonNull LocalDate transactionDate, boolean addJournal);
 
     void processBuyDownFeeAmortizationOnLoanChargeOff(@NonNull Loan loan, @NonNull LoanTransaction chargeOffTransaction);
 

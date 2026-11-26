@@ -32,6 +32,7 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.UUID;
 import org.apache.fineract.client.feign.util.CallFailedRuntimeException;
 import org.apache.fineract.client.models.GetCodesResponse;
@@ -47,13 +48,14 @@ import org.apache.fineract.client.models.ProjectedAmortizationScheduleData;
 import org.apache.fineract.client.models.PutGlobalConfigurationsRequest;
 import org.apache.fineract.infrastructure.configuration.api.GlobalConfigurationConstants;
 import org.apache.fineract.infrastructure.event.external.data.ExternalEventResponse;
+import org.apache.fineract.integrationtests.client.feign.helpers.FeignClientHelper;
+import org.apache.fineract.integrationtests.client.feign.helpers.FeignCodeHelper;
 import org.apache.fineract.integrationtests.client.feign.helpers.FeignExternalEventHelper;
+import org.apache.fineract.integrationtests.client.feign.helpers.FeignGlobalConfigurationHelper;
+import org.apache.fineract.integrationtests.client.feign.modules.ClientRequestBuilders;
 import org.apache.fineract.integrationtests.common.BusinessDateHelper;
-import org.apache.fineract.integrationtests.common.ClientHelper;
 import org.apache.fineract.integrationtests.common.FineractFeignClientHelper;
-import org.apache.fineract.integrationtests.common.GlobalConfigurationHelper;
 import org.apache.fineract.integrationtests.common.Utils;
-import org.apache.fineract.integrationtests.common.system.CodeHelper;
 import org.apache.fineract.integrationtests.common.workingcapitalloan.WorkingCapitalLoanApplicationTestBuilder;
 import org.apache.fineract.integrationtests.common.workingcapitalloan.WorkingCapitalLoanDisbursementTestBuilder;
 import org.apache.fineract.integrationtests.common.workingcapitalloan.WorkingCapitalLoanHelper;
@@ -65,10 +67,12 @@ import org.junit.jupiter.api.Test;
 
 public class WorkingCapitalLoanDisbursementTest {
 
+    private final FeignClientHelper clientHelper = new FeignClientHelper(FineractFeignClientHelper.getFineractFeignClient());
     private final WorkingCapitalLoanHelper applicationHelper = new WorkingCapitalLoanHelper();
     private final WorkingCapitalLoanProductHelper productHelper = new WorkingCapitalLoanProductHelper();
-    private final CodeHelper codeHelper = new CodeHelper();
-    private final GlobalConfigurationHelper globalConfigurationHelper = new GlobalConfigurationHelper();
+    private final FeignCodeHelper codeHelper = new FeignCodeHelper(FineractFeignClientHelper.getFineractFeignClient());
+    private final FeignGlobalConfigurationHelper globalConfigurationHelper = new FeignGlobalConfigurationHelper(
+            FineractFeignClientHelper.getFineractFeignClient());
     private final FeignExternalEventHelper externalEventHelper = new FeignExternalEventHelper(
             FineractFeignClientHelper.getFineractFeignClient());
 
@@ -162,7 +166,7 @@ public class WorkingCapitalLoanDisbursementTest {
             assertNotNull(txn.getType());
             assertEquals("loanTransactionType.disbursement", txn.getType().getCode());
             assertEqualBigDecimal(BigDecimal.valueOf(5000), txn.getTransactionAmount());
-            assertNotEquals(Boolean.TRUE, txn.getReversed(), "Disbursement transaction should not be reversed");
+            assertNotEquals(Boolean.valueOf(true), txn.getReversed(), "Disbursement transaction should not be reversed");
             assertEqualBigDecimal(BigDecimal.valueOf(5000), txn.getPrincipalPortion());
             assertEqualBigDecimal(BigDecimal.ZERO, txn.getFeeChargesPortion());
             assertEqualBigDecimal(BigDecimal.ZERO, txn.getPenaltyChargesPortion());
@@ -228,7 +232,8 @@ public class WorkingCapitalLoanDisbursementTest {
             assertEquals(400, ex.getStatus());
             assertNotNull(ex.getDeveloperMessage());
             final String msg = ex.getDeveloperMessage();
-            assertTrue(msg.contains("classificationId") || msg.contains("Code value") || msg.toLowerCase().contains("code value"),
+            assertTrue(
+                    msg.contains("classificationId") || msg.contains("Code value") || msg.toLowerCase(Locale.ROOT).contains("code value"),
                     "Expected validation message for invalid classificationId: " + msg);
         });
     }
@@ -301,24 +306,22 @@ public class WorkingCapitalLoanDisbursementTest {
             assertStatus(data, "loanStatusType.active");
             assertNotNull(data.getBalance(), "GET loan after disburse should include balance");
             assertEqualBigDecimal(transactionAmount.add(discountAmount), data.getBalance().getPrincipalOutstanding());
-            assertEqualBigDecimal(discountAmount, data.getDiscount());
+            assertEqualBigDecimal(discountAmount, data.getDiscountFee());
             assertEquals(loanId, data.getId());
-            assertNotNull(data.getClient());
-            assertNotNull(data.getProduct());
+            assertNotNull(data.getClientId());
+            assertNotNull(data.getLoanProductId());
 
             if (data.getTimeline() != null) {
                 assertNotNull(data.getTimeline().getActualDisbursementDate());
                 assertDateEquals(currentDate, data.getTimeline().getActualDisbursementDate());
                 assertNotNull(data.getTimeline().getApprovedOnDate());
                 assertNull(data.getTimeline().getActualMaturityDate(), "Expected actualMaturityDate to be null after disbursement");
-                assertNotNull(data.getTimeline().getDisbursementDetails(), "timeline should include disbursementDetails list");
-                assertFalse(data.getTimeline().getDisbursementDetails().isEmpty(), "timeline disbursementDetails should not be empty");
             }
             assertNotNull(data.getDisbursementDetails(), "GET loan after disburse should include disbursementDetails array");
             assertFalse(data.getDisbursementDetails().isEmpty(), "disbursementDetails should not be empty");
             final GetDisbursementDetail disbursement = data.getDisbursementDetails().getFirst();
             assertNotNull(disbursement.getExpectedDisbursementDate(), "disbursementDetails should include expectedDisbursementDate");
-            assertNotNull(disbursement.getExpectedAmount(), "disbursementDetails should include expectedAmount");
+            assertNotNull(disbursement.getPrincipal(), "disbursementDetails should include principal");
             assertDateEquals(currentDate, disbursement.getActualDisbursementDate());
             assertEqualBigDecimal(transactionAmount, disbursement.getActualAmount());
 
@@ -364,7 +367,9 @@ public class WorkingCapitalLoanDisbursementTest {
             assertStatus(data, "loanStatusType.approved");
             assertEqualBigDecimal(BigDecimal.valueOf(5000), data.getApprovedPrincipal());
             assertNotNull(data.getBalance(), "GET loan after undo should include balance");
-            assertEqualBigDecimal(BigDecimal.valueOf(5000), data.getBalance().getPrincipalOutstanding());
+            // Nothing is paid out after an undo-disbursal, so there is nothing outstanding - the loan is
+            // indistinguishable from one that was approved and never disbursed.
+            assertEqualBigDecimal(BigDecimal.ZERO, data.getBalance().getPrincipalOutstanding());
 
             assertNotNull(data.getDisbursementDetails(), "GET loan after undo should include disbursementDetails array");
             assertFalse(data.getDisbursementDetails().isEmpty(), "disbursementDetails should not be empty");
@@ -377,7 +382,7 @@ public class WorkingCapitalLoanDisbursementTest {
             GetWorkingCapitalLoanTransactionsResponse loanTransactionsResponse = applicationHelper.retrieveTransactionsByLoanId(loanId);
             assertEquals(1, loanTransactionsResponse.getContent().size(), "After disburse there should be one transaction");
             final GetWorkingCapitalLoanTransactionIdResponse txn = loanTransactionsResponse.getContent().getFirst();
-            assertEquals(Boolean.TRUE, txn.getReversed(), "Expected transaction to be reversed");
+            assertEquals(Boolean.valueOf(true), txn.getReversed(), "Expected transaction to be reversed");
         });
     }
 
@@ -414,7 +419,7 @@ public class WorkingCapitalLoanDisbursementTest {
                 assertEquals(loanId, event.getAggregateRootId());
                 assertEquals(txn.getId(), ((Number) event.getPayLoad().get("id")).longValue());
                 assertEquals(loanId, ((Number) event.getPayLoad().get("wcLoanId")).longValue());
-                assertEquals(Boolean.FALSE, event.getPayLoad().get("reversed"));
+                assertEquals(Boolean.valueOf(false), event.getPayLoad().get("reversed"));
             });
         } finally {
             externalEventHelper.disableBusinessEvent(WC_DISBURSAL_TXN_EVENT);
@@ -456,7 +461,7 @@ public class WorkingCapitalLoanDisbursementTest {
                 assertEquals(loanId, event.getAggregateRootId());
                 assertEquals(txn.getId(), ((Number) event.getPayLoad().get("id")).longValue());
                 assertEquals(loanId, ((Number) event.getPayLoad().get("wcLoanId")).longValue());
-                assertEquals(Boolean.TRUE, event.getPayLoad().get("reversed"));
+                assertEquals(Boolean.valueOf(true), event.getPayLoad().get("reversed"));
             });
         } finally {
             externalEventHelper.disableBusinessEvent(WC_UNDO_DISBURSAL_TXN_EVENT);
@@ -586,8 +591,8 @@ public class WorkingCapitalLoanDisbursementTest {
             final CallFailedRuntimeException ex = applicationHelper.runDisburseExpectingFailure(loanId, disburseJson);
             assertEquals(400, ex.getStatus());
             assertNotNull(ex.getDeveloperMessage());
-            assertTrue(ex.getDeveloperMessage().toLowerCase().contains("transactionamount") || ex.getDeveloperMessage().contains("positive")
-                    || ex.getDeveloperMessage().contains("greater"));
+            assertTrue(ex.getDeveloperMessage().toLowerCase(Locale.ROOT).contains("transactionamount")
+                    || ex.getDeveloperMessage().contains("positive") || ex.getDeveloperMessage().contains("greater"));
         });
     }
 
@@ -692,7 +697,7 @@ public class WorkingCapitalLoanDisbursementTest {
             final CallFailedRuntimeException ex = applicationHelper.runDisburseExpectingFailure(loanId, disburseJson);
             assertEquals(400, ex.getStatus());
             assertNotNull(ex.getDeveloperMessage());
-            assertTrue(ex.getDeveloperMessage().contains("note") || ex.getDeveloperMessage().toLowerCase().contains("length"),
+            assertTrue(ex.getDeveloperMessage().contains("note") || ex.getDeveloperMessage().toLowerCase(Locale.ROOT).contains("length"),
                     "Expected message about note length: " + ex.getDeveloperMessage());
         });
     }
@@ -784,7 +789,9 @@ public class WorkingCapitalLoanDisbursementTest {
                     null, null, null, null, null, null, null, null, sharedExternalId);
             final CallFailedRuntimeException ex = applicationHelper.runDisburseExpectingFailure(loanId2, disburseJson2);
             assertEquals(400, ex.getStatus());
-            assertTrue(ex.getDeveloperMessage().contains("externalId") && ex.getDeveloperMessage().toLowerCase().contains("already"),
+            assertTrue(
+                    ex.getDeveloperMessage().contains("externalId")
+                            && ex.getDeveloperMessage().toLowerCase(Locale.ROOT).contains("already"),
                     "Expected duplicate transaction externalId error: " + ex.getDeveloperMessage());
         });
     }
@@ -881,7 +888,7 @@ public class WorkingCapitalLoanDisbursementTest {
                     WorkingCapitalLoanDisbursementTestBuilder.buildUndoDisburseRequest(longNote));
             assertEquals(400, ex.getStatus());
             assertNotNull(ex.getDeveloperMessage());
-            assertTrue(ex.getDeveloperMessage().contains("note") || ex.getDeveloperMessage().toLowerCase().contains("length"),
+            assertTrue(ex.getDeveloperMessage().contains("note") || ex.getDeveloperMessage().toLowerCase(Locale.ROOT).contains("length"),
                     "Expected message about note length: " + ex.getDeveloperMessage());
         });
     }
@@ -1172,7 +1179,9 @@ public class WorkingCapitalLoanDisbursementTest {
             final CallFailedRuntimeException ex = applicationHelper.runDisburseExpectingFailure(loanId, disburseJson);
             assertEquals(400, ex.getStatus());
             assertNotNull(ex.getDeveloperMessage());
-            assertTrue(ex.getDeveloperMessage().contains("paymentTypeId") || ex.getDeveloperMessage().toLowerCase().contains("payment"),
+            assertTrue(
+                    ex.getDeveloperMessage().contains("paymentTypeId")
+                            || ex.getDeveloperMessage().toLowerCase(Locale.ROOT).contains("payment"),
                     "Expected message about invalid paymentTypeId: " + ex.getDeveloperMessage());
         });
     }
@@ -1199,7 +1208,9 @@ public class WorkingCapitalLoanDisbursementTest {
             final CallFailedRuntimeException ex = applicationHelper.runDisburseExpectingFailure(loanId, disburseJson);
             assertEquals(400, ex.getStatus());
             assertNotNull(ex.getDeveloperMessage());
-            assertTrue(ex.getDeveloperMessage().contains("accountNumber") || ex.getDeveloperMessage().toLowerCase().contains("length"),
+            assertTrue(
+                    ex.getDeveloperMessage().contains("accountNumber")
+                            || ex.getDeveloperMessage().toLowerCase(Locale.ROOT).contains("length"),
                     "Expected message about accountNumber length: " + ex.getDeveloperMessage());
         });
     }
@@ -1313,7 +1324,7 @@ public class WorkingCapitalLoanDisbursementTest {
     }
 
     private Long createClient() {
-        return ClientHelper.createClient(ClientHelper.defaultClientCreationRequest()).getClientId();
+        return clientHelper.createClient(ClientRequestBuilders.defaultClient()).getClientId();
     }
 
     private ProjectedAmortizationScheduleData retrieveAmortizationScheduleByLoanId(final Long loanId) {

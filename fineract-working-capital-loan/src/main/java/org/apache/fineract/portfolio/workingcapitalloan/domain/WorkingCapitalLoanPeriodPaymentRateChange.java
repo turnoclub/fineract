@@ -31,6 +31,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 import org.apache.fineract.infrastructure.core.domain.AbstractAuditableWithUTCDateTimeCustom;
+import org.apache.fineract.infrastructure.core.service.DateUtils;
 
 @Getter
 @Setter
@@ -58,6 +59,22 @@ public class WorkingCapitalLoanPeriodPaymentRateChange extends AbstractAuditable
     @Column(name = "reversed_on_date")
     private LocalDate reversedOnDate;
 
+    @Column(name = "submitted_on_date", nullable = false)
+    private LocalDate submittedOnDate;
+
+    /**
+     * Snapshot taken when the change was booked, never restated; null for changes booked before it existed. The annual
+     * EIR is a percentage, like the rates.
+     */
+    @Column(name = "calculated_annual_eir", scale = 6, precision = 19)
+    private BigDecimal calculatedAnnualEir;
+
+    @Column(name = "daily_payment_amount", scale = 6, precision = 19)
+    private BigDecimal dailyPaymentAmount;
+
+    @Column(name = "segment_term")
+    private Integer segmentTerm;
+
     @Version
     private int version;
 
@@ -69,11 +86,19 @@ public class WorkingCapitalLoanPeriodPaymentRateChange extends AbstractAuditable
         change.previousRate = previousRate;
         change.newRate = newRate;
         change.reversed = false;
+        change.submittedOnDate = DateUtils.getBusinessLocalDate();
         return change;
     }
 
     public void reverse(final LocalDate reversalDate) {
         this.reversed = true;
         this.reversedOnDate = reversalDate;
+    }
+
+    public void applyCalculatedValues(final BigDecimal calculatedAnnualEir, final BigDecimal dailyPaymentAmount,
+            final Integer segmentTerm) {
+        this.calculatedAnnualEir = calculatedAnnualEir;
+        this.dailyPaymentAmount = dailyPaymentAmount;
+        this.segmentTerm = segmentTerm;
     }
 }

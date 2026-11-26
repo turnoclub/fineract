@@ -18,10 +18,10 @@
  */
 package org.apache.fineract.template.service;
 
+import java.util.Arrays;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.fineract.command.jdbc.store.mapping.CommandMapper;
 import org.apache.fineract.template.data.TemplateCreateRequest;
 import org.apache.fineract.template.data.TemplateCreateResponse;
 import org.apache.fineract.template.data.TemplateData;
@@ -47,15 +47,13 @@ import org.springframework.transaction.annotation.Transactional;
 @ConditionalOnMissingBean(value = TemplateDomainService.class, ignored = TemplateDomainServiceImpl.class)
 public class TemplateDomainServiceImpl implements TemplateDomainService {
 
-    private final CommandMapper commandMapper;
-
     private final TemplateRepository templateRepository;
     private final TemplateMapper templateMapper;
     private final TemplateMapperDataMapper templateMapperDataMapper;
 
     @Override
     public List<TemplateData> getAll() {
-        return templateRepository.findAll().stream().map(template -> TemplateData.builder().id(template.getId()).build()).toList();
+        return templateMapper.map(templateRepository.findAll());
     }
 
     @Override
@@ -76,7 +74,7 @@ public class TemplateDomainServiceImpl implements TemplateDomainService {
         // FIXME: handle cases where data integrity constraints are fired from
         // database when saving.
 
-        var template = new Template().setName(request.getName()).setType(TemplateType.values()[request.getType()])
+        var template = new Template().setName(request.getName()).setType(findTemplateType(request.getType()))
                 .setEntity(TemplateEntity.values()[request.getEntity()]).setText(request.getText());
 
         templateRepository.saveAndFlush(template);
@@ -97,16 +95,7 @@ public class TemplateDomainServiceImpl implements TemplateDomainService {
         template.setText(request.getText());
         template.setEntity(TemplateEntity.values()[request.getEntity()]);
 
-        switch (request.getType()) {
-            case 0:
-                template.setType(TemplateType.DOCUMENT);
-            break;
-            case 2:
-                template.setType(TemplateType.SMS);
-            break;
-            default:
-                throw new TemplateTypeInvalidException(request.getType());
-        }
+        template.setType(findTemplateType(request.getType()));
 
         template.setMappers(templateMapperDataMapper.map(request.getMappers()));
 
@@ -127,7 +116,11 @@ public class TemplateDomainServiceImpl implements TemplateDomainService {
 
     @Override
     public List<TemplateData> getAllByEntityAndType(final TemplateEntity entity, final TemplateType type) {
-        return templateRepository.findByEntityAndType(entity, type).stream()
-                .map(template -> TemplateData.builder().id(template.getId()).build()).toList();
+        return templateMapper.map(templateRepository.findByEntityAndType(entity, type));
+    }
+
+    private TemplateType findTemplateType(final Integer typeId) {
+        return Arrays.stream(TemplateType.values()).filter(type -> type.getId() == typeId).findFirst()
+                .orElseThrow(() -> new TemplateTypeInvalidException(typeId));
     }
 }

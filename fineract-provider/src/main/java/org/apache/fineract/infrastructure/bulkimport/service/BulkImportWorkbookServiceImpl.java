@@ -27,30 +27,34 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.LocalDate;
 import java.util.Collection;
+import java.util.Locale;
+import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.io.FilenameUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.fineract.infrastructure.bulkimport.data.BulkImportEvent;
 import org.apache.fineract.infrastructure.bulkimport.data.GlobalEntityType;
 import org.apache.fineract.infrastructure.bulkimport.data.ImportData;
 import org.apache.fineract.infrastructure.bulkimport.domain.ImportDocument;
 import org.apache.fineract.infrastructure.bulkimport.domain.ImportDocumentRepository;
-import org.apache.fineract.infrastructure.bulkimport.importhandler.ImportHandlerUtils;
 import org.apache.fineract.infrastructure.bulkimport.mapping.ImportDocumentMapper;
 import org.apache.fineract.infrastructure.contentstore.util.ContentPipe;
 import org.apache.fineract.infrastructure.core.domain.JdbcSupport;
 import org.apache.fineract.infrastructure.core.exception.GeneralPlatformDomainRuleException;
+import org.apache.fineract.infrastructure.core.exception.PlatformApiDataValidationException;
 import org.apache.fineract.infrastructure.core.service.DateUtils;
 import org.apache.fineract.infrastructure.core.service.ThreadLocalContextUtil;
+import org.apache.fineract.infrastructure.core.service.TransactionBoundApplicationEventPublisher;
 import org.apache.fineract.infrastructure.documentmanagement.data.DocumentCreateRequest;
 import org.apache.fineract.infrastructure.documentmanagement.data.DocumentCreateResponse;
 import org.apache.fineract.infrastructure.documentmanagement.service.DocumentWritePlatformService;
 import org.apache.fineract.infrastructure.security.service.PlatformSecurityContext;
-import org.apache.poi.hssf.usermodel.HSSFWorkbook;
 import org.apache.poi.ss.usermodel.Workbook;
+import org.apache.poi.ss.usermodel.WorkbookFactory;
 import org.apache.tika.Tika;
 import org.apache.tika.io.TikaInputStream;
 import org.glassfish.jersey.media.multipart.FormDataContentDisposition;
-import org.springframework.context.ApplicationContext;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Service;
@@ -60,7 +64,11 @@ import org.springframework.stereotype.Service;
 @Service
 public class BulkImportWorkbookServiceImpl implements BulkImportWorkbookService {
 
-    private final ApplicationContext applicationContext;
+    static final int MAX_FILE_NAME_LENGTH = 250;
+    private static final Set<String> ACCEPTED_EXTENSIONS = Set.of("xls", "xlsx");
+    private static final String FILE_PARAMETER = "file";
+
+    private final TransactionBoundApplicationEventPublisher eventPublisher;
     private final PlatformSecurityContext securityContext;
     private final ImportDocumentRepository importDocumentRepository;
     private final DocumentWritePlatformService writePlatformService;
@@ -73,6 +81,7 @@ public class BulkImportWorkbookServiceImpl implements BulkImportWorkbookService 
             final String dateFormat) {
         try {
             if (entity != null && inputStream != null && fileDetail != null && locale != null && dateFormat != null) {
+                validateFileName(fileDetail.getFileName());
                 final ByteArrayOutputStream baos = new ByteArrayOutputStream();
                 inputStream.transferTo(baos);
                 final byte[] bytes = baos.toByteArray();
@@ -81,88 +90,68 @@ public class BulkImportWorkbookServiceImpl implements BulkImportWorkbookService 
                 final Tika tika = new Tika();
                 final TikaInputStream tikaInputStream = TikaInputStream.get(bis);
                 final String fileType = tika.detect(tikaInputStream);
-                if (!fileType.contains("msoffice") && !fileType.contains("application/vnd.ms-excel")) {
-                    // We had a problem where we tried to upload the downloaded
-                    // file from the import options, it was somehow changed the
-                    // extension we use this fix.
-                    throw new GeneralPlatformDomainRuleException("error.msg.invalid.file.extension",
-                            "Uploaded file extension is not recognized.");
-
+                if (!fileType.contains("msoffice") && !fileType.contains("application/vnd.ms-excel")
+                        && !fileType.contains("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")) {
+                    throw unreadableWorkbook(null);
                 }
-                Workbook workbook = new HSSFWorkbook(clonedInputStream);
-                GlobalEntityType entityType = null;
-                int primaryColumn = 0;
-                if (entity.trim().equalsIgnoreCase(GlobalEntityType.CLIENTS_PERSON.toString())) {
-                    entityType = GlobalEntityType.CLIENTS_PERSON;
-                    primaryColumn = 0;
-                } else if (entity.trim().equalsIgnoreCase(GlobalEntityType.CLIENTS_ENTITY.toString())) {
-                    entityType = GlobalEntityType.CLIENTS_ENTITY;
-                    primaryColumn = 0;
-                } else if (entity.trim().equalsIgnoreCase(GlobalEntityType.CENTERS.toString())) {
-                    entityType = GlobalEntityType.CENTERS;
-                    primaryColumn = 0;
-                } else if (entity.trim().equalsIgnoreCase(GlobalEntityType.GROUPS.toString())) {
-                    entityType = GlobalEntityType.GROUPS;
-                    primaryColumn = 0;
-                } else if (entity.trim().equalsIgnoreCase(GlobalEntityType.LOANS.toString())) {
-                    entityType = GlobalEntityType.LOANS;
-                    primaryColumn = 0;
-                } else if (entity.trim().equalsIgnoreCase(GlobalEntityType.LOAN_TRANSACTIONS.toString())) {
-                    entityType = GlobalEntityType.LOAN_TRANSACTIONS;
-                    primaryColumn = 0;
-                } else if (entity.trim().equalsIgnoreCase(GlobalEntityType.GUARANTORS.toString())) {
-                    entityType = GlobalEntityType.GUARANTORS;
-                    primaryColumn = 0;
-                } else if (entity.trim().equalsIgnoreCase(GlobalEntityType.OFFICES.toString())) {
-                    entityType = GlobalEntityType.OFFICES;
-                    primaryColumn = 0;
-                } else if (entity.trim().equalsIgnoreCase(GlobalEntityType.CHART_OF_ACCOUNTS.toString())) {
-                    entityType = GlobalEntityType.CHART_OF_ACCOUNTS;
-                    primaryColumn = 0;
-                } else if (entity.trim().equalsIgnoreCase(GlobalEntityType.GL_JOURNAL_ENTRIES.toString())) {
-                    entityType = GlobalEntityType.GL_JOURNAL_ENTRIES;
-                    primaryColumn = 0;
-                } else if (entity.trim().equalsIgnoreCase(GlobalEntityType.STAFF.toString())) {
-                    entityType = GlobalEntityType.STAFF;
-                    primaryColumn = 0;
-                } else if (entity.trim().equalsIgnoreCase(GlobalEntityType.SHARE_ACCOUNTS.toString())) {
-                    entityType = GlobalEntityType.SHARE_ACCOUNTS;
-                    primaryColumn = 0;
-                } else if (entity.trim().equalsIgnoreCase(GlobalEntityType.SAVINGS_ACCOUNT.toString())) {
-                    entityType = GlobalEntityType.SAVINGS_ACCOUNT;
-                    primaryColumn = 0;
-                } else if (entity.trim().equalsIgnoreCase(GlobalEntityType.SAVINGS_TRANSACTIONS.toString())) {
-                    entityType = GlobalEntityType.SAVINGS_TRANSACTIONS;
-                    primaryColumn = 0;
-                } else if (entity.trim().equalsIgnoreCase(GlobalEntityType.RECURRING_DEPOSIT_ACCOUNTS.toString())) {
-                    entityType = GlobalEntityType.RECURRING_DEPOSIT_ACCOUNTS;
-                    primaryColumn = 0;
-                } else if (entity.trim().equalsIgnoreCase(GlobalEntityType.RECURRING_DEPOSIT_ACCOUNTS_TRANSACTIONS.toString())) {
-                    entityType = GlobalEntityType.RECURRING_DEPOSIT_ACCOUNTS_TRANSACTIONS;
-                    primaryColumn = 0;
-                } else if (entity.trim().equalsIgnoreCase(GlobalEntityType.FIXED_DEPOSIT_ACCOUNTS.toString())) {
-                    entityType = GlobalEntityType.FIXED_DEPOSIT_ACCOUNTS;
-                    primaryColumn = 0;
-                } else if (entity.trim().equalsIgnoreCase(GlobalEntityType.FIXED_DEPOSIT_TRANSACTIONS.toString())) {
-                    entityType = GlobalEntityType.FIXED_DEPOSIT_TRANSACTIONS;
-                    primaryColumn = 0;
-                } else if (entity.trim().equalsIgnoreCase(GlobalEntityType.USERS.toString())) {
-                    entityType = GlobalEntityType.USERS;
-                    primaryColumn = 0;
-                } else {
+                Workbook workbook = readWorkbook(clonedInputStream);
+                final GlobalEntityType entityType = BulkImportTemplateLayout.findEntityType(entity).orElse(null);
+                if (entityType == null) {
                     workbook.close();
                     throw new GeneralPlatformDomainRuleException("error.msg.unable.to.find.resource", "Unable to find requested resource");
-
                 }
-                return publishEvent(primaryColumn, fileDetail, fileType, entityType, workbook, locale, dateFormat);
+                final BulkImportTemplateLayout layout = BulkImportTemplateLayout.of(entityType);
+                try {
+                    layout.validate(workbook);
+                } catch (PlatformApiDataValidationException e) {
+                    workbook.close();
+                    throw e;
+                }
+                return publishEvent(layout, fileDetail, fileType, entityType, workbook, locale, dateFormat);
             }
             throw new GeneralPlatformDomainRuleException("error.msg.null", "One or more of the given parameters not found");
         } catch (IOException e) {
             log.error("Problem occurred in importWorkbook function", e);
             throw new GeneralPlatformDomainRuleException("error.msg.io.exception",
-                    "IO exception occured with " + fileDetail.getFileName() + " " + e.getMessage(), e);
+                    "IO exception occurred with " + fileDetail.getFileName() + " " + e.getMessage(), e);
 
         }
+    }
+
+    private static void validateFileName(final String fileName) {
+        if (StringUtils.isBlank(fileName)) {
+            throw invalidFile("error.msg.bulk.import.file.name.missing", "File name is required");
+        }
+        if (fileName.length() > MAX_FILE_NAME_LENGTH) {
+            throw invalidFile("error.msg.bulk.import.file.name.too.long",
+                    "File name is too long (max " + MAX_FILE_NAME_LENGTH + " characters)");
+        }
+        final String extension = FilenameUtils.getExtension(fileName);
+        if (StringUtils.isBlank(extension)) {
+            throw invalidFile("error.msg.bulk.import.file.extension.missing", "File has no extension - only .xls and .xlsx are accepted");
+        }
+        if (!ACCEPTED_EXTENSIONS.contains(extension.toLowerCase(Locale.ROOT))) {
+            throw invalidFile("error.msg.bulk.import.file.extension.invalid",
+                    "File extension ." + extension + " is not supported - only .xls and .xlsx are accepted");
+        }
+    }
+
+    private static Workbook readWorkbook(final InputStream inputStream) {
+        try {
+            return WorkbookFactory.create(inputStream);
+        } catch (IOException | RuntimeException e) {
+            log.warn("Uploaded bulk import file could not be read as a workbook", e);
+            throw unreadableWorkbook(e);
+        }
+    }
+
+    private static PlatformApiDataValidationException unreadableWorkbook(final Throwable cause) {
+        return new PlatformApiDataValidationException("error.msg.bulk.import.file.unreadable",
+                "File could not be read as an Excel workbook", FILE_PARAMETER, cause);
+    }
+
+    private static PlatformApiDataValidationException invalidFile(final String messageCode, final String message) {
+        return new PlatformApiDataValidationException(messageCode, message, FILE_PARAMETER);
     }
 
     private DocumentCreateResponse createDocument(final Workbook workbook, final FormDataContentDisposition fileDetail,
@@ -179,11 +168,11 @@ public class BulkImportWorkbookServiceImpl implements BulkImportWorkbookService 
                         .fileName(fileDetail.getFileName()).size(fileDetail.getSize()).type(fileType).stream(pipedInputStream).build());
     }
 
-    private Long publishEvent(final Integer primaryColumn, final FormDataContentDisposition fileDetail, final String fileType,
+    private Long publishEvent(final BulkImportTemplateLayout layout, final FormDataContentDisposition fileDetail, final String fileType,
             final GlobalEntityType entityType, final Workbook workbook, final String locale, final String dateFormat) {
 
         final var importDocument = ImportDocument.instance(null, DateUtils.getLocalDateTimeOfTenant(), entityType.getValue(),
-                securityContext.authenticatedUser(), ImportHandlerUtils.getNumberOfRows(workbook.getSheetAt(0), primaryColumn));
+                securityContext.authenticatedUser(), layout.countRecords(workbook));
 
         final var response = createDocument(workbook, fileDetail, fileType);
 
@@ -195,7 +184,7 @@ public class BulkImportWorkbookServiceImpl implements BulkImportWorkbookService 
         final var event = new BulkImportEvent(this, workbook, fileDetail.getFileName(), fileType, importDocument, locale, dateFormat,
                 ThreadLocalContextUtil.getContext(), this.securityContext.authenticatedUser().getId());
 
-        applicationContext.publishEvent(event);
+        eventPublisher.publishEvent(event);
 
         return importDocument.getId();
     }
@@ -223,7 +212,7 @@ public class BulkImportWorkbookServiceImpl implements BulkImportWorkbookService 
                 i.failure_count as failureCount, i.createdby_id as createdBy
                 from m_import_document i inner join m_document d on i.document_id=d.id where i.entity_type= ?\s""";
 
-        public String schema() {
+        private String schema() {
             return IMPORT_SCHEMA;
         }
 

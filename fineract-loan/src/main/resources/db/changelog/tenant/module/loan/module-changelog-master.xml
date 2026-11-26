@@ -58,4 +58,8 @@
   <include relativeToChangelogFile="true" file="parts/1033_add_reage_reasons_for_loan.xml"/>
   <include relativeToChangelogFile="true" file="parts/1034_loan_reamortization_parameters.xml"/>
   <include relativeToChangelogFile="true" file="parts/1035_add_tax_to_loan_charge.xml"/>
+  <include relativeToChangelogFile="true" file="parts/1036_link_unlinked_charge_adjustments.xml"/>
+  <include relativeToChangelogFile="true" file="parts/1037_add_semi_monthly_repayment_frequency.xml"/>
+  <include relativeToChangelogFile="true" file="parts/1038_add_credit_allocation_strategy.xml"/>
+  <include relativeToChangelogFile="true" file="parts/1039_add_fee_refund_support.xml"/>
 </databaseChangeLog>

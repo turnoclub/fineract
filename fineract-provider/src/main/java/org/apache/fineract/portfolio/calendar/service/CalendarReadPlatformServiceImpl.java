@@ -33,9 +33,11 @@ import org.apache.fineract.infrastructure.core.domain.JdbcSupport;
 import org.apache.fineract.infrastructure.core.service.DateUtils;
 import org.apache.fineract.portfolio.calendar.data.CalendarData;
 import org.apache.fineract.portfolio.calendar.domain.CalendarEntityType;
+import org.apache.fineract.portfolio.calendar.domain.CalendarFrequencyType;
 import org.apache.fineract.portfolio.calendar.domain.CalendarType;
+import org.apache.fineract.portfolio.calendar.domain.CalendarWeekDaysType;
 import org.apache.fineract.portfolio.calendar.exception.CalendarNotFoundException;
-import org.apache.fineract.portfolio.meeting.data.MeetingData;
+import org.apache.fineract.portfolio.common.domain.NthDayType;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
@@ -49,7 +51,7 @@ public class CalendarReadPlatformServiceImpl implements CalendarReadPlatformServ
 
     private static final class CalendarDataMapper implements RowMapper<CalendarData> {
 
-        public String schema() {
+        private String schema() {
             return " select c.id as id, ci.id as calendarInstanceId, ci.entity_id as entityId, ci.entity_type_enum as entityTypeId, c.title as title, "
                     + " c.description as description, c.location as location, c.start_date as startDate, c.end_date as endDate, "
                     + " c.duration as duration, c.calendar_type_enum as typeId, c.repeating as repeating, "
@@ -79,11 +81,15 @@ public class CalendarReadPlatformServiceImpl implements CalendarReadPlatformServ
             final EnumOptionData type = CalendarEnumerations.calendarType(typeId);
             final boolean repeating = rs.getBoolean("repeating");
             final String recurrence = rs.getString("recurrence");
-            final EnumOptionData frequency = CalendarEnumerations.calendarFrequencyType(CalendarUtils.getFrequency(recurrence));
-            final Integer interval = Integer.valueOf(CalendarUtils.getInterval(recurrence));
-            final EnumOptionData repeatsOnDay = CalendarEnumerations.calendarWeekDaysType(CalendarUtils.getRepeatsOnDay(recurrence));
-            final EnumOptionData repeatsOnNthDayOfMonth = CalendarEnumerations
-                    .calendarFrequencyNthDayType(CalendarUtils.getRepeatsOnNthDayOfMonth(recurrence));
+            // A non-repeating calendar has no recurrence rule and CalendarUtils cannot parse a null one:
+            // fall back to the INVALID/0 defaults (same guard as the humanReadable computation below).
+            final EnumOptionData frequency = CalendarEnumerations
+                    .calendarFrequencyType(recurrence != null ? CalendarUtils.getFrequency(recurrence) : CalendarFrequencyType.INVALID);
+            final Integer interval = recurrence != null ? Integer.valueOf(CalendarUtils.getInterval(recurrence)) : 0;
+            final EnumOptionData repeatsOnDay = CalendarEnumerations
+                    .calendarWeekDaysType(recurrence != null ? CalendarUtils.getRepeatsOnDay(recurrence) : CalendarWeekDaysType.INVALID);
+            final EnumOptionData repeatsOnNthDayOfMonth = CalendarEnumerations.calendarFrequencyNthDayType(
+                    recurrence != null ? CalendarUtils.getRepeatsOnNthDayOfMonth(recurrence) : NthDayType.INVALID);
             final Integer remindById = rs.getInt("remindById");
             EnumOptionData remindBy = null;
             if (remindById != null && remindById != 0) {
@@ -95,7 +101,7 @@ public class CalendarReadPlatformServiceImpl implements CalendarReadPlatformServ
             if (startDate != null && recurrence != null) {
                 humanReadable = CalendarUtils.getRRuleReadable(startDate, recurrence);
             }
-            Integer monthOnDay = CalendarUtils.getMonthOnDay(recurrence);
+            Integer monthOnDay = recurrence != null ? CalendarUtils.getMonthOnDay(recurrence) : null;
             final OffsetDateTime createdDateLocal = JdbcSupport.getOffsetDateTime(rs, "createdDate");
             final OffsetDateTime createdDateUtc = JdbcSupport.getOffsetDateTime(rs, "createdDateUtc");
             final OffsetDateTime lastModifiedDateLocal = JdbcSupport.getOffsetDateTime(rs, "updatedDate");
@@ -208,16 +214,26 @@ public class CalendarReadPlatformServiceImpl implements CalendarReadPlatformServ
     public Collection<LocalDate> generateRecurringDates(final CalendarData calendarData, final boolean withHistory,
             final LocalDate tillDate) {
         final LocalDate fromDate = null;
-        Collection<LocalDate> recurringDates = generateRecurringDate(calendarData, fromDate, tillDate, -1);
+        // A non-repeating calendar, or a history row from before it became repeating, has no recurring dates
+        final Collection<LocalDate> recurringDates = new ArrayList<>();
+        addRecurringDates(recurringDates, calendarData, fromDate, tillDate);
 
         if (withHistory) {
             final Collection<CalendarData> calendarHistorys = this.retrieveCalendarsFromHistory(calendarData.getId());
             for (CalendarData calendarHistory : calendarHistorys) {
-                recurringDates.addAll(generateRecurringDate(calendarHistory, fromDate, tillDate, -1));
+                addRecurringDates(recurringDates, calendarHistory, fromDate, tillDate);
             }
         }
 
         return recurringDates;
+    }
+
+    private void addRecurringDates(final Collection<LocalDate> recurringDates, final CalendarData calendarData, final LocalDate fromDate,
+            final LocalDate tillDate) {
+        final Collection<LocalDate> dates = generateRecurringDate(calendarData, fromDate, tillDate, -1);
+        if (dates != null) {
+            recurringDates.addAll(dates);
+        }
     }
 
     @Override
@@ -309,9 +325,8 @@ public class CalendarReadPlatformServiceImpl implements CalendarReadPlatformServ
     }
 
     @Override
-    public LocalDate generateNextEligibleMeetingDateForCollection(final CalendarData calendarData, final MeetingData lastMeetingData) {
+    public LocalDate generateNextEligibleMeetingDateForCollection(final CalendarData calendarData, final LocalDate lastMeetingDate) {
 
-        final LocalDate lastMeetingDate = (lastMeetingData == null) ? null : lastMeetingData.getMeetingDate();
         // get applicable calendar based on meeting date
         CalendarData applicableCalendarData = calendarData;
         LocalDate nextEligibleMeetingDate = null;
@@ -446,7 +461,7 @@ public class CalendarReadPlatformServiceImpl implements CalendarReadPlatformServ
 
     private static final class CalendarDataFromHistoryMapper implements RowMapper<CalendarData> {
 
-        public String schema() {
+        private String schema() {
             return " select c.calendar_id as id, c.title as title, c.description as description, c.location as location, c.start_date as startDate, "
                     + " c.end_date as endDate, c.duration as duration, c.calendar_type_enum as typeId, c.repeating as repeating, "
                     + " c.recurrence as recurrence, c.remind_by_enum as remindById, c.first_reminder as firstReminder, c.second_reminder as secondReminder "
@@ -470,11 +485,15 @@ public class CalendarReadPlatformServiceImpl implements CalendarReadPlatformServ
             final EnumOptionData type = CalendarEnumerations.calendarType(typeId);
             final boolean repeating = rs.getBoolean("repeating");
             final String recurrence = rs.getString("recurrence");
-            final EnumOptionData frequency = CalendarEnumerations.calendarFrequencyType(CalendarUtils.getFrequency(recurrence));
-            final Integer interval = Integer.valueOf(CalendarUtils.getInterval(recurrence));
-            final EnumOptionData repeatsOnDay = CalendarEnumerations.calendarWeekDaysType(CalendarUtils.getRepeatsOnDay(recurrence));
-            final EnumOptionData repeatsOnNthDayOfMonth = CalendarEnumerations
-                    .calendarFrequencyNthDayType(CalendarUtils.getRepeatsOnNthDayOfMonth(recurrence));
+            // A non-repeating calendar has no recurrence rule and CalendarUtils cannot parse a null one:
+            // fall back to the INVALID/0 defaults (same guard as the humanReadable computation below).
+            final EnumOptionData frequency = CalendarEnumerations
+                    .calendarFrequencyType(recurrence != null ? CalendarUtils.getFrequency(recurrence) : CalendarFrequencyType.INVALID);
+            final Integer interval = recurrence != null ? Integer.valueOf(CalendarUtils.getInterval(recurrence)) : 0;
+            final EnumOptionData repeatsOnDay = CalendarEnumerations
+                    .calendarWeekDaysType(recurrence != null ? CalendarUtils.getRepeatsOnDay(recurrence) : CalendarWeekDaysType.INVALID);
+            final EnumOptionData repeatsOnNthDayOfMonth = CalendarEnumerations.calendarFrequencyNthDayType(
+                    recurrence != null ? CalendarUtils.getRepeatsOnNthDayOfMonth(recurrence) : NthDayType.INVALID);
             final Integer remindById = rs.getInt("remindById");
             EnumOptionData remindBy = null;
             if (remindById != null && remindById != 0) {
@@ -494,7 +513,7 @@ public class CalendarReadPlatformServiceImpl implements CalendarReadPlatformServ
             final Long lastUpdatedByUserId = null;
             final String lastUpdatedByUserName = null;
             final LocalTime meetingTime = null;
-            Integer monthOnDay = CalendarUtils.getMonthOnDay(recurrence);
+            Integer monthOnDay = recurrence != null ? CalendarUtils.getMonthOnDay(recurrence) : null;
 
             return CalendarData.instance(id, calendarInstanceId, entityId, entityType, title, description, location, startDate, endDate,
                     duration, type, repeating, recurrence, frequency, interval, repeatsOnDay, repeatsOnNthDayOfMonth, remindBy,

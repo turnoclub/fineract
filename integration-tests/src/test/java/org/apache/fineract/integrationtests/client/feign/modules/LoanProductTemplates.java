@@ -23,6 +23,7 @@ import java.util.List;
 import java.util.function.Function;
 import org.apache.fineract.client.models.AllowAttributeOverrides;
 import org.apache.fineract.client.models.PostLoanProductsRequest;
+import org.apache.fineract.integrationtests.client.feign.helpers.FeignDelinquencyHelper;
 import org.apache.fineract.integrationtests.client.feign.modules.LoanTestData.AmortizationType;
 import org.apache.fineract.integrationtests.client.feign.modules.LoanTestData.DaysInMonthType;
 import org.apache.fineract.integrationtests.client.feign.modules.LoanTestData.DaysInYearType;
@@ -32,7 +33,9 @@ import org.apache.fineract.integrationtests.client.feign.modules.LoanTestData.In
 import org.apache.fineract.integrationtests.client.feign.modules.LoanTestData.RepaymentFrequencyType;
 import org.apache.fineract.integrationtests.client.feign.modules.LoanTestData.RescheduleStrategyMethod;
 import org.apache.fineract.integrationtests.client.feign.modules.LoanTestData.TransactionProcessingStrategyCode;
+import org.apache.fineract.integrationtests.common.FineractFeignClientHelper;
 import org.apache.fineract.integrationtests.common.Utils;
+import org.apache.fineract.integrationtests.common.accounting.Account;
 import org.apache.fineract.integrationtests.common.loans.LoanProductTestBuilder;
 import org.apache.fineract.portfolio.loanaccount.loanschedule.domain.LoanScheduleType;
 
@@ -219,7 +222,7 @@ public interface LoanProductTemplates {
                 .chargeOffExpenseAccountId(getExpenseAccountId("chargeOff"))//
                 .chargeOffFraudExpenseAccountId(getExpenseAccountId("chargeOffFraud"))//
                 .dateFormat(LoanTestData.DATETIME_PATTERN)//
-                .locale("en")//
+                .locale(LoanTestData.LOCALE)//
                 .enableAccrualActivityPosting(false)//
                 .multiDisburseLoan(false)//
                 .disallowExpectedDisbursements(false)//
@@ -260,5 +263,305 @@ public interface LoanProductTemplates {
     default PostLoanProductsRequest customizeProduct(PostLoanProductsRequest template,
             Function<PostLoanProductsRequest, PostLoanProductsRequest> customizer) {
         return customizer.apply(template);
+    }
+
+    default PostLoanProductsRequest withPeriodicAccrualAccounting(PostLoanProductsRequest request, Account... accounts) {
+        Long assetAccountId = null;
+        Long incomeAccountId = null;
+        Long expenseAccountId = null;
+        Long liabilityAccountId = null;
+        for (Account account : accounts) {
+            switch (account.getAccountType()) {
+                case ASSET -> assetAccountId = account.getAccountID().longValue();
+                case INCOME -> incomeAccountId = account.getAccountID().longValue();
+                case EXPENSE -> expenseAccountId = account.getAccountID().longValue();
+                case LIABILITY -> liabilityAccountId = account.getAccountID().longValue();
+                case EQUITY -> {
+                    // not mapped for periodic accrual products
+                }
+            }
+        }
+        return request.accountingRule(3)//
+                .fundSourceAccountId(assetAccountId)//
+                .loanPortfolioAccountId(assetAccountId)//
+                .transfersInSuspenseAccountId(assetAccountId)//
+                .receivableInterestAccountId(assetAccountId)//
+                .receivableFeeAccountId(assetAccountId)//
+                .receivablePenaltyAccountId(assetAccountId)//
+                .interestOnLoanAccountId(incomeAccountId)//
+                .incomeFromFeeAccountId(incomeAccountId)//
+                .incomeFromPenaltyAccountId(incomeAccountId)//
+                .incomeFromRecoveryAccountId(incomeAccountId)//
+                .incomeFromChargeOffInterestAccountId(incomeAccountId)//
+                .incomeFromChargeOffFeesAccountId(incomeAccountId)//
+                .incomeFromChargeOffPenaltyAccountId(incomeAccountId)//
+                .incomeFromGoodwillCreditInterestAccountId(incomeAccountId)//
+                .incomeFromGoodwillCreditFeesAccountId(incomeAccountId)//
+                .incomeFromGoodwillCreditPenaltyAccountId(incomeAccountId)//
+                .writeOffAccountId(expenseAccountId)//
+                .goodwillCreditAccountId(expenseAccountId)//
+                .chargeOffExpenseAccountId(expenseAccountId)//
+                .chargeOffFraudExpenseAccountId(expenseAccountId)//
+                .overpaymentLiabilityAccountId(liabilityAccountId);
+    }
+
+    default PostLoanProductsRequest twelveMonthInterestRecalculationPeriodicAccrual(Account... accounts) {
+        return withPeriodicAccrualAccounting(twelveMonthInterestRecalculationProduct(), accounts);
+    }
+
+    default PostLoanProductsRequest twelveMonthInterestRecalculationProduct() {
+        return new PostLoanProductsRequest()//
+                .name(Utils.uniqueRandomStringGenerator("LOAN_PRODUCT_", 6))//
+                .shortName(Utils.uniqueRandomStringGenerator("", 4))//
+                .description("12 month interest recalculation product")//
+                .currencyCode("USD")//
+                .digitsAfterDecimal(2)//
+                .principal(1000.0)//
+                .numberOfRepayments(12)//
+                .repaymentEvery(1)//
+                .repaymentFrequencyType(RepaymentFrequencyType.MONTHS_L)//
+                .interestRatePerPeriod(12.0)//
+                .interestRateFrequencyType(InterestRateFrequencyType.YEARS)//
+                .amortizationType(AmortizationType.EQUAL_INSTALLMENTS)//
+                .interestType(InterestType.DECLINING_BALANCE)//
+                .interestCalculationPeriodType(InterestCalculationPeriodType.DAILY)//
+                .transactionProcessingStrategyCode(LoanProductTestBuilder.DEFAULT_STRATEGY)//
+                .loanScheduleType(LoanScheduleType.CUMULATIVE.toString())//
+                .daysInYearType(DaysInYearType.ACTUAL)//
+                .daysInMonthType(DaysInMonthType.ACTUAL)//
+                .isInterestRecalculationEnabled(true)//
+                .interestRecalculationCompoundingMethod(LoanTestData.InterestRecalculationCompoundingMethod.NONE)//
+                .rescheduleStrategyMethod(2)//
+                .recalculationRestFrequencyType(LoanTestData.RecalculationRestFrequencyType.DAILY)//
+                .recalculationRestFrequencyInterval(0)//
+                .preClosureInterestCalculationStrategy(1)//
+                .accountingRule(1)//
+                .multiDisburseLoan(false)//
+                .dateFormat(LoanTestData.DATETIME_PATTERN)//
+                .locale(LoanTestData.LOCALE);
+    }
+
+    default PostLoanProductsRequest singleRepaymentMultiDisbursePeriodicAccrual(Long delinquencyBucketId, Account... accounts) {
+        return withPeriodicAccrualAccounting(new PostLoanProductsRequest()//
+                .name(Utils.uniqueRandomStringGenerator("LOAN_PRODUCT_", 6))//
+                .shortName(Utils.uniqueRandomStringGenerator("", 4))//
+                .description("Single repayment multi-disburse product")//
+                .currencyCode("USD")//
+                .digitsAfterDecimal(2)//
+                .principal(1000.0)//
+                .numberOfRepayments(1)//
+                .repaymentEvery(1)//
+                .repaymentFrequencyType(RepaymentFrequencyType.MONTHS_L)//
+                .interestRatePerPeriod(0.0)//
+                .interestRateFrequencyType(InterestRateFrequencyType.MONTHS)//
+                .amortizationType(AmortizationType.EQUAL_PRINCIPAL)//
+                .interestType(InterestType.DECLINING_BALANCE)//
+                .interestCalculationPeriodType(InterestCalculationPeriodType.SAME_AS_REPAYMENT_PERIOD)//
+                .allowPartialPeriodInterestCalculation(true)//
+                .daysInMonthType(DaysInMonthType.DAYS_30)//
+                .daysInYearType(DaysInYearType.DAYS_365)//
+                .isInterestRecalculationEnabled(false)//
+                .transactionProcessingStrategyCode(
+                        LoanProductTestBuilder.DUE_PENALTY_FEE_INTEREST_PRINCIPAL_IN_ADVANCE_PRINCIPAL_PENALTY_FEE_INTEREST_STRATEGY)//
+                .loanScheduleType(LoanScheduleType.CUMULATIVE.toString())//
+                .multiDisburseLoan(true)//
+                .maxTrancheCount(3)//
+                .outstandingLoanBalance(35000.0)//
+                .disallowExpectedDisbursements(true)//
+                .allowApprovedDisbursedAmountsOverApplied(true)//
+                .overAppliedCalculationType("percentage")//
+                .overAppliedNumber(100)//
+                .delinquencyBucketId(delinquencyBucketId)//
+                .dateFormat(LoanTestData.DATETIME_PATTERN)//
+                .locale(LoanTestData.LOCALE), accounts);
+    }
+
+    default PostLoanProductsRequest onePeriod30DaysPeriodicAccrual(double interestRatePerPeriod) {
+        return onePeriod30DaysNoInterest()//
+                .interestRatePerPeriod(interestRatePerPeriod);
+    }
+
+    default PostLoanProductsRequest onePeriod30DaysPeriodicAccrual() {
+        return onePeriod30DaysPeriodicAccrual(0.0);
+    }
+
+    default PostLoanProductsRequest onePeriod30DaysPeriodicAccrualWithAdvancedAllocation() {
+        return onePeriod30DaysPeriodicAccrual()//
+                .transactionProcessingStrategyCode(TransactionProcessingStrategyCode.ADVANCED_PAYMENT_ALLOCATION_STRATEGY)//
+                .loanScheduleType("PROGRESSIVE")//
+                .loanScheduleProcessingType("HORIZONTAL")//
+                .addPaymentAllocationItem(LoanRequestBuilders.defaultPaymentAllocation());
+    }
+
+    default PostLoanProductsRequest fourPeriod1MonthWithoutInterest(String repaymentStrategy) {
+        PostLoanProductsRequest request = onePeriod30DaysPeriodicAccrual()//
+                .multiDisburseLoan(false)//
+                .disallowExpectedDisbursements(false)//
+                .allowApprovedDisbursedAmountsOverApplied(false)//
+                .overAppliedCalculationType(null)//
+                .overAppliedNumber(null)//
+                .principal(1000.0)//
+                .numberOfRepayments(4)//
+                .repaymentEvery(1)//
+                .repaymentFrequencyType(RepaymentFrequencyType.MONTHS_L)//
+                .transactionProcessingStrategyCode(repaymentStrategy);
+        if (TransactionProcessingStrategyCode.ADVANCED_PAYMENT_ALLOCATION_STRATEGY.equals(repaymentStrategy)) {
+            request.loanScheduleType("PROGRESSIVE")//
+                    .loanScheduleProcessingType("HORIZONTAL")//
+                    .addPaymentAllocationItem(LoanRequestBuilders.defaultPaymentAllocation());
+        } else {
+            request.loanScheduleType("CUMULATIVE")//
+                    .loanScheduleProcessingType(null)//
+                    .paymentAllocation(null);
+        }
+        return request;
+    }
+
+    default PostLoanProductsRequest create4IProgressive() {
+        final Long delinquencyBucketId = new FeignDelinquencyHelper(FineractFeignClientHelper.getFineractFeignClient())
+                .createDefaultBucket();
+        return new PostLoanProductsRequest().name(Utils.uniqueRandomStringGenerator("4I_PROGRESSIVE_", 6))//
+                .shortName(Utils.uniqueRandomStringGenerator("", 4))//
+                .description("4 installment product - progressive")//
+                .includeInBorrowerCycle(false)//
+                .useBorrowerCycle(false)//
+                .currencyCode("EUR")//
+                .digitsAfterDecimal(2)//
+                .principal(1000.0)//
+                .minPrincipal(100.0)//
+                .maxPrincipal(10000.0)//
+                .numberOfRepayments(4)//
+                .repaymentEvery(1)//
+                .repaymentFrequencyType(RepaymentFrequencyType.MONTHS_L)//
+                .interestRatePerPeriod(10D)//
+                .minInterestRatePerPeriod(0D)//
+                .maxInterestRatePerPeriod(120D)//
+                .interestRateFrequencyType(InterestRateFrequencyType.YEARS)//
+                .isLinkedToFloatingInterestRates(false)//
+                .allowVariableInstallments(false)//
+                .amortizationType(AmortizationType.EQUAL_INSTALLMENTS)//
+                .interestType(InterestType.DECLINING_BALANCE)//
+                .interestCalculationPeriodType(InterestCalculationPeriodType.DAILY)//
+                .allowPartialPeriodInterestCalculation(false)//
+                .transactionProcessingStrategyCode(TransactionProcessingStrategyCode.ADVANCED_PAYMENT_ALLOCATION_STRATEGY)//
+                .paymentAllocation(List.of(LoanRequestBuilders.defaultPaymentAllocation()))//
+                .creditAllocation(List.of())//
+                .overdueDaysForNPA(179)//
+                .daysInMonthType(DaysInMonthType.DAYS_30)//
+                .daysInYearType(DaysInYearType.DAYS_360)//
+                .isInterestRecalculationEnabled(true)//
+                .interestRecalculationCompoundingMethod(LoanTestData.InterestRecalculationCompoundingMethod.NONE)//
+                .rescheduleStrategyMethod(RescheduleStrategyMethod.ADJUST_LAST_UNPAID_PERIOD)//
+                .recalculationRestFrequencyType(LoanTestData.RecalculationRestFrequencyType.DAILY)//
+                .recalculationRestFrequencyInterval(1)//
+                .isArrearsBasedOnOriginalSchedule(false)//
+                .isCompoundingToBePostedAsTransaction(false)//
+                .preClosureInterestCalculationStrategy(1)//
+                .allowCompoundingOnEod(false)//
+                .canDefineInstallmentAmount(true)//
+                .repaymentStartDateType(1)//
+                .charges(List.of())//
+                .principalVariationsForBorrowerCycle(List.of())//
+                .interestRateVariationsForBorrowerCycle(List.of())//
+                .numberOfRepaymentVariationsForBorrowerCycle(List.of())//
+                .accountingRule(3)//
+                .canUseForTopup(false)//
+                .fundSourceAccountId(getLiabilityAccountId("fundSource"))//
+                .loanPortfolioAccountId(getAssetAccountId("loansReceivable"))//
+                .transfersInSuspenseAccountId(getAssetAccountId("suspense"))//
+                .interestOnLoanAccountId(getIncomeAccountId("interestIncome"))//
+                .incomeFromFeeAccountId(getIncomeAccountId("feeIncome"))//
+                .incomeFromPenaltyAccountId(getIncomeAccountId("penaltyIncome"))//
+                .incomeFromRecoveryAccountId(getIncomeAccountId("recoveries"))//
+                .writeOffAccountId(getExpenseAccountId("writtenOff"))//
+                .overpaymentLiabilityAccountId(getLiabilityAccountId("overpayment"))//
+                .receivableInterestAccountId(getAssetAccountId("interestReceivable"))//
+                .receivableFeeAccountId(getAssetAccountId("feeReceivable"))//
+                .receivablePenaltyAccountId(getAssetAccountId("penaltyReceivable"))//
+                .goodwillCreditAccountId(getExpenseAccountId("goodwillExpense"))//
+                .incomeFromGoodwillCreditInterestAccountId(getIncomeAccountId("interestIncomeChargeOff"))//
+                .incomeFromGoodwillCreditFeesAccountId(getIncomeAccountId("feeChargeOff"))//
+                .incomeFromGoodwillCreditPenaltyAccountId(getIncomeAccountId("feeChargeOff"))//
+                .incomeFromChargeOffInterestAccountId(getIncomeAccountId("interestIncomeChargeOff"))//
+                .incomeFromChargeOffFeesAccountId(getIncomeAccountId("feeChargeOff"))//
+                .incomeFromChargeOffPenaltyAccountId(getIncomeAccountId("penaltyChargeOff"))//
+                .chargeOffExpenseAccountId(getExpenseAccountId("chargeOff"))//
+                .chargeOffFraudExpenseAccountId(getExpenseAccountId("chargeOffFraud"))//
+                .enableAccrualActivityPosting(false)//
+                .dateFormat(LoanTestData.DATETIME_PATTERN)//
+                .locale(LoanTestData.LOCALE)//
+                .multiDisburseLoan(true)//
+                .maxTrancheCount(10)//
+                .outstandingLoanBalance(10000.0)//
+                .disallowExpectedDisbursements(true)//
+                .allowApprovedDisbursedAmountsOverApplied(true)//
+                .overAppliedCalculationType("percentage")//
+                .overAppliedNumber(50)//
+                .principalThresholdForLastInstallment(50)//
+                .holdGuaranteeFunds(false)//
+                .accountMovesOutOfNPAOnlyOnArrearsCompletion(false)//
+                .isEqualAmortization(false)//
+                .delinquencyBucketId(delinquencyBucketId)//
+                .enableDownPayment(false)//
+                .enableInstallmentLevelDelinquency(false)//
+                .loanScheduleType("PROGRESSIVE")//
+                .loanScheduleProcessingType("HORIZONTAL");
+    }
+
+    default PostLoanProductsRequest create4ICumulative() {
+        return create4IProgressive()//
+                .transactionProcessingStrategyCode(
+                        LoanProductTestBuilder.DUE_PENALTY_FEE_INTEREST_PRINCIPAL_IN_ADVANCE_PRINCIPAL_PENALTY_FEE_INTEREST_STRATEGY)//
+                .paymentAllocation(null)//
+                .rescheduleStrategyMethod(RescheduleStrategyMethod.RESCHEDULE_NEXT_REPAYMENTS)//
+                .allowAttributeOverrides(new AllowAttributeOverrides()//
+                        .amortizationType(true)//
+                        .interestType(true)//
+                        .transactionProcessingStrategyCode(true)//
+                        .interestCalculationPeriodType(true)//
+                        .inArrearsTolerance(true)//
+                        .repaymentEvery(true)//
+                        .graceOnPrincipalAndInterestPayment(true)//
+                        .graceOnArrearsAgeing(true))//
+                .loanScheduleType(LoanScheduleType.CUMULATIVE.toString())//
+                .loanScheduleProcessingType(null);
+    }
+
+    default PostLoanProductsRequest create4IProgressiveWithCapitalizedIncome() {
+        return create4IProgressive().enableIncomeCapitalization(true)//
+                .capitalizedIncomeCalculationType(PostLoanProductsRequest.CapitalizedIncomeCalculationTypeEnum.FLAT)//
+                .capitalizedIncomeStrategy(PostLoanProductsRequest.CapitalizedIncomeStrategyEnum.EQUAL_AMORTIZATION)//
+                .deferredIncomeLiabilityAccountId(getLiabilityAccountId("deferredIncomeLiability"))//
+                .incomeFromCapitalizationAccountId(getIncomeAccountId("feeIncome"))//
+                .capitalizedIncomeType(PostLoanProductsRequest.CapitalizedIncomeTypeEnum.FEE);
+    }
+
+    default PostLoanProductsRequest dueDateRespectiveNoAccountingNoInterestProduct(double principal, int repaymentEveryDays,
+            int numberOfRepayments, double interestRatePerPeriod, String repaymentStrategy) {
+        return new PostLoanProductsRequest().name(Utils.uniqueRandomStringGenerator("LOAN_PRODUCT_", 6))//
+                .shortName(Utils.uniqueRandomStringGenerator("", 4))//
+                .description("Due date respective test product")//
+                .currencyCode("USD")//
+                .digitsAfterDecimal(2)//
+                .principal(principal)//
+                .numberOfRepayments(numberOfRepayments)//
+                .repaymentEvery(repaymentEveryDays)//
+                .repaymentFrequencyType(RepaymentFrequencyType.DAYS_L)//
+                .interestRatePerPeriod(interestRatePerPeriod)//
+                .interestRateFrequencyType(InterestRateFrequencyType.MONTHS)//
+                .amortizationType(AmortizationType.EQUAL_PRINCIPAL)//
+                .interestType(InterestType.FLAT)//
+                .interestCalculationPeriodType(InterestCalculationPeriodType.SAME_AS_REPAYMENT_PERIOD)//
+                .transactionProcessingStrategyCode(repaymentStrategy)//
+                .loanScheduleType(LoanScheduleType.CUMULATIVE.toString())//
+                .daysInMonthType(DaysInMonthType.DAYS_30)//
+                .daysInYearType(DaysInYearType.DAYS_365)//
+                .graceOnPrincipalPayment(0)//
+                .graceOnInterestPayment(0)//
+                .isInterestRecalculationEnabled(false)//
+                .accountingRule(1)//
+                .multiDisburseLoan(false)//
+                .dateFormat(org.apache.fineract.integrationtests.client.feign.modules.LoanTestData.DATETIME_PATTERN)//
+                .locale(org.apache.fineract.integrationtests.client.feign.modules.LoanTestData.LOCALE);
     }
 }

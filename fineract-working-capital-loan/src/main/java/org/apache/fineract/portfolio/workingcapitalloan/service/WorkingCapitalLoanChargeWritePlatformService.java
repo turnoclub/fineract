@@ -19,10 +19,20 @@
 
 package org.apache.fineract.portfolio.workingcapitalloan.service;
 
+import java.math.BigDecimal;
 import org.apache.fineract.infrastructure.core.api.JsonCommand;
 import org.apache.fineract.infrastructure.core.data.CommandProcessingResult;
+import org.apache.fineract.portfolio.workingcapitalloan.domain.WorkingCapitalLoan;
+import org.apache.fineract.portfolio.workingcapitalloan.domain.WorkingCapitalLoanCharge;
 
 public interface WorkingCapitalLoanChargeWritePlatformService {
 
     CommandProcessingResult createLoanCharge(Long loanId, JsonCommand command);
+
+    CommandProcessingResult adjustmentForLoanCharge(Long loanId, Long wcLoanChargeId, JsonCommand command);
+
+    CommandProcessingResult waiveLoanCharge(Long loanId, Long wcLoanChargeId, JsonCommand command);
+
+    void validateChargeAdjustmentEntrance(WorkingCapitalLoan loan, WorkingCapitalLoanCharge charge, BigDecimal amount,
+            Long excludeTransactionId);
 }

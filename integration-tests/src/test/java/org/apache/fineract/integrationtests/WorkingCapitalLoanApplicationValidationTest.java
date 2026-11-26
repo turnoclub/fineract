@@ -19,6 +19,7 @@
 package org.apache.fineract.integrationtests;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -26,14 +27,19 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import org.apache.fineract.client.feign.util.CallFailedRuntimeException;
+import org.apache.fineract.client.models.PostPaymentAllocationRule;
 import org.apache.fineract.client.models.PostWorkingCapitalLoansRequest;
 import org.apache.fineract.client.models.PutWorkingCapitalLoansLoanIdRequest;
-import org.apache.fineract.integrationtests.common.ClientHelper;
+import org.apache.fineract.integrationtests.client.feign.helpers.FeignClientHelper;
+import org.apache.fineract.integrationtests.client.feign.helpers.FeignDelinquencyHelper;
+import org.apache.fineract.integrationtests.client.feign.modules.ClientRequestBuilders;
+import org.apache.fineract.integrationtests.common.FineractFeignClientHelper;
 import org.apache.fineract.integrationtests.common.Utils;
-import org.apache.fineract.integrationtests.common.products.DelinquencyBucketsHelper;
 import org.apache.fineract.integrationtests.common.workingcapitalloan.WorkingCapitalLoanApplicationTestBuilder;
 import org.apache.fineract.integrationtests.common.workingcapitalloan.WorkingCapitalLoanHelper;
 import org.apache.fineract.integrationtests.common.workingcapitalloanbreach.WorkingCapitalBreachHelper;
@@ -41,18 +47,27 @@ import org.apache.fineract.integrationtests.common.workingcapitalloanproduct.Wor
 import org.apache.fineract.integrationtests.common.workingcapitalloanproduct.WorkingCapitalLoanProductTestBuilder;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 public class WorkingCapitalLoanApplicationValidationTest {
 
+    private static final FeignDelinquencyHelper DELINQUENCY_HELPER = new FeignDelinquencyHelper(
+            FineractFeignClientHelper.getFineractFeignClient());
     private static Long delinquencyBucketId;
+    private static Long breachId;
 
+    private final FeignClientHelper clientHelper = new FeignClientHelper(FineractFeignClientHelper.getFineractFeignClient());
     private final WorkingCapitalLoanHelper applicationHelper = new WorkingCapitalLoanHelper();
     private final WorkingCapitalLoanProductHelper productHelper = new WorkingCapitalLoanProductHelper();
     private final WorkingCapitalBreachHelper breachHelper = new WorkingCapitalBreachHelper();
 
     @BeforeAll
-    static void initDelinquency() {
-        delinquencyBucketId = DelinquencyBucketsHelper.createDefaultBucket();
+    static void initSharedFixtures() {
+        delinquencyBucketId = DELINQUENCY_HELPER.createDefaultWorkingCapitalBucket();
+        final WorkingCapitalBreachHelper helper = new WorkingCapitalBreachHelper();
+        breachId = helper.create(
+                helper.createBreachRequest(Utils.randomStringGenerator("Breach", 20), 30, "DAYS", "PERCENTAGE", BigDecimal.valueOf(10)));
     }
 
     @Test
@@ -149,6 +164,23 @@ public class WorkingCapitalLoanApplicationValidationTest {
         assertNotNull(ex.getDeveloperMessage());
         assertEquals("Validation errors: [expectedDisbursementDate] The parameter `expectedDisbursementDate` is mandatory.",
                 ex.getDeveloperMessage());
+        productHelper.deleteWorkingCapitalLoanProductById(productId);
+    }
+
+    @Test
+    public void testSubmitWithInvalidBreachStartType() {
+        final Long productId = createProduct();
+        final Long clientId = createClient();
+        final PostWorkingCapitalLoansRequest request = new WorkingCapitalLoanApplicationTestBuilder().withClientId(clientId)
+                .withProductId(productId).withPrincipal(BigDecimal.valueOf(5000))
+                .withPeriodPaymentRate(WorkingCapitalLoanProductTestBuilder.DEFAULT_PERIOD_PAYMENT_RATE_PERCENT)
+                .withTotalPaymentVolume(BigDecimal.valueOf(5500)).withBreachStartType("FOO").buildSubmitRequest();
+
+        final CallFailedRuntimeException ex = applicationHelper.runSubmitExpectingFailure(request);
+        assertEquals(400, ex.getStatus());
+        assertNotNull(ex.getDeveloperMessage());
+        assertTrue(ex.getDeveloperMessage().contains("invalid.breach.start.type"),
+                "Expected invalid.breach.start.type error: " + ex.getDeveloperMessage());
         productHelper.deleteWorkingCapitalLoanProductById(productId);
     }
 
@@ -483,8 +515,8 @@ public class WorkingCapitalLoanApplicationValidationTest {
         final Long productId = createProduct();
         final Long clientId = createClient();
 
-        final Long breachId = breachHelper
-                .create(breachHelper.createBreachRequest("Validation WCL Breach", 30, "DAYS", "PERCENTAGE", BigDecimal.valueOf(10)));
+        final Long loanBreachId = breachHelper.create(breachHelper.createBreachRequest(Utils.randomStringGenerator("Breach", 20), 30,
+                "DAYS", "PERCENTAGE", BigDecimal.valueOf(10)));
 
         final var json = new WorkingCapitalLoanApplicationTestBuilder() //
                 .withClientId(clientId) //
@@ -492,7 +524,7 @@ public class WorkingCapitalLoanApplicationValidationTest {
                 .withPrincipal(BigDecimal.valueOf(5000)) //
                 .withPeriodPaymentRate(WorkingCapitalLoanProductTestBuilder.DEFAULT_PERIOD_PAYMENT_RATE_PERCENT) //
                 .withTotalPaymentVolume(BigDecimal.valueOf(5500)) //
-                .withBreachId(breachId) //
+                .withBreachId(loanBreachId) //
                 .buildSubmitRequest();
 
         final CallFailedRuntimeException ex = applicationHelper.runSubmitExpectingFailure(json);
@@ -503,7 +535,62 @@ public class WorkingCapitalLoanApplicationValidationTest {
         assertTrue(ex.getDeveloperMessage().contains("breachId"), "Expected breachId in: " + ex.getDeveloperMessage());
 
         productHelper.deleteWorkingCapitalLoanProductById(productId);
-        breachHelper.delete(breachId);
+        breachHelper.delete(loanBreachId);
+    }
+
+    @Test
+    public void testSubmitWithGraceDaysAndStartTypesNotAllowedByProduct() {
+        final Long productId = createProductWithoutOverrides();
+        final Long clientId = createClient();
+
+        final var json = new WorkingCapitalLoanApplicationTestBuilder() //
+                .withClientId(clientId) //
+                .withProductId(productId) //
+                .withPrincipal(BigDecimal.valueOf(5000)) //
+                .withPeriodPaymentRate(WorkingCapitalLoanProductTestBuilder.DEFAULT_PERIOD_PAYMENT_RATE_PERCENT) //
+                .withTotalPaymentVolume(BigDecimal.valueOf(5500)) //
+                .withDelinquencyGraceDays(5) //
+                .withDelinquencyStartType("DISBURSEMENT") //
+                .withBreachGraceDays(3) //
+                .withBreachStartType("LOAN_CREATION") //
+                .buildSubmitRequest();
+
+        final CallFailedRuntimeException ex = applicationHelper.runSubmitExpectingFailure(json);
+        assertEquals(400, ex.getStatus());
+        assertNotNull(ex.getDeveloperMessage());
+        assertTrue(ex.getDeveloperMessage().contains("override.not.allowed.by.product"),
+                "Expected override.not.allowed.by.product in: " + ex.getDeveloperMessage());
+        for (final String parameter : List.of("delinquencyGraceDays", "delinquencyStartType", "breachGraceDays", "breachStartType")) {
+            assertTrue(ex.getDeveloperMessage().contains(parameter), "Expected " + parameter + " in: " + ex.getDeveloperMessage());
+        }
+
+        productHelper.deleteWorkingCapitalLoanProductById(productId);
+    }
+
+    @Test
+    public void testSubmitWithDelinquencyGraceDaysNotAllowedWhileBreachOverrideIsAllowed() {
+        final Long productId = createProductWithBreachOverride();
+        final Long clientId = createClient();
+
+        final var json = new WorkingCapitalLoanApplicationTestBuilder() //
+                .withClientId(clientId) //
+                .withProductId(productId) //
+                .withPrincipal(BigDecimal.valueOf(5000)) //
+                .withPeriodPaymentRate(WorkingCapitalLoanProductTestBuilder.DEFAULT_PERIOD_PAYMENT_RATE_PERCENT) //
+                .withTotalPaymentVolume(BigDecimal.valueOf(5500)) //
+                .withDelinquencyGraceDays(5) //
+                .withBreachGraceDays(3) //
+                .buildSubmitRequest();
+
+        final CallFailedRuntimeException ex = applicationHelper.runSubmitExpectingFailure(json);
+        assertEquals(400, ex.getStatus());
+        assertNotNull(ex.getDeveloperMessage());
+        assertTrue(ex.getDeveloperMessage().contains("delinquencyGraceDays"),
+                "Expected delinquencyGraceDays in: " + ex.getDeveloperMessage());
+        assertFalse(ex.getDeveloperMessage().contains("breachGraceDays"),
+                "breachGraceDays is overridable on this product: " + ex.getDeveloperMessage());
+
+        productHelper.deleteWorkingCapitalLoanProductById(productId);
     }
 
     @Test
@@ -590,6 +677,38 @@ public class WorkingCapitalLoanApplicationValidationTest {
         assertEquals(403, ex.getStatus());
         assertNotNull(ex.getDeveloperMessage());
         assertEquals("Validation errors: [id] The date on which a loan is submitted cannot be in the future.", ex.getDeveloperMessage());
+        productHelper.deleteWorkingCapitalLoanProductById(productId);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = { "DOWN_PAYMENT", "INTEREST_REFUND", "MERCHANT_ISSUED_REFUND", "default" })
+    public void testSubmitAndModifyWithUnsupportedPaymentAllocationTransactionType(final String transactionType) {
+        final Long productId = createProduct();
+        final Long clientId = createClient();
+        final WorkingCapitalLoanApplicationTestBuilder builder = new WorkingCapitalLoanApplicationTestBuilder() //
+                .withClientId(clientId) //
+                .withProductId(productId) //
+                .withPrincipal(BigDecimal.valueOf(5000)) //
+                .withPeriodPaymentRate(WorkingCapitalLoanProductTestBuilder.DEFAULT_PERIOD_PAYMENT_RATE_PERCENT) //
+                .withTotalPaymentVolume(BigDecimal.valueOf(5500)) //
+                .withPaymentAllocationTypes(
+                        List.of("DUE_PENALTY", "DUE_FEE", "DUE_PRINCIPAL", "IN_ADVANCE_PRINCIPAL", "IN_ADVANCE_FEE", "IN_ADVANCE_PENALTY"));
+        final PostWorkingCapitalLoansRequest submitRequest = builder.buildSubmitRequest();
+        final PostPaymentAllocationRule defaultRule = submitRequest.getPaymentAllocation().getFirst();
+        final List<PostPaymentAllocationRule> rules = List.of(defaultRule, new PostPaymentAllocationRule().transactionType(transactionType)
+                .paymentAllocationOrder(defaultRule.getPaymentAllocationOrder()));
+
+        final CallFailedRuntimeException submitError = applicationHelper.runSubmitExpectingFailure(submitRequest.paymentAllocation(rules));
+        assertEquals(400, submitError.getStatus());
+        assertTrue(submitError.getResponseBody().contains("wc-payment-allocation.with.not.valid.transaction.type"));
+
+        final Long loanId = applicationHelper.submit(builder.buildSubmitRequest());
+        final CallFailedRuntimeException modifyError = applicationHelper.runModifyExpectingFailure(loanId,
+                new PutWorkingCapitalLoansLoanIdRequest().paymentAllocation(rules));
+        assertEquals(400, modifyError.getStatus());
+        assertTrue(modifyError.getResponseBody().contains("wc-payment-allocation.with.not.valid.transaction.type"));
+
+        applicationHelper.deleteById(loanId);
         productHelper.deleteWorkingCapitalLoanProductById(productId);
     }
 
@@ -964,7 +1083,7 @@ public class WorkingCapitalLoanApplicationValidationTest {
                 new WorkingCapitalLoanApplicationTestBuilder().withPrincipal(BigDecimal.valueOf(1000)).buildModifyRequest());
         assertEquals(404, ex.getStatus());
         assertNotNull(ex.getDeveloperMessage());
-        final String msg = ex.getDeveloperMessage().toLowerCase();
+        final String msg = ex.getDeveloperMessage().toLowerCase(Locale.ROOT);
         assertTrue(msg.contains("not found") || msg.contains("not available") || msg.contains("resource not found")
                 || msg.contains("does not exist"), "Expected message to indicate resource not found: " + ex.getDeveloperMessage());
     }
@@ -1099,6 +1218,7 @@ public class WorkingCapitalLoanApplicationValidationTest {
         return productHelper.createWorkingCapitalLoanProduct(new WorkingCapitalLoanProductTestBuilder() //
                 .withName(uniqueName) //
                 .withShortName(uniqueShortName) //
+                .withBreachId(breachId) //
                 .withAllowAttributeOverrides(Map.of("breach", true)) //
                 .build()) //
                 .getResourceId();
@@ -1115,6 +1235,6 @@ public class WorkingCapitalLoanApplicationValidationTest {
     }
 
     private Long createClient() {
-        return ClientHelper.createClient(ClientHelper.defaultClientCreationRequest()).getClientId();
+        return clientHelper.createClient(ClientRequestBuilders.defaultClient()).getClientId();
     }
 }

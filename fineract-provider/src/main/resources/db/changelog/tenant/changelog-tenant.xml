@@ -255,4 +255,58 @@
     <include file="parts/0234_add_missing_processing_result_enum_values.xml" relativeToChangelogFile="true" />
     <include file="parts/0235_transaction_summary_reports_buydown_fee_allocation.xml" relativeToChangelogFile="true" />
     <include file="parts/0236_transaction_summary_reports_fix_for_cap_income_amortization_duplicates.xml" relativeToChangelogFile="true" />
+    <include file="parts/0237_trial_balance_summary_report_update_originator_inline_join.xml" relativeToChangelogFile="true" />
+    <include file="parts/0238_transaction_summary_report_update_originator_inline_join.xml" relativeToChangelogFile="true" />
+    <include file="parts/0239_add_retained_earning_job.xml" relativeToChangelogFile="true"/>
+    <include file="parts/0240_add_retained_earning_global_configuration.xml" relativeToChangelogFile="true"/>
+    <include file="parts/0242_fix_group_summary_report_parameters.xml" relativeToChangelogFile="true"/>
+    <include file="parts/0242_update_m_tellers_unique_key.xml" relativeToChangelogFile="true" />
+    <include file="parts/0243_remove_mix_module.xml" relativeToChangelogFile="true" />
+    <include file="parts/0243_add_client_lifecycle_event_configuration.xml" relativeToChangelogFile="true" />
+    <include file="parts/0244_add_payment_detail_to_account_transfer_transaction.xml" relativeToChangelogFile="true" />
+    <include file="parts/0245_standardize_email_address_column_length.xml" relativeToChangelogFile="true" />
+    <include file="parts/0246_drop_request_audit_table.xml" relativeToChangelogFile="true" />
+    <include file="parts/0247_add_payment_detail_search_indexes.xml" relativeToChangelogFile="true" />
+    <include file="parts/0248_add_dates_to_client_identifier.xml" relativeToChangelogFile="true"/>
+    <include file="parts/0249_add_issuance_and_expiry_dates_to_m_document.xml" relativeToChangelogFile="true"/>
+    <include file="parts/0250_modify_note_length.xml" relativeToChangelogFile="true" />
+    <include file="parts/0251_add_disallow_backdated_transactions_configuration.xml" relativeToChangelogFile="true" />
+    <include file="parts/0252_trial_balance_summary_update_originator_external_ids.xml" relativeToChangelogFile="true" />
+    <include file="parts/0253_remove_unused_entity_access.xml" relativeToChangelogFile="true" />
+    <include file="parts/0254_transaction_summary_reports_exclude_reage_and_fix_amortization_mapping_sign.xml" relativeToChangelogFile="true" />
+    <include file="parts/0255_add_undo_accounttransfer_permission.xml" relativeToChangelogFile="true" />
+    <include file="parts/0256_add_savings_transaction_time.xml" relativeToChangelogFile="true" />
+    <include file="parts/0257_merge_trailing_space_standinginstruction_permissions.xml" relativeToChangelogFile="true" />
+    <include file="parts/0258_add_read_entitymapping_permission.xml" relativeToChangelogFile="true" />
+    <include file="parts/0259_put_cob_jobs_in_one_scheduler_group.xml" relativeToChangelogFile="true" />
+    <include file="parts/0260_merge_force_withdrawal_configurations.xml" relativeToChangelogFile="true" />
+    <include file="parts/0261_transaction_summary_reports_for_working_capital_loans.xml" relativeToChangelogFile="true" />
+    <include file="parts/0262_add_configuration_pl_charge_accrual_time.xml" relativeToChangelogFile="true" />
+    <include file="parts/0263_update_charge_accrual_date_description.xml" relativeToChangelogFile="true" />
+    <include file="parts/0264_add_product_type_to_annual_summary.xml" relativeToChangelogFile="true" />
+    <include file="parts/0265_trial_balance_summary_report_filter_retained_earning_by_product_type.xml" relativeToChangelogFile="true" />
+    <include file="parts/0266_trial_balance_summary_report_for_working_capital_loans.xml" relativeToChangelogFile="true" />
+    <include file="parts/0267_add_retained_earning_wc_report_global_configuration.xml" relativeToChangelogFile="true" />
+    <include file="parts/0268_add_payoff_schedule_preview_max_payoff_periods_configuration.xml" relativeToChangelogFile="true" />
+    <include file="parts/0269_add_payoff_schedule_preview_max_term_periods_configuration.xml" relativeToChangelogFile="true" />
+    <include file="parts/0270_month_end_due_date_strategy.xml" relativeToChangelogFile="true" />
+    <include file="parts/0271_fix_npa_job_cron_order.xml" relativeToChangelogFile="true" />
+    <include file="parts/0272_put_arrears_ageing_in_npa_scheduler_group.xml" relativeToChangelogFile="true" />
+    <include file="parts/0273_add_allow_partial_transfer_to_standing_instruction.xml" relativeToChangelogFile="true" />
+    <include file="parts/0274_clear_npa_on_settled_loans.xml" relativeToChangelogFile="true" />
+    <include file="parts/0275_add_deposit_product_validity_dates.xml" relativeToChangelogFile="true" />
+    <include file="parts/0276_add_unique_constraint_tax_component_and_group_name.xml" relativeToChangelogFile="true" />
+    <include file="parts/0277_add_result_columns_to_command_source.xml" relativeToChangelogFile="true" />
+    <include file="parts/0278_add_payment_detail_to_share_account_transactions.xml" relativeToChangelogFile="true" />
+    <include file="parts/0279_add_disbursement_detail_to_loan_charge.xml" relativeToChangelogFile="true" />
+    <include file="parts/0280_add_replaced_loan_charge_to_loan_charge.xml" relativeToChangelogFile="true" />
+    <include file="parts/0281_add_down_payment_fee_override_to_loan_charge.xml" relativeToChangelogFile="true" />
+    <include file="parts/0282_idempotency_recoverable_error_codes.xml" relativeToChangelogFile="true" />
+    <include file="parts/0283_add_fee_refund_to_r_enum_value.xml" relativeToChangelogFile="true" />
+    <include file="parts/0284_fee_refund_business_events.xml" relativeToChangelogFile="true" />
+    <include file="parts/0285_add_amortization_configuration_to_charge.xml" relativeToChangelogFile="true" />
+    <include file="parts/0286_add_enable_charge_amortization_to_loan_product.xml" relativeToChangelogFile="true" />
+    <include file="parts/0287_add_permissions_for_api_authorization_rules.xml" relativeToChangelogFile="true" />
+    <include file="parts/0288_add_is_force_transaction_to_savings_transaction.xml" relativeToChangelogFile="true" />
+    <include file="parts/0289_widen_command_source_api_get_url.xml" relativeToChangelogFile="true" />
 </databaseChangeLog>

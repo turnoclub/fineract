@@ -35,9 +35,9 @@ import org.apache.fineract.accounting.journalentry.data.ChargeTaxPaymentDTO;
 import org.apache.fineract.accounting.journalentry.data.GLAccountBalanceHolder;
 import org.apache.fineract.accounting.journalentry.data.LoanDTO;
 import org.apache.fineract.accounting.journalentry.data.LoanTransactionDTO;
+import org.apache.fineract.accounting.journalentry.data.LoanTransactionTypeDTO;
 import org.apache.fineract.infrastructure.core.service.MathUtil;
 import org.apache.fineract.organisation.office.domain.Office;
-import org.apache.fineract.portfolio.loanaccount.data.LoanTransactionEnumData;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -62,7 +62,7 @@ public class CashBasedAccountingProcessorForLoan implements AccountingProcessorF
             final String transactionId = loanTransactionDTO.getTransactionId();
             final Long paymentTypeId = loanTransactionDTO.getPaymentTypeId();
             final Long loanId = loanDTO.getLoanId();
-            final LoanTransactionEnumData transactionType = loanTransactionDTO.getTransactionType();
+            final LoanTransactionTypeDTO transactionType = loanTransactionDTO.getTransactionType();
 
             this.helper.checkForBranchClosures(latestGLClosure, transactionDate);
 
@@ -71,37 +71,35 @@ public class CashBasedAccountingProcessorForLoan implements AccountingProcessorF
                 continue;
             }
 
-            /** Handle Disbursements **/
+            // Handle Disbursements
             if (transactionType.isDisbursement()) {
                 createJournalEntriesForDisbursements(loanDTO, loanTransactionDTO, office);
             }
-            /***
-             * Logic for repayments, repayments at disbursement (except charge adjustment)
-             ***/
+            // Logic for repayments, repayments at disbursement (except charge adjustment)
             else if ((transactionType.isRepaymentType() && !transactionType.isChargeAdjustment())
                     || transactionType.isRepaymentAtDisbursement() || transactionType.isChargePayment()) {
                 createJournalEntriesForRepayments(loanDTO, loanTransactionDTO, office);
             }
 
-            /** Logic for handling recovery payments **/
+            // Logic for handling recovery payments
             else if (transactionType.isRecoveryRepayment()) {
                 createJournalEntriesForRecoveryRepayments(loanDTO, loanTransactionDTO, office);
             }
 
-            /** Logic for Refunds of Overpayments **/
+            // Logic for Refunds of Overpayments
             else if (transactionType.isRefund()) {
                 createJournalEntriesForRefund(loanDTO, loanTransactionDTO, office);
             }
 
-            /** Logic for Credit Balance Refunds **/
+            // Logic for Credit Balance Refunds
             else if (transactionType.isCreditBalanceRefund()) {
                 createJournalEntriesForCreditBalanceRefund(loanDTO, loanTransactionDTO, office);
             }
 
-            /***
+            /*
              * Only principal write off affects cash based accounting (interest and fee write off need not be
              * considered). Debit losses written off and credit Loan Portfolio
-             **/
+             */
             else if (transactionType.isWriteOff()) {
                 final BigDecimal principalAmount = loanTransactionDTO.getPrincipal();
                 if (principalAmount != null && principalAmount.compareTo(BigDecimal.ZERO) > 0) {
@@ -114,7 +112,7 @@ public class CashBasedAccountingProcessorForLoan implements AccountingProcessorF
                     || transactionType.isWithdrawTransfer()) {
                 createJournalEntriesForTransfers(loanDTO, loanTransactionDTO, office);
             }
-            /** Logic for Refunds of Active Loans **/
+            // Logic for Refunds of Active Loans
             else if (transactionType.isRefundForActiveLoans()) {
                 createJournalEntriesForRefundForActiveLoan(loanDTO, loanTransactionDTO, office);
             }
@@ -301,9 +299,9 @@ public class CashBasedAccountingProcessorForLoan implements AccountingProcessorF
         }
 
         if (totalDebitAmount.compareTo(BigDecimal.ZERO) > 0) {
-            Long chargeId = loanTransactionDTO.getLoanChargeData().getChargeId();
+            Long chargeId = loanTransactionDTO.getLoanChargeDTO().getChargeId();
             Integer accountMappingTypeId;
-            if (loanTransactionDTO.getLoanChargeData().isPenalty()) {
+            if (loanTransactionDTO.getLoanChargeDTO().isPenalty()) {
                 accountMappingTypeId = CashAccountsForLoan.INCOME_FROM_PENALTIES.getValue();
             } else {
                 accountMappingTypeId = CashAccountsForLoan.INCOME_FROM_FEES.getValue();
@@ -399,9 +397,9 @@ public class CashBasedAccountingProcessorForLoan implements AccountingProcessorF
         }
 
         if (totalDebitAmount.compareTo(BigDecimal.ZERO) > 0) {
-            Long chargeId = loanTransactionDTO.getLoanChargeData().getChargeId();
+            Long chargeId = loanTransactionDTO.getLoanChargeDTO().getChargeId();
             Integer accountMappingTypeId;
-            if (loanTransactionDTO.getLoanChargeData().isPenalty()) {
+            if (loanTransactionDTO.getLoanChargeDTO().isPenalty()) {
                 accountMappingTypeId = CashAccountsForLoan.INCOME_FROM_PENALTIES.getValue();
             } else {
                 accountMappingTypeId = CashAccountsForLoan.INCOME_FROM_FEES.getValue();
@@ -695,7 +693,7 @@ public class CashBasedAccountingProcessorForLoan implements AccountingProcessorF
                     creditEntry.getValue(), glAccount);
         }
 
-        /*** create a single debit entry for the entire amount **/
+        // create a single debit entry for the entire amount
         if (loanTransactionDTO.isLoanToLoanTransfer()) {
             this.helper.createDebitJournalEntryForLoan(office, currencyCode, FinancialActivity.ASSET_TRANSFER.getValue(), loanProductId,
                     paymentTypeId, loanId, transactionId, transactionDate, totalDebitAmount);
@@ -711,10 +709,8 @@ public class CashBasedAccountingProcessorForLoan implements AccountingProcessorF
             }
         }
 
-        /**
-         * Charge Refunds have an extra refund related pair of journal entries in addition to those related to the
-         * repayment above
-         ***/
+        // Charge Refunds have an extra refund related pair of journal entries in addition to those related to the
+        // repayment above
         if (totalDebitAmount.compareTo(BigDecimal.ZERO) > 0) {
             if (loanTransactionDTO.getTransactionType().isChargeRefund()) {
                 Integer incomeAccount = this.helper.getValueForFeeOrPenaltyIncomeAccount(loanTransactionDTO.getChargeRefundChargeType());
@@ -819,7 +815,7 @@ public class CashBasedAccountingProcessorForLoan implements AccountingProcessorF
             }
         }
 
-        /*** create a single debit entry for the entire amount **/
+        // create a single debit entry for the entire amount
         if (loanTransactionDTO.isLoanToLoanTransfer()) {
             this.helper.createDebitJournalEntryForLoan(office, currencyCode, FinancialActivity.ASSET_TRANSFER.getValue(), loanProductId,
                     paymentTypeId, loanId, transactionId, transactionDate, totalDebitAmount);
@@ -841,10 +837,8 @@ public class CashBasedAccountingProcessorForLoan implements AccountingProcessorF
             }
         }
 
-        /**
-         * Charge Refunds have an extra refund related pair of journal entries in addition to those related to the
-         * repayment above
-         ***/
+        // Charge Refunds have an extra refund related pair of journal entries in addition to those related to the
+        // repayment above
         if (totalDebitAmount.compareTo(BigDecimal.ZERO) > 0 && loanTransactionDTO.getTransactionType().isChargeRefund()) {
             Integer incomeAccount = this.helper.getValueForFeeOrPenaltyIncomeAccount(loanTransactionDTO.getChargeRefundChargeType());
             this.helper.createJournalEntriesForLoan(office, currencyCode, incomeAccount, CashAccountsForLoan.FUND_SOURCE.getValue(),
@@ -1006,7 +1000,7 @@ public class CashBasedAccountingProcessorForLoan implements AccountingProcessorF
                     paymentTypeId, loanId, transactionId, transactionDate, overPaymentAmount);
         }
 
-        /*** create a single debit entry (or reversal) for the entire amount **/
+        // create a single debit entry (or reversal) for the entire amount
         this.helper.createCreditJournalEntryForLoan(office, currencyCode, CashAccountsForLoan.FUND_SOURCE.getValue(), loanProductId,
                 paymentTypeId, loanId, transactionId, transactionDate, totalDebitAmount);
     }

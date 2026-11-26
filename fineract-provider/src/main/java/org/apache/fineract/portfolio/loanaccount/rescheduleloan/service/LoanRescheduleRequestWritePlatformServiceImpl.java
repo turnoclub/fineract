@@ -27,6 +27,7 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -436,7 +437,7 @@ public class LoanRescheduleRequestWritePlatformServiceImpl implements LoanResche
             LocalDate rescheduleFromDate = null;
             List<LoanTermVariations> activeLoanTermVariations = loan.getActiveLoanTermVariations();
             LoanTermVariations dueDateVariationInCurrentRequest = loanRescheduleRequest.getDueDateTermVariationIfExists();
-            if (dueDateVariationInCurrentRequest != null && !activeLoanTermVariations.isEmpty()) {
+            if (!loan.isProgressiveSchedule() && dueDateVariationInCurrentRequest != null && !activeLoanTermVariations.isEmpty()) {
                 LocalDate fromScheduleDate = dueDateVariationInCurrentRequest.fetchTermApplicaDate();
                 LocalDate currentScheduleDate = fromScheduleDate;
                 LocalDate modifiedScheduleDate = dueDateVariationInCurrentRequest.fetchDateValue();
@@ -577,7 +578,7 @@ public class LoanRescheduleRequestWritePlatformServiceImpl implements LoanResche
             final Throwable realCause = e.getCause();
             final List<ApiParameterError> dataValidationErrors = new ArrayList<>();
             final DataValidatorBuilder baseDataValidator = new DataValidatorBuilder(dataValidationErrors).resource("loan.transaction");
-            if (realCause.getMessage().toLowerCase().contains("external_id_unique")) {
+            if (realCause.getMessage().toLowerCase(Locale.ROOT).contains("external_id_unique")) {
                 baseDataValidator.reset().parameter("externalId").failWithCode("value.must.be.unique");
             }
             if (!dataValidationErrors.isEmpty()) {

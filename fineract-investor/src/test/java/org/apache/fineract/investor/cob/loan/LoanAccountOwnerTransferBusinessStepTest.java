@@ -57,13 +57,17 @@ import org.apache.fineract.investor.domain.ExternalAssetOwnerTransferLoanMapping
 import org.apache.fineract.investor.domain.ExternalAssetOwnerTransferRepository;
 import org.apache.fineract.investor.domain.LoanOwnershipTransferBusinessEvent;
 import org.apache.fineract.investor.service.DelayedSettlementAttributeService;
+import org.apache.fineract.investor.service.ExternalAssetOwnerLoanAttributesWriteService;
 import org.apache.fineract.investor.service.ExternalAssetOwnerTransferOutstandingInterestCalculation;
 import org.apache.fineract.investor.service.LoanTransferabilityService;
 import org.apache.fineract.organisation.monetary.domain.MoneyHelper;
 import org.apache.fineract.portfolio.loanaccount.domain.Loan;
 import org.apache.fineract.portfolio.loanaccount.domain.LoanSummary;
+import org.apache.fineract.portfolio.loanaccount.service.LoanBuyDownFeeAmortizationProcessingService;
+import org.apache.fineract.portfolio.loanaccount.service.LoanCapitalizedIncomeAmortizationProcessingService;
 import org.apache.fineract.portfolio.loanaccount.service.LoanJournalEntryPoster;
 import org.apache.fineract.portfolio.loanproduct.domain.LoanProduct;
+import org.jspecify.annotations.NonNull;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
@@ -78,14 +82,13 @@ import org.mockito.Mock;
 import org.mockito.MockedStatic;
 import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
-import org.springframework.lang.NonNull;
 
 @ExtendWith(MockitoExtension.class)
 public class LoanAccountOwnerTransferBusinessStepTest {
 
     public static final LocalDate FUTURE_DATE_9999_12_31 = LocalDate.of(9999, 12, 31);
+    private static final Long LOAN_ID = 1L;
     private static final Long LOAN_PRODUCT_ID = 2L;
     private final LocalDate actualDate = LocalDate.now(ZoneId.systemDefault());
     private static final MockedStatic<MoneyHelper> MONEY_HELPER = mockStatic(MoneyHelper.class);
@@ -111,6 +114,15 @@ public class LoanAccountOwnerTransferBusinessStepTest {
     @Mock
     private ExternalAssetOwnerTransferOutstandingInterestCalculation externalAssetOwnerTransferOutstandingInterestCalculation;
 
+    @Mock
+    private LoanCapitalizedIncomeAmortizationProcessingService loanCapitalizedIncomeAmortizationProcessingService;
+
+    @Mock
+    private LoanBuyDownFeeAmortizationProcessingService loanBuyDownFeeAmortizationProcessingService;
+
+    @Mock
+    private ExternalAssetOwnerLoanAttributesWriteService externalAssetOwnerLoanAttributesWriteService;
+
     private LoanAccountOwnerTransferBusinessStep underTest;
 
     @BeforeAll
@@ -131,7 +143,9 @@ public class LoanAccountOwnerTransferBusinessStepTest {
         ThreadLocalContextUtil.setBusinessDates(new HashMap<>(Map.of(BusinessDateType.BUSINESS_DATE, actualDate)));
         underTest = new LoanAccountOwnerTransferBusinessStep(externalAssetOwnerTransferRepository,
                 externalAssetOwnerTransferLoanMappingRepository, loanJournalEntryPoster, businessEventNotifierService,
-                loanTransferabilityService, delayedSettlementAttributeService, externalAssetOwnerTransferOutstandingInterestCalculation);
+                loanTransferabilityService, delayedSettlementAttributeService, externalAssetOwnerTransferOutstandingInterestCalculation,
+                loanCapitalizedIncomeAmortizationProcessingService, loanBuyDownFeeAmortizationProcessingService,
+                externalAssetOwnerLoanAttributesWriteService);
     }
 
     @AfterEach
@@ -148,7 +162,9 @@ public class LoanAccountOwnerTransferBusinessStepTest {
         // when
         final Loan processedLoan = underTest.execute(loanForProcessing);
         // then
-        verify(externalAssetOwnerTransferRepository, times(1)).findAll(any(Specification.class), eq(Sort.by(Sort.Direction.ASC, "id")));
+        verify(externalAssetOwnerTransferRepository, times(1))
+                .findAllByLoanIdAndSettlementDateAndStatusInAndEffectiveDateToGreaterThanEqual(eq(1L), eq(actualDate), any(),
+                        eq(FUTURE_DATE_9999_12_31));
         verifyNoInteractions(businessEventNotifierService, loanTransferabilityService, loanJournalEntryPoster);
         assertEquals(processedLoan, loanForProcessing);
     }
@@ -160,22 +176,24 @@ public class LoanAccountOwnerTransferBusinessStepTest {
         when(loanProduct.getId()).thenReturn(LOAN_PRODUCT_ID);
 
         final Loan loanForProcessing = Mockito.mock(Loan.class);
-        when(loanForProcessing.getId()).thenReturn(1L);
+        when(loanForProcessing.getId()).thenReturn(LOAN_ID);
         when(loanForProcessing.getLoanProduct()).thenReturn(loanProduct);
-        when(delayedSettlementAttributeService.isEnabled(LOAN_PRODUCT_ID)).thenReturn(false);
+        when(delayedSettlementAttributeService.isEnabled(LOAN_ID, LOAN_PRODUCT_ID)).thenReturn(false);
 
         ExternalAssetOwnerTransfer firstResponseItem = Mockito.mock(ExternalAssetOwnerTransfer.class);
         ExternalAssetOwnerTransfer secondResponseItem = Mockito.mock(ExternalAssetOwnerTransfer.class);
         when(firstResponseItem.getStatus()).thenReturn(ExternalTransferStatus.PENDING);
         when(secondResponseItem.getStatus()).thenReturn(ExternalTransferStatus.ACTIVE);
         List<ExternalAssetOwnerTransfer> response = List.of(firstResponseItem, secondResponseItem);
-        when(externalAssetOwnerTransferRepository.findAll(any(Specification.class), eq(Sort.by(Sort.Direction.ASC, "id"))))
-                .thenReturn(response);
+        when(externalAssetOwnerTransferRepository.findAllByLoanIdAndSettlementDateAndStatusInAndEffectiveDateToGreaterThanEqual(eq(1L),
+                eq(actualDate), any(), eq(FUTURE_DATE_9999_12_31))).thenReturn(response);
         // when
         IllegalStateException exception = assertThrows(IllegalStateException.class, () -> underTest.execute(loanForProcessing));
         // then
         assertEquals("Illegal transfer found. Expected PENDING and BUYBACK, found: PENDING and ACTIVE", exception.getMessage());
-        verify(externalAssetOwnerTransferRepository, times(1)).findAll(any(Specification.class), eq(Sort.by(Sort.Direction.ASC, "id")));
+        verify(externalAssetOwnerTransferRepository, times(1))
+                .findAllByLoanIdAndSettlementDateAndStatusInAndEffectiveDateToGreaterThanEqual(eq(1L), eq(actualDate), any(),
+                        eq(FUTURE_DATE_9999_12_31));
         verifyNoInteractions(businessEventNotifierService, loanTransferabilityService, loanJournalEntryPoster);
     }
 
@@ -186,22 +204,24 @@ public class LoanAccountOwnerTransferBusinessStepTest {
         when(loanProduct.getId()).thenReturn(LOAN_PRODUCT_ID);
 
         final Loan loanForProcessing = Mockito.mock(Loan.class);
-        when(loanForProcessing.getId()).thenReturn(1L);
+        when(loanForProcessing.getId()).thenReturn(LOAN_ID);
         when(loanForProcessing.getLoanProduct()).thenReturn(loanProduct);
-        when(delayedSettlementAttributeService.isEnabled(LOAN_PRODUCT_ID)).thenReturn(true);
+        when(delayedSettlementAttributeService.isEnabled(LOAN_ID, LOAN_PRODUCT_ID)).thenReturn(true);
 
         ExternalAssetOwnerTransfer firstResponseItem = Mockito.mock(ExternalAssetOwnerTransfer.class);
         ExternalAssetOwnerTransfer secondResponseItem = Mockito.mock(ExternalAssetOwnerTransfer.class);
         when(firstResponseItem.getStatus()).thenReturn(ExternalTransferStatus.PENDING);
         when(secondResponseItem.getStatus()).thenReturn(ExternalTransferStatus.BUYBACK);
         List<ExternalAssetOwnerTransfer> response = List.of(firstResponseItem, secondResponseItem);
-        when(externalAssetOwnerTransferRepository.findAll(any(Specification.class), eq(Sort.by(Sort.Direction.ASC, "id"))))
-                .thenReturn(response);
+        when(externalAssetOwnerTransferRepository.findAllByLoanIdAndSettlementDateAndStatusInAndEffectiveDateToGreaterThanEqual(eq(1L),
+                eq(actualDate), any(), eq(FUTURE_DATE_9999_12_31))).thenReturn(response);
         // when
         IllegalStateException exception = assertThrows(IllegalStateException.class, () -> underTest.execute(loanForProcessing));
         // then
         assertEquals("Delayed Settlement enabled, but found 2 transfers of statuses: PENDING and BUYBACK", exception.getMessage());
-        verify(externalAssetOwnerTransferRepository, times(1)).findAll(any(Specification.class), eq(Sort.by(Sort.Direction.ASC, "id")));
+        verify(externalAssetOwnerTransferRepository, times(1))
+                .findAllByLoanIdAndSettlementDateAndStatusInAndEffectiveDateToGreaterThanEqual(eq(1L), eq(actualDate), any(),
+                        eq(FUTURE_DATE_9999_12_31));
         verifyNoInteractions(businessEventNotifierService, loanTransferabilityService, loanJournalEntryPoster);
     }
 
@@ -212,9 +232,9 @@ public class LoanAccountOwnerTransferBusinessStepTest {
         when(loanProduct.getId()).thenReturn(LOAN_PRODUCT_ID);
 
         final Loan loanForProcessing = Mockito.mock(Loan.class);
-        when(loanForProcessing.getId()).thenReturn(1L);
+        when(loanForProcessing.getId()).thenReturn(LOAN_ID);
         when(loanForProcessing.getLoanProduct()).thenReturn(loanProduct);
-        when(delayedSettlementAttributeService.isEnabled(LOAN_PRODUCT_ID)).thenReturn(false);
+        when(delayedSettlementAttributeService.isEnabled(LOAN_ID, LOAN_PRODUCT_ID)).thenReturn(false);
 
         ExternalAssetOwnerTransfer firstResponseItem = Mockito.mock(ExternalAssetOwnerTransfer.class);
         ExternalAssetOwnerTransfer secondResponseItem = Mockito.mock(ExternalAssetOwnerTransfer.class);
@@ -230,14 +250,16 @@ public class LoanAccountOwnerTransferBusinessStepTest {
         when(firstResponseItem.getStatus()).thenReturn(ExternalTransferStatus.PENDING);
         when(secondResponseItem.getStatus()).thenReturn(ExternalTransferStatus.BUYBACK);
         List<ExternalAssetOwnerTransfer> response = List.of(firstResponseItem, secondResponseItem);
-        when(externalAssetOwnerTransferRepository.findAll(any(Specification.class), eq(Sort.by(Sort.Direction.ASC, "id"))))
-                .thenReturn(response);
+        when(externalAssetOwnerTransferRepository.findAllByLoanIdAndSettlementDateAndStatusInAndEffectiveDateToGreaterThanEqual(eq(1L),
+                eq(actualDate), any(), eq(FUTURE_DATE_9999_12_31))).thenReturn(response);
         ArgumentCaptor<ExternalAssetOwnerTransfer> externalAssetOwnerTransferArgumentCaptor = ArgumentCaptor
                 .forClass(ExternalAssetOwnerTransfer.class);
         // when
         final Loan processedLoan = underTest.execute(loanForProcessing);
         // then
-        verify(externalAssetOwnerTransferRepository, times(1)).findAll(any(Specification.class), eq(Sort.by(Sort.Direction.ASC, "id")));
+        verify(externalAssetOwnerTransferRepository, times(1))
+                .findAllByLoanIdAndSettlementDateAndStatusInAndEffectiveDateToGreaterThanEqual(eq(1L), eq(actualDate), any(),
+                        eq(FUTURE_DATE_9999_12_31));
         verify(firstResponseItem).setEffectiveDateTo(actualDate);
         verify(externalAssetOwnerTransferRepository, times(4)).save(externalAssetOwnerTransferArgumentCaptor.capture());
 
@@ -289,15 +311,15 @@ public class LoanAccountOwnerTransferBusinessStepTest {
     public void givenLoanBuyback(final ExternalTransferStatus buybackStatus) {
         // given
         final Loan loanForProcessing = Mockito.mock(Loan.class);
-        when(loanForProcessing.getId()).thenReturn(1L);
+        when(loanForProcessing.getId()).thenReturn(LOAN_ID);
         LoanSummary loanSummary = Mockito.mock(LoanSummary.class);
         when(loanForProcessing.getSummary()).thenReturn(loanSummary);
         ExternalAssetOwnerTransfer firstResponseItem = Mockito.mock(ExternalAssetOwnerTransfer.class);
         ExternalAssetOwnerTransfer secondResponseItem = Mockito.mock(ExternalAssetOwnerTransfer.class);
         when(firstResponseItem.getStatus()).thenReturn(buybackStatus);
         List<ExternalAssetOwnerTransfer> response = List.of(firstResponseItem);
-        when(externalAssetOwnerTransferRepository.findAll(any(Specification.class), eq(Sort.by(Sort.Direction.ASC, "id"))))
-                .thenReturn(response);
+        when(externalAssetOwnerTransferRepository.findAllByLoanIdAndSettlementDateAndStatusInAndEffectiveDateToGreaterThanEqual(eq(1L),
+                eq(actualDate), any(), eq(FUTURE_DATE_9999_12_31))).thenReturn(response);
         when(externalAssetOwnerTransferRepository.findOne(any(Specification.class))).thenReturn(Optional.of(secondResponseItem));
         ArgumentCaptor<ExternalAssetOwnerTransfer> externalAssetOwnerTransferArgumentCaptor = ArgumentCaptor
                 .forClass(ExternalAssetOwnerTransfer.class);
@@ -308,7 +330,9 @@ public class LoanAccountOwnerTransferBusinessStepTest {
         // then
         verifyNoInteractions(loanTransferabilityService);
 
-        verify(externalAssetOwnerTransferRepository, times(1)).findAll(any(Specification.class), eq(Sort.by(Sort.Direction.ASC, "id")));
+        verify(externalAssetOwnerTransferRepository, times(1))
+                .findAllByLoanIdAndSettlementDateAndStatusInAndEffectiveDateToGreaterThanEqual(eq(1L), eq(actualDate), any(),
+                        eq(FUTURE_DATE_9999_12_31));
         verify(firstResponseItem).setEffectiveDateTo(actualDate);
         verify(externalAssetOwnerTransferRepository, times(2)).save(externalAssetOwnerTransferArgumentCaptor.capture());
         verify(secondResponseItem).setEffectiveDateTo(actualDate);
@@ -318,6 +342,7 @@ public class LoanAccountOwnerTransferBusinessStepTest {
 
         verify(loanJournalEntryPoster).postJournalEntriesForExternalOwnerTransfer(loanForProcessing, firstResponseItem, null);
         verifyNoMoreInteractions(loanJournalEntryPoster);
+        verifyNoInteractions(externalAssetOwnerLoanAttributesWriteService);
 
         ArgumentCaptor<BusinessEvent<?>> businessEventArgumentCaptor = verifyBusinessEvents(2);
         verifyLoanTransferBusinessEvent(businessEventArgumentCaptor, 0, loanForProcessing, firstResponseItem);
@@ -334,13 +359,9 @@ public class LoanAccountOwnerTransferBusinessStepTest {
     public void givenLoanSaleTransferable(final boolean isDelayedSettlementEnabled, final ExternalTransferStatus pendingStatus,
             final ExternalTransferStatus expectedActiveStatus) {
         // given
-        final LoanProduct loanProduct = Mockito.mock(LoanProduct.class);
-        when(loanProduct.getId()).thenReturn(LOAN_PRODUCT_ID);
-
         final Loan loanForProcessing = Mockito.mock(Loan.class);
-        when(loanForProcessing.getId()).thenReturn(1L);
-        when(loanForProcessing.getLoanProduct()).thenReturn(loanProduct);
-        when(delayedSettlementAttributeService.isEnabled(LOAN_PRODUCT_ID)).thenReturn(isDelayedSettlementEnabled);
+        when(loanForProcessing.getId()).thenReturn(LOAN_ID);
+        when(delayedSettlementAttributeService.isSaleUnderDelayedSettlement(any())).thenReturn(isDelayedSettlementEnabled);
 
         LoanSummary loanSummary = Mockito.mock(LoanSummary.class);
         when(loanForProcessing.getSummary()).thenReturn(loanSummary);
@@ -348,8 +369,8 @@ public class LoanAccountOwnerTransferBusinessStepTest {
         ExternalAssetOwnerTransfer pendingTransfer = new ExternalAssetOwnerTransfer();
         pendingTransfer.setStatus(pendingStatus);
         List<ExternalAssetOwnerTransfer> response = List.of(pendingTransfer);
-        when(externalAssetOwnerTransferRepository.findAll(any(Specification.class), eq(Sort.by(Sort.Direction.ASC, "id"))))
-                .thenReturn(response);
+        when(externalAssetOwnerTransferRepository.findAllByLoanIdAndSettlementDateAndStatusInAndEffectiveDateToGreaterThanEqual(eq(1L),
+                eq(actualDate), any(), eq(FUTURE_DATE_9999_12_31))).thenReturn(response);
 
         when(loanTransferabilityService.isTransferable(loanForProcessing, pendingTransfer)).thenReturn(true);
 
@@ -362,7 +383,9 @@ public class LoanAccountOwnerTransferBusinessStepTest {
         // then
         verify(loanTransferabilityService).isTransferable(loanForProcessing, pendingTransfer);
         verifyNoMoreInteractions(loanTransferabilityService);
-        verify(externalAssetOwnerTransferRepository).findAll(any(Specification.class), eq(Sort.by(Sort.Direction.ASC, "id")));
+        verify(externalAssetOwnerLoanAttributesWriteService).copyLoanProductAttributesIfAbsent(loanForProcessing, pendingTransfer);
+        verify(externalAssetOwnerTransferRepository).findAllByLoanIdAndSettlementDateAndStatusInAndEffectiveDateToGreaterThanEqual(eq(1L),
+                eq(actualDate), any(), eq(FUTURE_DATE_9999_12_31));
 
         ArgumentCaptor<ExternalAssetOwnerTransfer> externalAssetOwnerTransferArgumentCaptor = ArgumentCaptor
                 .forClass(ExternalAssetOwnerTransfer.class);
@@ -408,13 +431,13 @@ public class LoanAccountOwnerTransferBusinessStepTest {
             final ExternalTransferSubStatus expectedSubStatus) {
         // given
         final Loan loanForProcessing = Mockito.mock(Loan.class);
-        when(loanForProcessing.getId()).thenReturn(1L);
+        when(loanForProcessing.getId()).thenReturn(LOAN_ID);
 
         ExternalAssetOwnerTransfer pendingTransfer = new ExternalAssetOwnerTransfer();
         pendingTransfer.setStatus(pendingStatus);
         List<ExternalAssetOwnerTransfer> response = List.of(pendingTransfer);
-        when(externalAssetOwnerTransferRepository.findAll(any(Specification.class), eq(Sort.by(Sort.Direction.ASC, "id"))))
-                .thenReturn(response);
+        when(externalAssetOwnerTransferRepository.findAllByLoanIdAndSettlementDateAndStatusInAndEffectiveDateToGreaterThanEqual(eq(1L),
+                eq(actualDate), any(), eq(FUTURE_DATE_9999_12_31))).thenReturn(response);
 
         when(loanTransferabilityService.isTransferable(loanForProcessing, pendingTransfer)).thenReturn(false);
         when(loanTransferabilityService.getDeclinedSubStatus(loanForProcessing)).thenReturn(expectedSubStatus);
@@ -427,7 +450,10 @@ public class LoanAccountOwnerTransferBusinessStepTest {
         final Loan processedLoan = underTest.execute(loanForProcessing);
         // then
         verify(loanTransferabilityService).isTransferable(loanForProcessing, pendingTransfer);
-        verify(externalAssetOwnerTransferRepository, times(1)).findAll(any(Specification.class), eq(Sort.by(Sort.Direction.ASC, "id")));
+        verifyNoInteractions(externalAssetOwnerLoanAttributesWriteService);
+        verify(externalAssetOwnerTransferRepository, times(1))
+                .findAllByLoanIdAndSettlementDateAndStatusInAndEffectiveDateToGreaterThanEqual(eq(1L), eq(actualDate), any(),
+                        eq(FUTURE_DATE_9999_12_31));
 
         ArgumentCaptor<ExternalAssetOwnerTransfer> externalAssetOwnerTransferArgumentCaptor = ArgumentCaptor
                 .forClass(ExternalAssetOwnerTransfer.class);
@@ -454,13 +480,9 @@ public class LoanAccountOwnerTransferBusinessStepTest {
     @Test
     public void testSaleLoanWithDelayedSettlementFromIntermediateToInvestor() {
         // given
-        final LoanProduct loanProduct = Mockito.mock(LoanProduct.class);
-        when(loanProduct.getId()).thenReturn(LOAN_PRODUCT_ID);
-
         final Loan loanForProcessing = Mockito.mock(Loan.class);
-        when(loanForProcessing.getId()).thenReturn(1L);
-        when(loanForProcessing.getLoanProduct()).thenReturn(loanProduct);
-        when(delayedSettlementAttributeService.isEnabled(LOAN_PRODUCT_ID)).thenReturn(true);
+        when(loanForProcessing.getId()).thenReturn(LOAN_ID);
+        when(delayedSettlementAttributeService.isSaleUnderDelayedSettlement(any())).thenReturn(true);
 
         LoanSummary loanSummary = Mockito.mock(LoanSummary.class);
         when(loanForProcessing.getSummary()).thenReturn(loanSummary);
@@ -474,8 +496,8 @@ public class LoanAccountOwnerTransferBusinessStepTest {
         ExternalAssetOwnerTransfer pendingTransfer = new ExternalAssetOwnerTransfer();
         pendingTransfer.setStatus(ExternalTransferStatus.PENDING);
         List<ExternalAssetOwnerTransfer> response = List.of(pendingTransfer);
-        when(externalAssetOwnerTransferRepository.findAll(any(Specification.class), eq(Sort.by(Sort.Direction.ASC, "id"))))
-                .thenReturn(response);
+        when(externalAssetOwnerTransferRepository.findAllByLoanIdAndSettlementDateAndStatusInAndEffectiveDateToGreaterThanEqual(eq(1L),
+                eq(actualDate), any(), eq(FUTURE_DATE_9999_12_31))).thenReturn(response);
 
         when(loanTransferabilityService.isTransferable(loanForProcessing, pendingTransfer)).thenReturn(true);
 
@@ -489,7 +511,8 @@ public class LoanAccountOwnerTransferBusinessStepTest {
         // then
         verify(loanTransferabilityService).isTransferable(loanForProcessing, pendingTransfer);
         verifyNoMoreInteractions(loanTransferabilityService);
-        verify(externalAssetOwnerTransferRepository).findAll(any(Specification.class), eq(Sort.by(Sort.Direction.ASC, "id")));
+        verify(externalAssetOwnerTransferRepository).findAllByLoanIdAndSettlementDateAndStatusInAndEffectiveDateToGreaterThanEqual(eq(1L),
+                eq(actualDate), any(), eq(FUTURE_DATE_9999_12_31));
         verify(externalAssetOwnerTransferRepository).findOne(any(Specification.class));
 
         ArgumentCaptor<ExternalAssetOwnerTransfer> externalAssetOwnerTransferArgumentCaptor = ArgumentCaptor
@@ -529,21 +552,17 @@ public class LoanAccountOwnerTransferBusinessStepTest {
     @Test
     public void testSaleLoanWithDelayedSettlementFromIntermediateToInvestorActiveIntermediateTransferNotFound() {
         // given
-        final LoanProduct loanProduct = Mockito.mock(LoanProduct.class);
-        when(loanProduct.getId()).thenReturn(LOAN_PRODUCT_ID);
-
         final Loan loanForProcessing = Mockito.mock(Loan.class);
-        when(loanForProcessing.getId()).thenReturn(1L);
-        when(loanForProcessing.getLoanProduct()).thenReturn(loanProduct);
-        when(delayedSettlementAttributeService.isEnabled(LOAN_PRODUCT_ID)).thenReturn(true);
+        when(loanForProcessing.getId()).thenReturn(LOAN_ID);
+        when(delayedSettlementAttributeService.isSaleUnderDelayedSettlement(any())).thenReturn(true);
 
         when(externalAssetOwnerTransferRepository.findOne(any(Specification.class))).thenReturn(Optional.empty());
 
         ExternalAssetOwnerTransfer pendingTransfer = new ExternalAssetOwnerTransfer();
         pendingTransfer.setStatus(ExternalTransferStatus.PENDING);
         List<ExternalAssetOwnerTransfer> response = List.of(pendingTransfer);
-        when(externalAssetOwnerTransferRepository.findAll(any(Specification.class), eq(Sort.by(Sort.Direction.ASC, "id"))))
-                .thenReturn(response);
+        when(externalAssetOwnerTransferRepository.findAllByLoanIdAndSettlementDateAndStatusInAndEffectiveDateToGreaterThanEqual(eq(1L),
+                eq(actualDate), any(), eq(FUTURE_DATE_9999_12_31))).thenReturn(response);
         when(loanTransferabilityService.isTransferable(loanForProcessing, pendingTransfer)).thenReturn(true);
 
         // when
@@ -555,7 +574,8 @@ public class LoanAccountOwnerTransferBusinessStepTest {
         verify(loanTransferabilityService).isTransferable(loanForProcessing, pendingTransfer);
         verifyNoMoreInteractions(loanTransferabilityService);
         verifyNoInteractions(loanJournalEntryPoster);
-        verify(externalAssetOwnerTransferRepository).findAll(any(Specification.class), eq(Sort.by(Sort.Direction.ASC, "id")));
+        verify(externalAssetOwnerTransferRepository).findAllByLoanIdAndSettlementDateAndStatusInAndEffectiveDateToGreaterThanEqual(eq(1L),
+                eq(actualDate), any(), eq(FUTURE_DATE_9999_12_31));
         verify(externalAssetOwnerTransferRepository).findOne(any(Specification.class));
         verify(externalAssetOwnerTransferRepository, never()).save(any(ExternalAssetOwnerTransfer.class));
         verifyNoInteractions(externalAssetOwnerTransferLoanMappingRepository);

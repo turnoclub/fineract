@@ -18,6 +18,7 @@
  */
 package org.apache.fineract.organisation.monetary.starter;
 
+import com.querydsl.sql.SQLQueryFactory;
 import org.apache.fineract.organisation.monetary.domain.ApplicationCurrencyRepositoryWrapper;
 import org.apache.fineract.organisation.monetary.domain.OrganisationCurrencyRepository;
 import org.apache.fineract.organisation.monetary.service.CurrencyReadPlatformService;
@@ -26,9 +27,6 @@ import org.apache.fineract.organisation.monetary.service.CurrencyWritePlatformSe
 import org.apache.fineract.organisation.monetary.service.CurrencyWritePlatformServiceJpaRepositoryImpl;
 import org.apache.fineract.organisation.monetary.service.OrganisationCurrencyReadPlatformService;
 import org.apache.fineract.organisation.monetary.service.OrganisationCurrencyReadPlatformServiceImpl;
-import org.apache.fineract.portfolio.charge.service.ChargeReadPlatformService;
-import org.apache.fineract.portfolio.loanproduct.service.LoanProductReadPlatformService;
-import org.apache.fineract.portfolio.savings.service.SavingsProductReadPlatformService;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -39,17 +37,16 @@ public class OrganisationMonetaryConfiguration {
 
     @Bean
     @ConditionalOnMissingBean(CurrencyReadPlatformService.class)
-    public CurrencyReadPlatformService currencyReadPlatformService(JdbcTemplate jdbcTemplate) {
-        return new CurrencyReadPlatformServiceImpl(jdbcTemplate);
+    public CurrencyReadPlatformService currencyReadPlatformService(JdbcTemplate jdbcTemplate, SQLQueryFactory queryFactory) {
+        return new CurrencyReadPlatformServiceImpl(jdbcTemplate, queryFactory);
     }
 
     @Bean
     @ConditionalOnMissingBean(CurrencyWritePlatformService.class)
     public CurrencyWritePlatformService currencyWritePlatformService(ApplicationCurrencyRepositoryWrapper applicationCurrencyRepository,
-            OrganisationCurrencyRepository organisationCurrencyRepository, LoanProductReadPlatformService loanProductService,
-            SavingsProductReadPlatformService savingsProductService, ChargeReadPlatformService chargeService) {
+            OrganisationCurrencyRepository organisationCurrencyRepository, JdbcTemplate jdbcTemplate) {
         return new CurrencyWritePlatformServiceJpaRepositoryImpl(applicationCurrencyRepository, organisationCurrencyRepository,
-                loanProductService, savingsProductService, chargeService);
+                jdbcTemplate);
     }
 
     @Bean

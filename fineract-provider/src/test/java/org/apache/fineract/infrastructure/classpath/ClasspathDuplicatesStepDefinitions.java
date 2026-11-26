@@ -27,6 +27,7 @@ import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.stream.Collectors;
 import org.apache.commons.collections4.MapUtils;
@@ -95,12 +96,12 @@ public class ClasspathDuplicatesStepDefinitions implements En {
                 || resourcePath.equals("OSGI-INF/MANIFEST.MF") //
                 || resourcePath.equals("META-INF/INDEX.LIST") //
                 || resourcePath.equals("META-INF/ORACLE_J.SF") //
-                || resourcePath.toUpperCase().startsWith("META-INF/ASL") //
-                || resourcePath.toUpperCase().startsWith("META-INF/NOTICE") //
-                || resourcePath.toUpperCase().startsWith("META-INF/LICENSE") //
-                || resourcePath.toUpperCase().startsWith("META-INF/COPYRIGHT") //
-                || resourcePath.toUpperCase().startsWith("LICENSE") //
-                || resourcePath.toUpperCase().startsWith("LICENSE/NOTICE") //
+                || resourcePath.toUpperCase(Locale.ROOT).startsWith("META-INF/ASL") //
+                || resourcePath.toUpperCase(Locale.ROOT).startsWith("META-INF/NOTICE") //
+                || resourcePath.toUpperCase(Locale.ROOT).startsWith("META-INF/LICENSE") //
+                || resourcePath.toUpperCase(Locale.ROOT).startsWith("META-INF/COPYRIGHT") //
+                || resourcePath.toUpperCase(Locale.ROOT).startsWith("LICENSE") //
+                || resourcePath.toUpperCase(Locale.ROOT).startsWith("LICENSE/NOTICE") //
                 // list formerly in ClasspathHellDuplicatesCheckRule (moved here
                 // in INFRAUTILS-52)
                 || resourcePath.endsWith(".txt") //
@@ -153,6 +154,8 @@ public class ClasspathDuplicatesStepDefinitions implements En {
                 || resourcePath.startsWith("META-INF/additional-spring") //
                 || resourcePath.startsWith("META-INF/terracotta") //
                 || resourcePath.startsWith("com/fasterxml/jackson/core/io/doubleparser") //
+                // httpclient5 5.5+ and docker-java-transport-zerodep both bundle Mozilla's public suffix list
+                || resourcePath.startsWith("org/publicsuffix/list/") //
                 // Groovy is groovy
                 || resourcePath.startsWith("META-INF/groovy") //
                 || resourcePath.startsWith("org/springframework/batch/core/scope/context/JobSynchronizationManager") //

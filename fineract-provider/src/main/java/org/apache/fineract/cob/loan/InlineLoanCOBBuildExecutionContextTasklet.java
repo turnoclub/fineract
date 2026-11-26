@@ -44,11 +44,10 @@ import org.apache.fineract.infrastructure.jobs.data.JobParameterDTO;
 import org.apache.fineract.infrastructure.jobs.domain.CustomJobParameter;
 import org.apache.fineract.infrastructure.jobs.domain.CustomJobParameterRepository;
 import org.apache.fineract.infrastructure.springbatch.SpringBatchJobConstants;
-import org.apache.fineract.portfolio.loanaccount.exception.LoanNotFoundException;
-import org.springframework.batch.core.StepContribution;
 import org.springframework.batch.core.scope.context.ChunkContext;
+import org.springframework.batch.core.step.StepContribution;
 import org.springframework.batch.core.step.tasklet.Tasklet;
-import org.springframework.batch.repeat.RepeatStatus;
+import org.springframework.batch.infrastructure.repeat.RepeatStatus;
 
 @Slf4j
 @RequiredArgsConstructor
@@ -86,7 +85,7 @@ public class InlineLoanCOBBuildExecutionContextTasklet<T extends AbstractPersist
     private String getBusinessDateFromJobParameters(ChunkContext chunkContext) {
         Long customJobParameterId = (Long) chunkContext.getStepContext().getJobParameters().get(COBConstant.BUSINESS_DATE_PARAMETER_NAME);
         CustomJobParameter customJobParameter = customJobParameterRepository.findById(customJobParameterId)
-                .orElseThrow(() -> new LoanNotFoundException(customJobParameterId));
+                .orElseThrow(() -> new CustomJobParameterNotFoundException(customJobParameterId));
         String parameterJson = customJobParameter.getParameterJson();
         Set<JobParameterDTO> jobParameters = gson.fromJson(parameterJson, new TypeToken<HashSet<JobParameterDTO>>() {}.getType());
         JobParameterDTO businessDateParameter = jobParameters.stream()
@@ -98,7 +97,7 @@ public class InlineLoanCOBBuildExecutionContextTasklet<T extends AbstractPersist
     private List<Long> getLoanIdsFromJobParameters(ChunkContext chunkContext) {
         Set<JobParameterDTO> jobParameters = customJobParameterResolver
                 .getCustomJobParameterSet(chunkContext.getStepContext().getStepExecution())
-                .orElseThrow(() -> new LoanNotFoundException(SpringBatchJobConstants.CUSTOM_JOB_PARAMETER_ID_KEY));
+                .orElseThrow(() -> new CustomJobParameterNotFoundException(SpringBatchJobConstants.CUSTOM_JOB_PARAMETER_ID_KEY));
         JobParameterDTO loanIdsParameter = jobParameters.stream()
                 .filter(jobParameterDTO -> jobParameterDTO.getParameterName().equals(COBConstant.INLINE_IDS_PARAMETER_NAME)).findFirst()
                 .orElseThrow(() -> new CustomJobParameterNotFoundException(COBConstant.INLINE_IDS_PARAMETER_NAME));

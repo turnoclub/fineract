@@ -2,6 +2,12 @@ name: Verify Liquibase DDL Safety
 
 on:
   workflow_call:
+    inputs:
+      upload_artifacts:
+        description: Upload reports and logs even when the job succeeds
+        required: false
+        default: false
+        type: boolean
     secrets:
       DEVELOCITY_ACCESS_KEY:
         required: false
@@ -12,18 +18,35 @@ permissions:
 jobs:
   ddl-safety-check:
     if: ${{ github.event_name == 'pull_request' }}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 60
 
     steps:
       - name: Download workspace
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        id: download-workspace
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        continue-on-error: true
         with:
           name: fineract-workspace-${{ github.run_id }}
           path: .
 
       - name: Extract workspace
+        if: steps.download-workspace.outcome == 'success'
         run: tar -xf fineract-workspace.tar
+
+      - name: Checkout
+        if: steps.download-workspace.outcome != 'success'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Build workspace fallback
+        if: steps.download-workspace.outcome != 'success'
+        uses: $/.github/actions/setup-and-build-fineract
+        with:
+          cache-read-only: false
 
       - name: Fetch base branch
         env:
@@ -36,7 +59,7 @@ jobs:
           BASE_REF: ${{ github.event.pull_request.base.ref }}
         run: |
           MERGE_BASE=$(git merge-base "origin/$BASE_REF" HEAD)
-          CHANGES=$(git diff --name-only "$MERGE_BASE"..HEAD -- '**/db/changelog/**/*.xml' || true)
+          CHANGES=$(git diff --name-only "$MERGE_BASE"..HEAD -- '**/db/changelog/**/*.xml' '**/db/custom-changelog/**/*.xml' '**/db/custom-changelog/*.xml' || true)
           if [ -n "$CHANGES" ]; then
             echo "has_changes=true" >> "$GITHUB_OUTPUT"
             echo "$CHANGES"
@@ -94,17 +117,17 @@ jobs:
           fi
 
       - name: Archive report
-        if: failure() && steps.changes.outputs.has_changes == 'true'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ (failure() || inputs.upload_artifacts) && steps.changes.outputs.has_changes == 'true' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ddl-safety-report
           path: ${{ runner.temp }}/ddl-safety-report/
           retention-days: 5
           compression-level: 9
 
-      - name: Fail if critical violations found (unless overridden)
+      - name: Fail if blocking violations found (unless overridden)
         if: steps.changes.outputs.has_changes == 'true' && steps.ddl-check.outcome == 'failure' && steps.override.outputs.override != 'true'
         run: |
-          echo "::error::Dangerous DDL changes detected on critical tables. See the report above for details."
+          echo "::error::Liquibase safety violations detected. See the report above for details."
           echo "::error::Add the 'ddl-safety-override' label to bypass this check if the change is intentional."
           exit 1

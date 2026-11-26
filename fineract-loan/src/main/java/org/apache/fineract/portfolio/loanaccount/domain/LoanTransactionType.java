@@ -18,6 +18,9 @@
  */
 package org.apache.fineract.portfolio.loanaccount.domain;
 
+import java.util.Arrays;
+import java.util.List;
+
 public enum LoanTransactionType {
 
     INVALID(0, "loanTransactionType.invalid"), //
@@ -80,6 +83,8 @@ public enum LoanTransactionType {
     DISCOUNT_FEE_AMORTIZATION(45, "loanTransactionType.discountFeeAmortization"), //
     DISCOUNT_FEE_ADJUSTMENT(46, "loanTransactionType.discountFeeAdjustment"), //
     DISCOUNT_FEE_AMORTIZATION_ADJUSTMENT(47, "loanTransactionType.discountFeeAmortizationAdjustment"), //
+    LOAN_WITHDRAWAL(48, "loanTransactionType.loanWithdrawal"), //
+    FEE_REFUND(49, "loanTransactionType.feeRefund"), //
     ;
 
     private final Integer value;
@@ -143,6 +148,8 @@ public enum LoanTransactionType {
             case 45 -> LoanTransactionType.DISCOUNT_FEE_AMORTIZATION;
             case 46 -> LoanTransactionType.DISCOUNT_FEE_ADJUSTMENT;
             case 47 -> LoanTransactionType.DISCOUNT_FEE_AMORTIZATION_ADJUSTMENT;
+            case 48 -> LoanTransactionType.LOAN_WITHDRAWAL;
+            case 49 -> LoanTransactionType.FEE_REFUND;
             default -> LoanTransactionType.INVALID;
         };
     }
@@ -189,7 +196,7 @@ public enum LoanTransactionType {
 
     public boolean isRepaymentType() {
         return (isRepayment() || isMerchantIssuedRefund() || isPayoutRefund() || isGoodwillCredit() || isChargeRefund() || isDownPayment()
-                || isInterestPaymentWaiver());
+                || isInterestPaymentWaiver() || isChargeAdjustment());
     }
 
     public boolean isRecoveryRepayment() {
@@ -256,6 +263,10 @@ public enum LoanTransactionType {
         return this.equals(LoanTransactionType.INTEREST_REFUND);
     }
 
+    public boolean isFeeRefund() {
+        return this.equals(LoanTransactionType.FEE_REFUND);
+    }
+
     public boolean isAccrualAdjustment() {
         return this == LoanTransactionType.ACCRUAL_ADJUSTMENT;
     }
@@ -272,6 +283,10 @@ public enum LoanTransactionType {
         return this == LoanTransactionType.CONTRACT_TERMINATION;
     }
 
+    public boolean isLoanWithdrawal() {
+        return this == LoanTransactionType.LOAN_WITHDRAWAL;
+    }
+
     public boolean isBuyDownFee() {
         return this == LoanTransactionType.BUY_DOWN_FEE;
     }
@@ -286,5 +301,9 @@ public enum LoanTransactionType {
 
     public boolean isDiscountFeeAmortization() {
         return this == LoanTransactionType.DISCOUNT_FEE_AMORTIZATION;
+    }
+
+    public static List<LoanTransactionType> getRepaymentLikeTransactionTypes() {
+        return Arrays.stream(LoanTransactionType.values()).filter(LoanTransactionType::isRepaymentType).toList();
     }
 }

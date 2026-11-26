@@ -34,6 +34,7 @@ import org.apache.fineract.organisation.monetary.domain.Money;
 import org.apache.fineract.portfolio.common.domain.DaysInMonthType;
 import org.apache.fineract.portfolio.common.domain.DaysInYearCustomStrategyType;
 import org.apache.fineract.portfolio.common.domain.DaysInYearType;
+import org.apache.fineract.portfolio.common.domain.MonthEndDueDateStrategy;
 import org.apache.fineract.portfolio.common.domain.PeriodFrequencyType;
 import org.apache.fineract.portfolio.loanaccount.domain.Loan;
 import org.apache.fineract.portfolio.loanaccount.domain.LoanBuyDownFeeCalculationType;
@@ -96,6 +97,14 @@ public class LoanProductRelatedDetail {
     @Enumerated(EnumType.ORDINAL)
     @Column(name = "repayment_period_frequency_enum", nullable = false)
     private PeriodFrequencyType repaymentPeriodFrequencyType;
+
+    /** First due day of the month of a {@code SEMI_MONTHLY} repayment frequency; null for any other frequency. */
+    @Column(name = "first_repayment_day_of_month")
+    private Integer firstRepaymentDayOfMonth;
+
+    /** Second due day of the month of a {@code SEMI_MONTHLY} repayment frequency; 31 is the last day of the month. */
+    @Column(name = "second_repayment_day_of_month")
+    private Integer secondRepaymentDayOfMonth;
 
     @Column(name = "fixed_length", nullable = false)
     private Integer fixedLength;
@@ -163,6 +172,10 @@ public class LoanProductRelatedDetail {
     @Column(name = "supported_interest_refund_types")
     private List<LoanSupportedInterestRefundTypes> supportedInterestRefundTypes = List.of();
 
+    @Convert(converter = SupportedFeeRefundTypesListConverter.class)
+    @Column(name = "supported_fee_refund_types")
+    private List<LoanSupportedFeeRefundTypes> supportedFeeRefundTypes = List.of();
+
     @Column(name = "charge_off_behaviour")
     @Enumerated(EnumType.STRING)
     private LoanChargeOffBehaviour chargeOffBehaviour;
@@ -173,6 +186,10 @@ public class LoanProductRelatedDetail {
     @Enumerated(EnumType.STRING)
     @Column(name = "days_in_year_custom_strategy")
     private DaysInYearCustomStrategyType daysInYearCustomStrategy;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "month_end_due_date_strategy")
+    private MonthEndDueDateStrategy monthEndDueDateStrategy;
 
     @Column(name = "enable_income_capitalization")
     private boolean enableIncomeCapitalization = false;
@@ -207,6 +224,9 @@ public class LoanProductRelatedDetail {
     @Column(name = "is_merchant_buy_down_fee")
     private boolean merchantBuyDownFee = true;
 
+    @Column(name = "enable_charge_amortization", nullable = false)
+    private boolean enableChargeAmortization = false;
+
     @Column(name = "installment_amount_in_multiples_of")
     private Integer installmentAmountInMultiplesOf;
 
@@ -214,34 +234,36 @@ public class LoanProductRelatedDetail {
             final BigDecimal nominalInterestRatePerPeriod, final PeriodFrequencyType interestRatePeriodFrequencyType,
             final BigDecimal nominalAnnualInterestRate, final InterestMethod interestMethod,
             final InterestCalculationPeriodMethod interestCalculationPeriodMethod, final boolean allowPartialPeriodInterestCalculation,
-            final Integer repaymentEvery, final PeriodFrequencyType repaymentPeriodFrequencyType, final Integer numberOfRepayments,
-            final Integer graceOnPrincipalPayment, final Integer recurringMoratoriumOnPrincipalPeriods,
-            final Integer graceOnInterestPayment, final Integer graceOnInterestCharged, final AmortizationMethod amortizationMethod,
-            final BigDecimal inArrearsTolerance, final Integer graceOnArrearsAgeing, final Integer daysInMonthType,
-            final Integer daysInYearType, final boolean isInterestRecalculationEnabled, final boolean isEqualAmortization,
-            final boolean enableDownPayment, final BigDecimal disbursedAmountPercentageForDownPayment,
+            final Integer repaymentEvery, final PeriodFrequencyType repaymentPeriodFrequencyType, final Integer firstRepaymentDayOfMonth,
+            final Integer secondRepaymentDayOfMonth, final Integer numberOfRepayments, final Integer graceOnPrincipalPayment,
+            final Integer recurringMoratoriumOnPrincipalPeriods, final Integer graceOnInterestPayment, final Integer graceOnInterestCharged,
+            final AmortizationMethod amortizationMethod, final BigDecimal inArrearsTolerance, final Integer graceOnArrearsAgeing,
+            final Integer daysInMonthType, final Integer daysInYearType, final boolean isInterestRecalculationEnabled,
+            final boolean isEqualAmortization, final boolean enableDownPayment, final BigDecimal disbursedAmountPercentageForDownPayment,
             final boolean enableAutoRepaymentForDownPayment, final LoanScheduleType loanScheduleType,
             final LoanScheduleProcessingType loanScheduleProcessingType, final Integer fixedLength,
             final boolean enableAccrualActivityPosting, final List<LoanSupportedInterestRefundTypes> supportedInterestRefundTypes,
-            final LoanChargeOffBehaviour chargeOffBehaviour, final boolean interestRecognitionOnDisbursementDate,
-            final DaysInYearCustomStrategyType daysInYearCustomStrategy, final boolean enableIncomeCapitalization,
-            final LoanCapitalizedIncomeCalculationType capitalizedIncomeCalculationType,
+            final List<LoanSupportedFeeRefundTypes> supportedFeeRefundTypes, final LoanChargeOffBehaviour chargeOffBehaviour,
+            final boolean interestRecognitionOnDisbursementDate, final DaysInYearCustomStrategyType daysInYearCustomStrategy,
+            final boolean enableIncomeCapitalization, final LoanCapitalizedIncomeCalculationType capitalizedIncomeCalculationType,
             final LoanCapitalizedIncomeStrategy capitalizedIncomeStrategy, final LoanCapitalizedIncomeType capitalizedIncomeType,
             final Integer installmentAmountInMultiplesOf, final boolean enableBuyDownFee,
             final LoanBuyDownFeeCalculationType buyDownFeeCalculationType, final LoanBuyDownFeeStrategy buyDownFeeStrategy,
-            final LoanBuyDownFeeIncomeType buyDownFeeIncomeType, final boolean merchantBuyDownFee) {
+            final LoanBuyDownFeeIncomeType buyDownFeeIncomeType, final boolean merchantBuyDownFee,
+            final MonthEndDueDateStrategy monthEndDueDateStrategy) {
 
         final MonetaryCurrency currency = MonetaryCurrency.fromCurrencyData(currencyData);
         return new LoanProductRelatedDetail(currency, principal, nominalInterestRatePerPeriod, interestRatePeriodFrequencyType,
                 nominalAnnualInterestRate, interestMethod, interestCalculationPeriodMethod, allowPartialPeriodInterestCalculation,
-                repaymentEvery, repaymentPeriodFrequencyType, numberOfRepayments, graceOnPrincipalPayment,
-                recurringMoratoriumOnPrincipalPeriods, graceOnInterestPayment, graceOnInterestCharged, amortizationMethod,
-                inArrearsTolerance, graceOnArrearsAgeing, daysInMonthType, daysInYearType, isInterestRecalculationEnabled,
-                isEqualAmortization, enableDownPayment, disbursedAmountPercentageForDownPayment, enableAutoRepaymentForDownPayment,
-                loanScheduleType, loanScheduleProcessingType, fixedLength, enableAccrualActivityPosting, supportedInterestRefundTypes,
-                chargeOffBehaviour, interestRecognitionOnDisbursementDate, daysInYearCustomStrategy, enableIncomeCapitalization,
-                capitalizedIncomeCalculationType, capitalizedIncomeStrategy, capitalizedIncomeType, installmentAmountInMultiplesOf,
-                enableBuyDownFee, buyDownFeeCalculationType, buyDownFeeStrategy, buyDownFeeIncomeType, merchantBuyDownFee);
+                repaymentEvery, repaymentPeriodFrequencyType, firstRepaymentDayOfMonth, secondRepaymentDayOfMonth, numberOfRepayments,
+                graceOnPrincipalPayment, recurringMoratoriumOnPrincipalPeriods, graceOnInterestPayment, graceOnInterestCharged,
+                amortizationMethod, inArrearsTolerance, graceOnArrearsAgeing, daysInMonthType, daysInYearType,
+                isInterestRecalculationEnabled, isEqualAmortization, enableDownPayment, disbursedAmountPercentageForDownPayment,
+                enableAutoRepaymentForDownPayment, loanScheduleType, loanScheduleProcessingType, fixedLength, enableAccrualActivityPosting,
+                supportedInterestRefundTypes, supportedFeeRefundTypes, chargeOffBehaviour, interestRecognitionOnDisbursementDate,
+                daysInYearCustomStrategy, enableIncomeCapitalization, capitalizedIncomeCalculationType, capitalizedIncomeStrategy,
+                capitalizedIncomeType, installmentAmountInMultiplesOf, enableBuyDownFee, buyDownFeeCalculationType, buyDownFeeStrategy,
+                buyDownFeeIncomeType, merchantBuyDownFee, monthEndDueDateStrategy);
     }
 
     protected LoanProductRelatedDetail() {
@@ -252,22 +274,23 @@ public class LoanProductRelatedDetail {
             final BigDecimal defaultNominalInterestRatePerPeriod, final PeriodFrequencyType interestPeriodFrequencyType,
             final BigDecimal defaultAnnualNominalInterestRate, final InterestMethod interestMethod,
             final InterestCalculationPeriodMethod interestCalculationPeriodMethod, final boolean allowPartialPeriodInterestCalculation,
-            final Integer repayEvery, final PeriodFrequencyType repaymentFrequencyType, final Integer defaultNumberOfRepayments,
-            final Integer graceOnPrincipalPayment, final Integer recurringMoratoriumOnPrincipalPeriods,
-            final Integer graceOnInterestPayment, final Integer graceOnInterestCharged, final AmortizationMethod amortizationMethod,
-            final BigDecimal inArrearsTolerance, final Integer graceOnArrearsAgeing, final Integer daysInMonthType,
-            final Integer daysInYearType, final boolean isInterestRecalculationEnabled, final boolean isEqualAmortization,
-            final boolean enableDownPayment, final BigDecimal disbursedAmountPercentageForDownPayment,
+            final Integer repayEvery, final PeriodFrequencyType repaymentFrequencyType, final Integer firstRepaymentDayOfMonth,
+            final Integer secondRepaymentDayOfMonth, final Integer defaultNumberOfRepayments, final Integer graceOnPrincipalPayment,
+            final Integer recurringMoratoriumOnPrincipalPeriods, final Integer graceOnInterestPayment, final Integer graceOnInterestCharged,
+            final AmortizationMethod amortizationMethod, final BigDecimal inArrearsTolerance, final Integer graceOnArrearsAgeing,
+            final Integer daysInMonthType, final Integer daysInYearType, final boolean isInterestRecalculationEnabled,
+            final boolean isEqualAmortization, final boolean enableDownPayment, final BigDecimal disbursedAmountPercentageForDownPayment,
             final boolean enableAutoRepaymentForDownPayment, final LoanScheduleType loanScheduleType,
             final LoanScheduleProcessingType loanScheduleProcessingType, final Integer fixedLength,
             final boolean enableAccrualActivityPosting, List<LoanSupportedInterestRefundTypes> supportedInterestRefundTypes,
-            final LoanChargeOffBehaviour chargeOffBehaviour, final boolean interestRecognitionOnDisbursementDate,
-            final DaysInYearCustomStrategyType daysInYearCustomStrategy, final boolean enableIncomeCapitalization,
-            final LoanCapitalizedIncomeCalculationType capitalizedIncomeCalculationType,
+            final List<LoanSupportedFeeRefundTypes> supportedFeeRefundTypes, final LoanChargeOffBehaviour chargeOffBehaviour,
+            final boolean interestRecognitionOnDisbursementDate, final DaysInYearCustomStrategyType daysInYearCustomStrategy,
+            final boolean enableIncomeCapitalization, final LoanCapitalizedIncomeCalculationType capitalizedIncomeCalculationType,
             final LoanCapitalizedIncomeStrategy capitalizedIncomeStrategy, final LoanCapitalizedIncomeType capitalizedIncomeType,
             final Integer installmentAmountInMultiplesOf, final boolean enableBuyDownFee,
             final LoanBuyDownFeeCalculationType buyDownFeeCalculationType, final LoanBuyDownFeeStrategy buyDownFeeStrategy,
-            final LoanBuyDownFeeIncomeType buyDownFeeIncomeType, final boolean merchantBuyDownFee) {
+            final LoanBuyDownFeeIncomeType buyDownFeeIncomeType, final boolean merchantBuyDownFee,
+            final MonthEndDueDateStrategy monthEndDueDateStrategy) {
         this.currency = currency;
         this.principal = defaultPrincipal;
         this.nominalInterestRatePerPeriod = defaultNominalInterestRatePerPeriod;
@@ -278,6 +301,8 @@ public class LoanProductRelatedDetail {
         this.allowPartialPeriodInterestCalculation = allowPartialPeriodInterestCalculation;
         this.repayEvery = repayEvery;
         this.repaymentPeriodFrequencyType = repaymentFrequencyType;
+        this.firstRepaymentDayOfMonth = firstRepaymentDayOfMonth;
+        this.secondRepaymentDayOfMonth = secondRepaymentDayOfMonth;
         this.numberOfRepayments = defaultNumberOfRepayments;
         this.fixedLength = fixedLength;
         this.graceOnPrincipalPayment = defaultToNullIfZero(graceOnPrincipalPayment);
@@ -302,6 +327,7 @@ public class LoanProductRelatedDetail {
         this.loanScheduleProcessingType = loanScheduleProcessingType;
         this.enableAccrualActivityPosting = enableAccrualActivityPosting;
         this.supportedInterestRefundTypes = supportedInterestRefundTypes;
+        this.supportedFeeRefundTypes = supportedFeeRefundTypes;
         this.chargeOffBehaviour = chargeOffBehaviour;
         this.interestRecognitionOnDisbursementDate = interestRecognitionOnDisbursementDate;
         this.daysInYearCustomStrategy = daysInYearCustomStrategy;
@@ -315,6 +341,7 @@ public class LoanProductRelatedDetail {
         this.buyDownFeeStrategy = buyDownFeeStrategy;
         this.buyDownFeeIncomeType = buyDownFeeIncomeType;
         this.merchantBuyDownFee = merchantBuyDownFee;
+        this.monthEndDueDateStrategy = monthEndDueDateStrategy;
     }
 
     private Integer defaultToNullIfZero(final Integer value) {

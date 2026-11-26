@@ -18,12 +18,23 @@
  */
 package org.apache.fineract.portfolio.workingcapitalloan.service;
 
+import java.time.LocalDate;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.fineract.infrastructure.core.api.JsonCommand;
 import org.apache.fineract.infrastructure.core.data.CommandProcessingResult;
 import org.apache.fineract.infrastructure.core.data.CommandProcessingResultBuilder;
+import org.apache.fineract.infrastructure.core.service.DateUtils;
+import org.apache.fineract.infrastructure.event.business.domain.BusinessEvent;
+import org.apache.fineract.infrastructure.event.business.domain.workingcapitalloan.loan.WorkingCapitalLoanDelinquencyDisableBusinessEvent;
+import org.apache.fineract.infrastructure.event.business.domain.workingcapitalloan.loan.WorkingCapitalLoanDelinquencyEnableBusinessEvent;
+import org.apache.fineract.infrastructure.event.business.domain.workingcapitalloan.loan.WorkingCapitalLoanDelinquencyPauseBusinessEvent;
+import org.apache.fineract.infrastructure.event.business.domain.workingcapitalloan.loan.WorkingCapitalLoanDelinquencyRescheduleBusinessEvent;
+import org.apache.fineract.infrastructure.event.business.domain.workingcapitalloan.loan.WorkingCapitalLoanDelinquencyResetBusinessEvent;
+import org.apache.fineract.infrastructure.event.business.domain.workingcapitalloan.loan.WorkingCapitalLoanDelinquencyResumeBusinessEvent;
+import org.apache.fineract.infrastructure.event.business.domain.workingcapitalloan.loan.WorkingCapitalLoanDelinquencyUndoResetBusinessEvent;
+import org.apache.fineract.infrastructure.event.business.service.BusinessEventNotifierService;
 import org.apache.fineract.portfolio.delinquency.domain.DelinquencyAction;
 import org.apache.fineract.portfolio.workingcapitalloan.domain.WorkingCapitalLoan;
 import org.apache.fineract.portfolio.workingcapitalloan.domain.WorkingCapitalLoanDelinquencyAction;
@@ -43,6 +54,8 @@ public class WorkingCapitalLoanDelinquencyActionWriteServiceImpl implements Work
     private final WorkingCapitalLoanDelinquencyActionRepository actionRepository;
     private final WorkingCapitalLoanDelinquencyActionParseAndValidator validator;
     private final WorkingCapitalLoanDelinquencyRangeScheduleService rangeScheduleService;
+    private final WorkingCapitalLoanDelinquencyClassificationService classificationService;
+    private final BusinessEventNotifierService businessEventNotifierService;
 
     @Transactional
     @Override
@@ -54,16 +67,56 @@ public class WorkingCapitalLoanDelinquencyActionWriteServiceImpl implements Work
                 .findByWorkingCapitalLoanIdOrderById(workingCapitalLoanId);
 
         final WorkingCapitalLoanDelinquencyAction action = validator.validateAndParse(command, workingCapitalLoan, existing);
-        action.setWorkingCapitalLoan(workingCapitalLoan);
 
+        // A disable/enable is routed through the same create command (like the breach actions) and, as with breach,
+        // each is persisted as its own row: an enable adds an ENABLE row and separately closes the open disable window.
         final WorkingCapitalLoanDelinquencyAction saved = actionRepository.saveAndFlush(action);
         log.debug("Created WC loan delinquency action {} for loan {}", action.getAction(), workingCapitalLoanId);
 
-        if (DelinquencyAction.PAUSE.equals(action.getAction())) {
+        WorkingCapitalLoanDelinquencyClassificationMode classification = WorkingCapitalLoanDelinquencyClassificationMode.NONE;
+
+        if (DelinquencyAction.ENABLE.equals(action.getAction())) {
+            // Mirror breach action management: close the open disable at the day before the enable date so the loan
+            // stops being considered disabled from the enable date on.
+            final LocalDate enableDate = action.getStartDate();
+            // The validator (validateDisableState) already rejects an enable when no active disable exists, so an open
+            // disable is guaranteed to be present here - mirroring the breach action flow.
+            final WorkingCapitalLoanDelinquencyAction activeDisable = validator.findActiveDisable(existing);
+            activeDisable.setEndDate(enableDate.minusDays(1));
+            actionRepository.saveAndFlush(activeDisable);
+            // Nothing was evaluated or updated while disabled, so every period is recalculated as if the loan had never
+            // been disabled. As in breach, the disabled window is NOT treated as a pause - period dates are not
+            // shifted.
+            if (!rangeScheduleService.hasSchedule(workingCapitalLoanId)) {
+                rangeScheduleService.generateInitialPeriod(workingCapitalLoan);
+            }
+            rangeScheduleService.recalculateBaseExpectedAmount(workingCapitalLoan);
+            classification = rangeScheduleService.reprocessSchedulePeriods(workingCapitalLoan);
+        } else if (DelinquencyAction.PAUSE.equals(action.getAction())) {
             rangeScheduleService.extendPeriodsForPause(workingCapitalLoan, action.getStartDate(), action.getEndDate());
+            if (!action.getStartDate().isAfter(DateUtils.getBusinessLocalDate())) {
+                classification = rangeScheduleService.reprocessSchedulePeriods(workingCapitalLoan);
+            }
         } else if (DelinquencyAction.RESCHEDULE.equals(action.getAction())) {
             rangeScheduleService.rescheduleMinimumPayment(workingCapitalLoan, action);
+            classification = rangeScheduleService.reprocessSchedulePeriods(workingCapitalLoan);
+        } else if (DelinquencyAction.RESUME.equals(action.getAction())) {
+            final WorkingCapitalLoanDelinquencyAction activePause = validator.findActivePauseForResume(existing,
+                    DateUtils.getBusinessLocalDate());
+            classification = rangeScheduleService.resumeActivePause(workingCapitalLoan, activePause, action);
+        } else if (DelinquencyAction.RESET.equals(action.getAction())) {
+            rangeScheduleService.resetPeriods(workingCapitalLoan, action);
+        } else if (DelinquencyAction.UNDO_RESET.equals(action.getAction())) {
+            List<WorkingCapitalLoanDelinquencyAction> byWorkingCapitalLoanIdOrderById = actionRepository
+                    .findByWorkingCapitalLoanIdOrderById(workingCapitalLoanId);
+            rangeScheduleService.undoResetPeriods(workingCapitalLoan, action, byWorkingCapitalLoanIdOrderById);
+            classification = rangeScheduleService.reprocessSchedulePeriods(workingCapitalLoan);
+        } else if (DelinquencyAction.DISABLE.equals(action.getAction())) {
+            classificationService.liftDelinquencyClassification(workingCapitalLoan, action.getStartDate());
         }
+        classificationService.classifyDelinquencyOnFinalState(workingCapitalLoan, classification);
+
+        businessEventNotifierService.notifyPostBusinessEvent(delinquencyActionEvent(action.getAction(), workingCapitalLoan));
 
         return new CommandProcessingResultBuilder() //
                 .withCommandId(command.commandId()) //
@@ -72,6 +125,18 @@ public class WorkingCapitalLoanDelinquencyActionWriteServiceImpl implements Work
                 .withOfficeId(workingCapitalLoan.getOfficeId()) //
                 .withClientId(workingCapitalLoan.getClientId()) //
                 .build();
+    }
+
+    private BusinessEvent<?> delinquencyActionEvent(final DelinquencyAction actionType, final WorkingCapitalLoan loan) {
+        return switch (actionType) {
+            case DISABLE -> new WorkingCapitalLoanDelinquencyDisableBusinessEvent(loan);
+            case ENABLE -> new WorkingCapitalLoanDelinquencyEnableBusinessEvent(loan);
+            case PAUSE -> new WorkingCapitalLoanDelinquencyPauseBusinessEvent(loan);
+            case RESUME -> new WorkingCapitalLoanDelinquencyResumeBusinessEvent(loan);
+            case RESCHEDULE -> new WorkingCapitalLoanDelinquencyRescheduleBusinessEvent(loan);
+            case RESET -> new WorkingCapitalLoanDelinquencyResetBusinessEvent(loan);
+            case UNDO_RESET -> new WorkingCapitalLoanDelinquencyUndoResetBusinessEvent(loan);
+        };
     }
 
 }

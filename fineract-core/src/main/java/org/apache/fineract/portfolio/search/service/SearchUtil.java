@@ -54,8 +54,8 @@ import org.apache.fineract.infrastructure.dataqueries.data.ResultsetColumnHeader
 import org.apache.fineract.infrastructure.security.service.SqlValidator;
 import org.apache.fineract.portfolio.search.data.ColumnFilterData;
 import org.apache.fineract.portfolio.search.data.FilterData;
+import org.jspecify.annotations.NonNull;
 import org.springframework.jdbc.support.rowset.SqlRowSet;
-import org.springframework.lang.NonNull;
 import org.springframework.stereotype.Component;
 
 @Slf4j
@@ -271,7 +271,14 @@ public class SearchUtil {
                 }
                 return columnValue;
             } else if (columnHeader.isCodeLookupDisplayType()) {
-                final Integer codeLookup = Integer.valueOf(columnValue);
+                final Integer codeLookup;
+                try {
+                    codeLookup = Integer.valueOf(columnValue);
+                } catch (NumberFormatException e) {
+                    ApiParameterError error = ApiParameterError.parameterError("error.msg.invalid.columnValue",
+                            "Value not found in Allowed Value list", columnHeader.getColumnName(), columnValue);
+                    throw new PlatformApiDataValidationException(errorCode, errorMsg, List.of(error), e);
+                }
                 if (!columnHeader.isColumnCodeAllowed(codeLookup)) {
                     ApiParameterError error = ApiParameterError.parameterError("error.msg.invalid.columnValue",
                             "Value not found in Allowed Value list", columnHeader.getColumnName(), columnValue);
@@ -321,6 +328,6 @@ public class SearchUtil {
 
     public String camelToSnake(final String camelStr) {
         return camelStr == null ? null
-                : camelStr.replaceAll("([A-Z]+)([A-Z][a-z])", "$1_$2").replaceAll("([a-z])([A-Z])", "$1_$2").toLowerCase();
+                : camelStr.replaceAll("([A-Z]+)([A-Z][a-z])", "$1_$2").replaceAll("([a-z])([A-Z])", "$1_$2").toLowerCase(Locale.ROOT);
     }
 }

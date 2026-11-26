@@ -21,7 +21,8 @@
 # check-liquibase-ddl-safety.sh
 #
 # Scans Liquibase XML changesets introduced in a PR for dangerous DDL
-# operations on critical tables. Designed for CI but also runs locally.
+# operations on critical tables, invalid DATETIME precision, and index creation
+# that would lock a table on PostgreSQL. Designed for CI but also runs locally.
 #
 # Uses only bash builtins + grep/sed (no xmllint dependency).
 #
@@ -96,28 +97,32 @@ while IFS= read -r line; do
     CRITICAL_TABLES+=("$line")
 done < "$CRITICAL_TABLES_FILE"
 
-# Load dangerous operations into associative arrays
-declare -A OP_SEVERITY
-declare -A OP_RISK
+# Load dangerous operations into indexed arrays. Avoid associative arrays so
+# this script can also start on macOS' default Bash 3.
+OP_ELEMENTS=()
+OP_SEVERITIES=()
+OP_RISKS=()
 while IFS='|' read -r element severity risk; do
     element="${element%%#*}"
     element="$(echo "$element" | tr -d '[:space:]')"
     [[ -z "$element" ]] && continue
     severity="$(echo "$severity" | tr -d '[:space:]')"
     risk="$(echo "$risk" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
-    OP_SEVERITY["$element"]="$severity"
-    OP_RISK["$element"]="$risk"
+    OP_ELEMENTS+=("$element")
+    OP_SEVERITIES+=("$severity")
+    OP_RISKS+=("$risk")
 done < "$DANGEROUS_OPS_FILE"
 
 # ---- Find changed XML files ----
 CHANGED_FILES=()
+MERGE_BASE=""
 if [[ -n "$FILES_OVERRIDE" ]]; then
     IFS=',' read -ra CHANGED_FILES <<< "$FILES_OVERRIDE"
 else
     MERGE_BASE=$(git -C "$REPO_ROOT" merge-base "$BASE_REF" "$HEAD_REF" 2>/dev/null || echo "$BASE_REF")
     while IFS= read -r f; do
         [[ -n "$f" ]] && CHANGED_FILES+=("$f")
-    done < <(git -C "$REPO_ROOT" diff --name-only --diff-filter=AM "$MERGE_BASE".."$HEAD_REF" -- '*.xml' | grep '/db/changelog/' || true)
+    done < <(git -C "$REPO_ROOT" diff --name-only --diff-filter=AM "$MERGE_BASE".."$HEAD_REF" -- '*.xml' | grep -E '/db/(changelog|custom-changelog)/' || true)
 fi
 
 if [[ ${#CHANGED_FILES[@]} -eq 0 ]]; then
@@ -182,6 +187,10 @@ done
 
 is_created_in_pr() {
     local table="$1"
+    if [[ ${#CREATED_TABLES[@]} -eq 0 ]]; then
+        return 1
+    fi
+
     for ct in "${CREATED_TABLES[@]}"; do
         if [[ "$table" == "$ct" ]]; then
             return 0
@@ -210,7 +219,9 @@ add_violation() {
     fi
 
     local effective_severity="$severity"
-    if [[ "$severity" == "CRITICAL" ]] || [[ "$severity" == "HIGH" ]]; then
+    if [[ "$severity" == "BLOCKING" ]]; then
+        ((BLOCKING_COUNT++)) || true
+    elif [[ "$severity" == "CRITICAL" ]] || [[ "$severity" == "HIGH" ]]; then
         if is_critical_table "$table"; then
             effective_severity="CRITICAL"
             ((BLOCKING_COUNT++)) || true
@@ -228,6 +239,225 @@ add_violation() {
     fi
 
     VIOLATIONS+=("${effective_severity}|${file}|${operation}|${table}${detail_str}|${risk}")
+}
+
+find_invalid_datetime_precision() {
+    local local_file="$1"
+    awk '
+    BEGIN {}
+    {
+        remaining = $0
+        while (match(remaining, /(type|columnDataType)[[:space:]]*=[[:space:]]*"[^"]*"/)) {
+            attr = substr(remaining, RSTART, RLENGTH)
+            value = attr
+            sub(/^[^"]*"/, "", value)
+            sub(/"$/, "", value)
+
+            normalized = toupper(value)
+            gsub(/[[:space:]]/, "", normalized)
+
+            if (normalized ~ /^DATETIME(\([0-9]+\))?$/ && normalized != "DATETIME(6)") {
+                print FNR "|" attr
+            }
+
+            remaining = substr(remaining, RSTART + RLENGTH)
+        }
+    }
+    ' "$local_file"
+}
+
+find_invalid_datetime_precision_in_sql_blocks() {
+    local local_file="$1"
+    awk '
+    BEGIN { in_sql = 0 }
+    /<sql([[:space:]>]|$)/ { in_sql = 1 }
+    in_sql {
+        remaining = $0
+        while (match(toupper(remaining), /(^|[^[:alnum:]_])DATETIME[[:space:]]*(\([[:space:]]*[0-9]+[[:space:]]*\))?([^[:alnum:]_]|$)/)) {
+            token = substr(remaining, RSTART, RLENGTH)
+            gsub(/^[^[:alnum:]_]+/, "", token)
+            gsub(/[^[:alnum:]_)]+$/, "", token)
+            normalized = toupper(token)
+            gsub(/[[:space:]]/, "", normalized)
+
+            if (normalized != "DATETIME(6)") {
+                print FNR "|" token
+            }
+
+            remaining = substr(remaining, RSTART + RLENGTH)
+        }
+    }
+    /<\/sql>/ { in_sql = 0 }
+    ' "$local_file"
+}
+
+# Line numbers this PR added to a file, one per line. Empty output means "no
+# diff available" (--files mode), and callers then scan the whole file.
+added_lines_of() {
+    local file="$1"
+    [[ -z "$MERGE_BASE" ]] && return 0
+    git -C "$REPO_ROOT" diff -U0 "$MERGE_BASE".."$HEAD_REF" -- "$file" 2>/dev/null \
+        | awk '
+        /^@@/ {
+            # @@ -old,count +new,count @@ — $3 is the "+new,count" field.
+            split($3, hunk, ",")
+            start = substr(hunk[1], 2) + 0
+            count = (hunk[2] == "" ? 1 : hunk[2] + 0)
+            for (i = 0; i < count; i++) print start + i
+        }' || true
+}
+
+# Index creation that would take an ACCESS EXCLUSIVE lock on PostgreSQL.
+#
+# CREATE INDEX blocks every reader and writer of the table until the index is
+# built. On a large table in a live deployment that is an outage. PostgreSQL's
+# CREATE INDEX CONCURRENTLY builds without the lock, but it cannot run inside a
+# transaction block, so its changeSet must carry runInTransaction="false".
+# Liquibase's <createIndex> element has no way to emit CONCURRENTLY, which makes
+# it unusable for PostgreSQL; the MySQL form belongs in its own context="mysql"
+# changeSet.
+#
+# Emits: <line>|<kind>|<table>|<detail>
+# Kinds: createIndex | raw-sql | concurrent-in-transaction
+find_unsafe_index_creation() {
+    local local_file="$1"
+    local added_file="$2"
+    awk -v added_file="$added_file" '
+    function lc_strip(s) { s = tolower(s); gsub(/[ \t\r\n]/, "", s); return s }
+
+    # Value of attribute `name` within the already-collected tag text `t`.
+    function attr(t, name,    v, p) {
+        if (match(t, "[ \t]" name "[ \t]*=[ \t]*\"")) {
+            v = substr(t, RSTART + RLENGTH)
+            p = index(v, "\"")
+            if (p > 0) return substr(v, 1, p - 1)
+        }
+        return ""
+    }
+
+    # Text of the <tagname ...> opening on line `start`, joined across line
+    # breaks so attributes spread over several lines are still visible.
+    function collect_tag(start, tagname,    i, s, p, t) {
+        t = ""
+        for (i = start; i <= n; i++) {
+            s = lines[i]
+            if (i == start) {
+                p = index(s, "<" tagname)
+                if (p == 0) return ""
+                s = substr(s, p)
+            }
+            t = t " " s
+            if (index(s, ">") > 0) break
+        }
+        p = index(t, ">")
+        if (p > 0) t = substr(t, 1, p)
+        return t
+    }
+
+    # Can a changeSet carrying these context/dbms attributes reach PostgreSQL?
+    function targets_postgres(ctx, dbms,    c, d, i, count, toks, tok) {
+        d = lc_strip(dbms)
+        if (d != "") {
+            if (substr(d, 1, 1) == "!") {
+                if (index(d, "postgres") > 0) return 0
+            } else {
+                return (index(d, "postgres") > 0) ? 1 : 0
+            }
+        }
+        c = lc_strip(ctx)
+        if (c == "") return 1
+        if (index(c, "postgres") > 0) return 1
+        # Rule the changeSet out only when every token names another database.
+        # Functional contexts (tenant_db, initial_switch, ...) do reach PostgreSQL.
+        gsub(/[()]/, "", c)
+        count = split(c, toks, /,|and|or/)
+        for (i = 1; i <= count; i++) {
+            tok = toks[i]
+            if (tok == "") continue
+            if (tok != "mysql" && tok != "mariadb" && tok != "!postgresql") return 1
+        }
+        return 0
+    }
+
+    # Table named by the ON clause of a CREATE INDEX statement. `rest` is the
+    # upper-cased tail used for matching, `raw` the same tail in original case.
+    function sql_table(rest, raw,    t) {
+        if (!match(rest, /[ \t]ON[ \t]+/)) return "unknown"
+        t = substr(raw, RSTART + RLENGTH)
+        sub(/[ \t(;].*$/, "", t)
+        gsub(/["`]/, "", t)
+        return (t == "") ? "unknown" : tolower(t)
+    }
+
+    # Report only on what this PR touched: either the offending line itself or
+    # the opening tag of its changeSet, so flipping an existing changeSet to a
+    # PostgreSQL context is caught too. Pre-existing changesets stay silent.
+    function touched(line_no) {
+        if (!have_diff) return 1
+        return ((line_no in added) || (cs_line in added))
+    }
+
+    BEGIN {
+        have_diff = 0
+        if (added_file != "") {
+            while ((getline a < added_file) > 0) { added[a + 0] = 1; have_diff = 1 }
+            close(added_file)
+        }
+    }
+
+    { lines[NR] = $0 }
+
+    END {
+        n = NR
+        in_cs = 0
+        for (i = 1; i <= n; i++) {
+            line = lines[i]
+
+            if (!in_cs) {
+                if (index(line, "<changeSet") > 0) {
+                    tag = collect_tag(i, "changeSet")
+                    cs_line = i
+                    cs_id = attr(tag, "id")
+                    cs_ctx = attr(tag, "context")
+                    if (cs_ctx == "") cs_ctx = attr(tag, "contextFilter")
+                    cs_pg = targets_postgres(cs_ctx, attr(tag, "dbms"))
+                    cs_tx = lc_strip(attr(tag, "runInTransaction"))
+                    in_cs = 1
+                }
+                continue
+            }
+
+            if (index(line, "</changeSet>") > 0) { in_cs = 0; continue }
+            if (!cs_pg || !touched(i)) continue
+
+            if (index(line, "<createIndex") > 0) {
+                itag = collect_tag(i, "createIndex")
+                tbl = attr(itag, "tableName")
+                if (tbl == "") tbl = "unknown"
+                print i "|createIndex|" tolower(tbl) "|changeSet id=" cs_id
+            }
+
+            # Raw SQL CREATE [UNIQUE] INDEX, possibly more than one per line.
+            u = toupper(line)
+            off = 0
+            while (1) {
+                seg = substr(u, off + 1)
+                if (!match(seg, /CREATE[ \t]+(UNIQUE[ \t]+)?INDEX[ \t]/)) break
+                start = RSTART; len = RLENGTH
+                rest = substr(seg, start + len)
+                raw = substr(line, off + start + len)
+                tbl = sql_table(rest, raw)
+                if (match(rest, /^CONCURRENTLY([ \t]|$)/)) {
+                    if (cs_tx != "false")
+                        print i "|concurrent-in-transaction|" tbl "|changeSet id=" cs_id
+                } else {
+                    print i "|raw-sql|" tbl "|changeSet id=" cs_id
+                }
+                off = off + start + len - 1
+            }
+        }
+    }
+    ' "$local_file"
 }
 
 # ---- Scan each changed file ----
@@ -248,8 +478,28 @@ for file in "${CHANGED_FILES[@]}"; do
     # Flatten multiline XML tags so attribute matching works across line breaks
     FLAT_CONTENT=$(flatten_xml_tags "$(cat "$local_file")")
 
+    # ---- Check DATETIME precision ----
+    # MySQL DATETIME defaults to precision 0. Use DATETIME(6) explicitly in
+    # Liquibase changelogs to preserve microsecond precision.
+    while IFS='|' read -r line match; do
+        [[ -z "$line" ]] && continue
+        add_violation "BLOCKING" "$file" "datetime-precision" "n/a" \
+            "Use DATETIME(6) instead of DATETIME; MySQL DATETIME defaults to precision 0" \
+            "line: $line, match: $match"
+    done < <(find_invalid_datetime_precision "$local_file")
+
+    while IFS='|' read -r line match; do
+        [[ -z "$line" ]] && continue
+        add_violation "BLOCKING" "$file" "raw-SQL-datetime-precision" "n/a" \
+            "Use DATETIME(6) instead of DATETIME in raw SQL blocks; MySQL DATETIME defaults to precision 0" \
+            "line: $line, match: $match"
+    done < <(find_invalid_datetime_precision_in_sql_blocks "$local_file")
+
     # ---- Check simple dangerous operations ----
-    for op in "${!OP_SEVERITY[@]}"; do
+    for op_index in "${!OP_ELEMENTS[@]}"; do
+        op="${OP_ELEMENTS[$op_index]}"
+        op_severity="${OP_SEVERITIES[$op_index]}"
+        op_risk="${OP_RISKS[$op_index]}"
         # Find all occurrences of <operation ... tableName="xxx" ...> or <operation ... tableName="xxx"/>
         while IFS= read -r table; do
             [[ -z "$table" ]] && continue
@@ -280,7 +530,7 @@ for file in "${CHANGED_FILES[@]}"; do
                     ;;
             esac
 
-            add_violation "${OP_SEVERITY[$op]}" "$file" "$op" "$table" "${OP_RISK[$op]}" "$detail"
+            add_violation "$op_severity" "$file" "$op" "$table" "$op_risk" "$detail"
         done < <(echo "$FLAT_CONTENT" | grep -oP "<${op}[^>]*tableName=\"\K[^\"]*" 2>/dev/null | sort -u || true)
     done
 
@@ -302,6 +552,41 @@ for file in "${CHANGED_FILES[@]}"; do
             fi
         fi
     done < <(echo "$FLAT_CONTENT" | grep -oP '<addColumn[^>]*tableName="\K[^"]+' 2>/dev/null | sort -u || true)
+
+    # ---- Check index creation concurrency (PostgreSQL) ----
+    # A plain CREATE INDEX locks the table against all reads and writes for as
+    # long as the build takes. Only lines this PR touched are reported, so the
+    # many pre-existing <createIndex> changesets stay quiet unless edited.
+    ADDED_LINES_FILE=""
+    if [[ -z "$FILES_OVERRIDE" ]]; then
+        ADDED_LINES_FILE="$(mktemp)"
+        added_lines_of "$file" > "$ADDED_LINES_FILE"
+    fi
+
+    while IFS='|' read -r idx_line idx_kind idx_table idx_detail; do
+        [[ -z "$idx_line" ]] && continue
+        case "$idx_kind" in
+            createIndex)
+                add_violation "BLOCKING" "$file" "createIndex-not-concurrent" "$idx_table" \
+                    "<createIndex> cannot emit CONCURRENTLY; on PostgreSQL it locks the table against reads and writes while the index builds" \
+                    "line: $idx_line, $idx_detail"
+                ;;
+            raw-sql)
+                add_violation "BLOCKING" "$file" "raw-SQL-index-not-concurrent" "$idx_table" \
+                    "CREATE INDEX without CONCURRENTLY locks the table against reads and writes while the index builds" \
+                    "line: $idx_line, $idx_detail"
+                ;;
+            concurrent-in-transaction)
+                add_violation "BLOCKING" "$file" "index-concurrent-in-transaction" "n/a" \
+                    "CREATE INDEX CONCURRENTLY cannot run inside a transaction block; the changeSet needs runInTransaction=\"false\"" \
+                    "line: $idx_line, table: $idx_table, $idx_detail"
+                ;;
+        esac
+    done < <(find_unsafe_index_creation "$local_file" "$ADDED_LINES_FILE")
+
+    if [[ -n "$ADDED_LINES_FILE" ]]; then
+        rm -f "$ADDED_LINES_FILE"
+    fi
 
     # ---- Check raw SQL blocks for dangerous DDL ----
     # Extract text between <sql> and </sql> tags
@@ -328,12 +613,12 @@ echo ""
 TOTAL_VIOLATIONS=${#VIOLATIONS[@]}
 
 if [[ $TOTAL_VIOLATIONS -eq 0 ]]; then
-    echo "No dangerous DDL changes detected."
+    echo "No Liquibase safety violations detected."
     if [[ -n "$OUTPUT_DIR" ]]; then
         cat > "$OUTPUT_DIR/report.md" << 'MDEOF'
 ## Liquibase DDL Safety Check - PASSED
 
-No dangerous DDL changes detected in this PR's Liquibase migrations.
+No Liquibase safety violations detected in this PR's Liquibase migrations.
 All migrations are safe for rolling deployments.
 MDEOF
         echo '{"violations":[],"summary":{"total":0,"critical":0,"warnings":0}}' > "$OUTPUT_DIR/report.json"
@@ -345,8 +630,8 @@ fi
 MD_REPORT=""
 if [[ $BLOCKING_COUNT -gt 0 ]]; then
     MD_REPORT+="## Liquibase DDL Safety Check - BLOCKED"$'\n\n'
-    MD_REPORT+="**${BLOCKING_COUNT} blocking violation(s) found** on critical tables."$'\n'
-    MD_REPORT+="These changes are dangerous for rolling deployments and must be reviewed."$'\n\n'
+    MD_REPORT+="**${BLOCKING_COUNT} blocking violation(s) found**."$'\n'
+    MD_REPORT+="These changes violate Liquibase migration safety rules and must be reviewed."$'\n\n'
 else
     MD_REPORT+="## Liquibase DDL Safety Check - WARNINGS"$'\n\n'
     MD_REPORT+="**${WARNING_COUNT} warning(s) found** (non-blocking)."$'\n\n'
@@ -399,6 +684,8 @@ if [[ $BLOCKING_COUNT -gt 0 ]]; then
     MD_REPORT+="- **Instead of DROP COLUMN**: Mark as deprecated, remove in a future release after all instances are updated"$'\n'
     MD_REPORT+="- **Instead of RENAME COLUMN**: Add new column, backfill, update code, drop old column in a later release"$'\n'
     MD_REPORT+="- **Instead of ADD NOT NULL**: Add as nullable first, backfill defaults, add constraint in a later release"$'\n'
+    MD_REPORT+="- **Instead of DATETIME**: Use \`DATETIME(6)\` to preserve MySQL microsecond precision"$'\n'
+    MD_REPORT+="- **Instead of \`<createIndex>\` / plain \`CREATE INDEX\`**: split the index into two changesets — \`context=\"postgresql\"\` with \`runInTransaction=\"false\"\` running \`CREATE INDEX CONCURRENTLY\` as raw \`<sql>\`, and \`context=\"mysql\"\` with the MySQL form"$'\n'
 fi
 
 # Print to console
@@ -418,7 +705,7 @@ fi
 # Exit code
 if [[ $BLOCKING_COUNT -gt 0 ]]; then
     echo ""
-    echo "FAILED: $BLOCKING_COUNT blocking violation(s) on critical tables."
+    echo "FAILED: $BLOCKING_COUNT blocking violation(s)."
     exit 1
 else
     echo ""

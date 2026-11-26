@@ -23,6 +23,7 @@ import static org.apache.fineract.portfolio.loanproduct.calc.data.LoanInterestSc
 import static org.apache.fineract.portfolio.loanproduct.calc.data.LoanInterestScheduleModelModifiers.EMI_RECALCULATION;
 import static org.apache.fineract.portfolio.loanproduct.calc.data.LoanInterestScheduleModelModifiers.INTEREST_PAUSE_FOR_EMI_CALCULATION;
 import static org.apache.fineract.portfolio.loanproduct.calc.data.LoanInterestScheduleModelModifiers.INTEREST_RECALCULATION_ENABLED;
+import static org.apache.fineract.portfolio.loanproduct.calc.data.LoanInterestScheduleModelModifiers.PRINCIPAL_GRACE_LIFTED;
 
 import jakarta.validation.constraints.NotNull;
 import java.math.BigDecimal;
@@ -40,6 +41,7 @@ import java.util.function.BiConsumer;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.function.Predicate;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.Setter;
@@ -48,6 +50,9 @@ import org.apache.fineract.infrastructure.core.serialization.gson.JsonExclude;
 import org.apache.fineract.infrastructure.core.service.DateUtils;
 import org.apache.fineract.infrastructure.core.service.MathUtil;
 import org.apache.fineract.organisation.monetary.domain.Money;
+import org.apache.fineract.portfolio.common.domain.MonthlyDueDateResolver;
+import org.apache.fineract.portfolio.loanaccount.loanschedule.domain.SemiMonthlyDueDays;
+import org.apache.fineract.portfolio.loanaccount.loanschedule.domain.SemiMonthlyScheduleDates;
 import org.apache.fineract.portfolio.loanproduct.domain.ILoanConfigurationDetails;
 
 @Data
@@ -116,29 +121,108 @@ public class ProgressiveLoanInterestScheduleModel {
     }
 
     /**
-     * Reverses all recorded overdue corrections on this model by subtracting each correction's amount from the
-     * corresponding InterestPeriod's balanceCorrectionAmount.
+     * Reverses recorded overdue corrections on the interest period holding them. A correction without such an interest
+     * period is reversed by a balance change on its date. Corrections whose interest period was removed by
+     * {@link #removeInterestPeriods(RepaymentPeriod, int)} have nothing left to reverse. Clears the correction
+     * tracking.
      */
     public void reverseOverdueCorrections() {
-        for (final OverdueBalanceCorrection oc : overdueCorrections) {
-            changeOutstandingBalanceAndUpdateInterestPeriods(oc.correctionDate(), zero(), oc.amount().negated(), zero());
-        }
+        overdueCorrections.stream().filter(correction -> !correction.interestPeriodRemoved())
+                .forEach(correction -> findInterestPeriodForOverdueCorrection(correction).ifPresentOrElse(
+                        interestPeriod -> interestPeriod.addBalanceCorrectionAmount(correction.amount().negated()),
+                        () -> changeOutstandingBalanceAndUpdateInterestPeriods(correction.correctionDate(), zero(),
+                                correction.amount().negated(), zero())));
         overdueCorrections.clear();
         this.lastOverdueBalanceChange = null;
+    }
+
+    /**
+     * Removes the interest periods of a repayment period from the given index and marks the overdue corrections
+     * recorded on them as removed. Used when a calculation copy is truncated at a date.
+     */
+    public void removeInterestPeriods(final RepaymentPeriod repaymentPeriod, final int fromIndex) {
+        final List<InterestPeriod> interestPeriods = repaymentPeriod.getInterestPeriods();
+        final List<InterestPeriod> removedInterestPeriods = interestPeriods.subList(fromIndex, interestPeriods.size());
+        if (removedInterestPeriods.isEmpty()) {
+            return;
+        }
+        final Predicate<OverdueBalanceCorrection> isOnRemovedInterestPeriod = fromIndex == 0
+                ? correction -> findRepaymentPeriodForOverdueCorrection(correction)
+                        .filter(period -> isSameInstance(period, repaymentPeriod)).isPresent()
+                : correction -> findInterestPeriodForOverdueCorrection(correction).filter(
+                        interestPeriod -> removedInterestPeriods.stream().anyMatch(removed -> isSameInstance(removed, interestPeriod)))
+                        .isPresent();
+        overdueCorrections.replaceAll((final OverdueBalanceCorrection correction) -> !correction.interestPeriodRemoved()
+                && isOnRemovedInterestPeriod.test(correction) ? correction.withInterestPeriodRemoved() : correction);
+        removedInterestPeriods.clear();
+    }
+
+    public void truncateInterestPeriodDueDate(final InterestPeriod interestPeriod, final LocalDate dueDate) {
+        overdueCorrections.replaceAll((final OverdueBalanceCorrection correction) -> {
+            if (findInterestPeriodForOverdueCorrection(correction).filter(period -> isSameInstance(period, interestPeriod)).isEmpty()) {
+                return correction;
+            }
+            return new OverdueBalanceCorrection(dueDate, correction.amount(), correction.affectedRpDueDate(),
+                    interestPeriod.getRepaymentPeriod().getDueDate(), false);
+        });
+        interestPeriod.setDueDate(dueDate);
+    }
+
+    /**
+     * Repayment and interest periods compare by value, but an overdue correction belongs to one period instance. Plain
+     * JDK identity check: the embeddable schedule generator jar does not ship Guava.
+     */
+    @SuppressWarnings("ReferenceEquality")
+    private static boolean isSameInstance(final Object first, final Object second) {
+        return first == second;
+    }
+
+    private Optional<RepaymentPeriod> findRepaymentPeriodForOverdueCorrection(final OverdueBalanceCorrection correction) {
+        if (correction.interestPeriodRemoved()) {
+            return Optional.empty();
+        }
+        return Optional.ofNullable(correction.ownerRpDueDate())
+                .map(dueDate -> repaymentPeriods.stream().filter(period -> period.getDueDate().isEqual(dueDate)).findFirst())
+                .orElseGet(() -> findRepaymentPeriodForBalanceChange(correction.correctionDate()));
+    }
+
+    private Optional<InterestPeriod> findInterestPeriodForOverdueCorrection(final OverdueBalanceCorrection correction) {
+        return findRepaymentPeriodForOverdueCorrection(correction)
+                .flatMap((final RepaymentPeriod period) -> findInterestPeriodEndingOn(period, correction.correctionDate(),
+                        isLastRepaymentPeriod(period) && correction.correctionDate().isEqual(period.getDueDate())));
     }
 
     public ProgressiveLoanInterestScheduleModel deepCopy(final MathContext mc) {
         final ProgressiveLoanInterestScheduleModel copy = new ProgressiveLoanInterestScheduleModel(repaymentPeriods, interestRates,
                 loanProductRelatedDetail, installmentAmountInMultiplesOf, mc, false);
         copy.overdueCorrections = new ArrayList<>(this.overdueCorrections);
+        copy.copyPrincipalGraceLiftFrom(this);
         return copy;
     }
 
     public ProgressiveLoanInterestScheduleModel copyWithoutPaidAmounts() {
         final List<RepaymentPeriod> repaymentPeriodCopies = copyRepaymentPeriods(repaymentPeriods,
                 (previousPeriod, repaymentPeriod) -> RepaymentPeriod.copyWithoutPaidAmounts(previousPeriod, repaymentPeriod, mc));
-        return new ProgressiveLoanInterestScheduleModel(repaymentPeriodCopies, interestRates, loanProductRelatedDetail,
-                installmentAmountInMultiplesOf, mc, true);
+        final ProgressiveLoanInterestScheduleModel copy = new ProgressiveLoanInterestScheduleModel(repaymentPeriodCopies, interestRates,
+                loanProductRelatedDetail, installmentAmountInMultiplesOf, mc, true);
+        copy.copyPrincipalGraceLiftFrom(this);
+        return copy;
+    }
+
+    /**
+     * Re-amortization and re-aging replace principal grace. Later recalculations must not rebuild it from the product
+     * grace setting.
+     */
+    public void liftPrincipalGrace() {
+        modifiers.put(PRINCIPAL_GRACE_LIFTED, true);
+    }
+
+    public boolean isPrincipalGraceLifted() {
+        return Boolean.TRUE.equals(modifiers.get(PRINCIPAL_GRACE_LIFTED));
+    }
+
+    private void copyPrincipalGraceLiftFrom(final ProgressiveLoanInterestScheduleModel source) {
+        modifiers.put(PRINCIPAL_GRACE_LIFTED, source.isPrincipalGraceLifted());
     }
 
     private List<RepaymentPeriod> copyRepaymentPeriods(final List<RepaymentPeriod> repaymentPeriods,
@@ -272,8 +356,14 @@ public class ProgressiveLoanInterestScheduleModel {
             var lastInterestPeriod = repaymentPeriod.getLastInterestPeriod();
             return lastInterestPeriod.getLength() == 0 ? Optional.of(lastInterestPeriod) : Optional.empty();
         }
-        return repaymentPeriod.getInterestPeriods().stream()//
-                .filter(interestPeriod -> balanceChangeDate.isEqual(interestPeriod.getDueDate()))//
+        return findInterestPeriodEndingOn(repaymentPeriod, balanceChangeDate, false);
+    }
+
+    private Optional<InterestPeriod> findInterestPeriodEndingOn(final RepaymentPeriod repaymentPeriod, final LocalDate dueDate,
+            final boolean lastMatch) {
+        final List<InterestPeriod> interestPeriods = lastMatch ? repaymentPeriod.getInterestPeriods().reversed()
+                : repaymentPeriod.getInterestPeriods();
+        return interestPeriods.stream().filter((final InterestPeriod interestPeriod) -> dueDate.isEqual(interestPeriod.getDueDate()))
                 .findFirst();
     }
 
@@ -459,9 +549,14 @@ public class ProgressiveLoanInterestScheduleModel {
 
     public Function<Long, LocalDate> resolveRepaymentPeriodLengthGeneratorFunction(final LocalDate instance) {
         return switch (loanProductRelatedDetail.getRepaymentPeriodFrequencyType()) {
-            case MONTHS -> instance::plusMonths;
+            case MONTHS ->
+                months -> MonthlyDueDateResolver.plusMonths(instance, months, loanProductRelatedDetail.getMonthEndDueDateStrategy());
             case WEEKS -> instance::plusWeeks;
             case DAYS -> instance::plusDays;
+            case SEMI_MONTHLY -> {
+                final SemiMonthlyDueDays dueDays = loanProductRelatedDetail.semiMonthlyDueDays();
+                yield periods -> SemiMonthlyScheduleDates.plusPeriods(instance, periods, dueDays);
+            }
             default -> throw new UnsupportedOperationException();
         };
     }

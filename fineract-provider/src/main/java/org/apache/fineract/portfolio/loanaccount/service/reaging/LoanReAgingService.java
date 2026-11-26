@@ -102,7 +102,7 @@ public class LoanReAgingService {
     private final LoanCapitalizedIncomeBalanceRepository loanCapitalizedIncomeBalanceRepository;
 
     public CommandProcessingResult reAge(final Long loanId, final JsonCommand command) {
-        final Loan loan = loanAssembler.assembleFrom(loanId);
+        final Loan loan = loanAssembler.assembleFromInUserScope(loanId);
         reAgingValidator.validateReAge(loan, command);
         BigDecimal userProvidedTxnAmount = command.bigDecimalValueOfParameterNamed(LoanReAgingApiConstants.transactionAmountParamName);
 
@@ -167,7 +167,7 @@ public class LoanReAgingService {
     }
 
     public CommandProcessingResult undoReAge(Long loanId, JsonCommand command) {
-        Loan loan = loanAssembler.assembleFrom(loanId);
+        Loan loan = loanAssembler.assembleFromInUserScope(loanId);
         reAgingValidator.validateUndoReAge(loan);
 
         Map<String, Object> changes = new LinkedHashMap<>();
@@ -208,7 +208,9 @@ public class LoanReAgingService {
                 || LoanReAgeInterestHandlingType.EQUAL_AMORTIZATION_FULL_INTEREST
                         .equals(reAgeTransaction.getLoanReAgeParameter().getInterestHandlingType())
                 || LoanReAgeInterestHandlingType.EQUAL_AMORTIZATION_PAYABLE_INTEREST
-                        .equals(reAgeTransaction.getLoanReAgeParameter().getInterestHandlingType())) {
+                        .equals(reAgeTransaction.getLoanReAgeParameter().getInterestHandlingType())
+                || loan.getActiveLoanTermVariations().stream()
+                        .anyMatch(ltv -> ltv.getTermApplicableFrom().isAfter(reAgeTransaction.getSubmittedOnDate()))) {
             final ScheduleGeneratorDTO scheduleGeneratorDTO = loanUtilService.buildScheduleGeneratorDTO(loan, null);
             loanScheduleService.regenerateRepaymentSchedule(loan, scheduleGeneratorDTO);
             if (withPostTransactionChecks) {

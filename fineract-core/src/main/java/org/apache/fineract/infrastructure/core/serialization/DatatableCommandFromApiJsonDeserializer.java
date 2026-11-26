@@ -64,6 +64,7 @@ import jakarta.validation.constraints.NotNull;
 import java.lang.reflect.Type;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -315,7 +316,9 @@ public class DatatableCommandFromApiJsonDeserializer {
             validator = validator.reset().parameter(API_FIELD_LENGTH).value(length);
             if (jdbcType.hasPrecision(databaseTypeResolver.databaseType())) {
                 if (jdbcType.isStringType() && length == null) {
-                    validator.failWithCode("must.be.provided.when.type.is.String");
+                    final String columnName = this.fromApiJsonHelper.extractStringNamed(API_FIELD_NAME, column);
+                    validator.failWithCodeAndMessage("must.be.provided.when.type.is.String",
+                            "Column length is required for String columns (" + columnName + ").", columnName);
                 }
                 validator.ignoreIfNull().positiveAmount();
             } // else, the precision is ignored
@@ -333,7 +336,7 @@ public class DatatableCommandFromApiJsonDeserializer {
     }
 
     private static JdbcJavaType mapApiTypeToJdbcType(@NotNull String apiType, boolean fail) {
-        switch (apiType.toLowerCase()) {
+        switch (apiType.toLowerCase(Locale.ROOT)) {
             case API_FIELD_TYPE_STRING:
                 return VARCHAR;
             case API_FIELD_TYPE_NUMBER, API_FIELD_TYPE_DROPDOWN:

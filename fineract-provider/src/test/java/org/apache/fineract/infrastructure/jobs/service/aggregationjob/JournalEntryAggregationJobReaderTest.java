@@ -19,7 +19,11 @@
 package org.apache.fineract.infrastructure.jobs.service.aggregationjob;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
 
 import com.zaxxer.hikari.HikariDataSource;
@@ -36,6 +40,7 @@ import org.apache.fineract.infrastructure.businessdate.domain.BusinessDateType;
 import org.apache.fineract.infrastructure.core.domain.FineractPlatformTenant;
 import org.apache.fineract.infrastructure.core.domain.FineractPlatformTenantConnection;
 import org.apache.fineract.infrastructure.core.service.ThreadLocalContextUtil;
+import org.apache.fineract.infrastructure.core.service.database.DatabaseTypeResolver;
 import org.apache.fineract.infrastructure.core.service.migration.TenantDataSourceFactory;
 import org.apache.fineract.infrastructure.jobs.service.aggregationjob.data.JournalEntryAggregationSummaryData;
 import org.junit.jupiter.api.AfterEach;
@@ -44,9 +49,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.batch.core.JobExecution;
+import org.springframework.batch.core.job.JobExecution;
 import org.springframework.batch.core.scope.context.JobSynchronizationManager;
-import org.springframework.batch.item.ExecutionContext;
+import org.springframework.batch.infrastructure.item.ExecutionContext;
 
 @ExtendWith(MockitoExtension.class)
 public class JournalEntryAggregationJobReaderTest {
@@ -60,6 +65,8 @@ public class JournalEntryAggregationJobReaderTest {
     @Mock
     private ExecutionContext executionContext;
     @Mock
+    private DatabaseTypeResolver databaseTypeResolver;
+    @Mock
     private HikariDataSource dataSource;
     @Mock
     private ResultSet resultSet;
@@ -71,6 +78,7 @@ public class JournalEntryAggregationJobReaderTest {
     public void setUp() {
         tenant = new FineractPlatformTenant(1L, "default", "Default Tenant", "default", fineractPlatformTenantConnection);
         ThreadLocalContextUtil.setTenant(tenant);
+        lenient().when(tenantDataSourceFactory.create(tenant)).thenReturn(dataSource);
         ThreadLocalContextUtil
                 .setBusinessDates(new HashMap<>(Map.of(BusinessDateType.BUSINESS_DATE, LocalDate.now(ZoneId.systemDefault()))));
     }
@@ -89,7 +97,7 @@ public class JournalEntryAggregationJobReaderTest {
         setupResultSetMocks();
 
         // Act
-        reader = new JournalEntryAggregationJobReader(tenantDataSourceFactory);
+        reader = new JournalEntryAggregationJobReader(tenantDataSourceFactory, databaseTypeResolver);
         JournalEntryAggregationSummaryData result = invokeMapRowMethod(resultSet, 1);
 
         // Assert
@@ -101,6 +109,7 @@ public class JournalEntryAggregationJobReaderTest {
         assertEquals("USD", result.getCurrencyCode(), "Currency code should match");
         assertEquals(LocalDate.of(2023, 6, 15), result.getAggregatedOnDate(), "Aggregated date should match");
         assertEquals(Long.valueOf(500L), result.getExternalOwnerId(), "Asset owner should match");
+        assertEquals("originator1, originator2", result.getOriginatorExternalIds(), "Originator external IDs should match");
         assertEquals(new BigDecimal("1000.00"), result.getDebitAmount(), "Debit amount should match");
         assertEquals(Boolean.FALSE, result.getManualEntry(), "Manual entry should be false");
         assertEquals(ThreadLocalContextUtil.getBusinessDate(), result.getSubmittedOnDate(), "Submitted on date should match business date");
@@ -112,11 +121,63 @@ public class JournalEntryAggregationJobReaderTest {
         setupResultSetMocksWithNullOwner();
 
         // Act
-        reader = new JournalEntryAggregationJobReader(tenantDataSourceFactory);
+        reader = new JournalEntryAggregationJobReader(tenantDataSourceFactory, databaseTypeResolver);
         JournalEntryAggregationSummaryData result = invokeMapRowMethod(resultSet, 1);
 
         // Assert
         assertEquals(Long.valueOf(0L), result.getExternalOwnerId(), "Asset owner should be 0 when null in resultset");
+    }
+
+    @Test
+    public void testAggregationQueryResolvesWorkingCapitalLoanProductAndOriginatorsOnPostgres() throws Exception {
+        when(databaseTypeResolver.isMySQL()).thenReturn(false);
+
+        String query = invokeBuildAggregationQuery();
+
+        assertWorkingCapitalLoanJoins(query);
+        assertTrue(query.contains("STRING_AGG(DISTINCT mlo.external_id, ', ' ORDER BY mlo.external_id)"),
+                "PostgreSQL query should aggregate originator external IDs with STRING_AGG");
+    }
+
+    @Test
+    public void testAggregationQueryResolvesWorkingCapitalLoanProductAndOriginatorsOnMySQL() throws Exception {
+        when(databaseTypeResolver.isMySQL()).thenReturn(true);
+
+        String query = invokeBuildAggregationQuery();
+
+        assertWorkingCapitalLoanJoins(query);
+        assertTrue(query.contains("GROUP_CONCAT(DISTINCT mlo.external_id ORDER BY mlo.external_id SEPARATOR ', ')"),
+                "MySQL query should aggregate originator external IDs with GROUP_CONCAT");
+    }
+
+    private void assertWorkingCapitalLoanJoins(String query) {
+        String normalized = query.replaceAll("\\s+", " ");
+        assertTrue(normalized.contains(
+                "LEFT JOIN m_wc_loan wc_loan ON wc_loan.id = acc_gl_journal_entry.entity_id AND acc_gl_journal_entry.entity_type_enum = 6"),
+                "Query should join working capital loans for entity type 6");
+        assertTrue(normalized.contains(
+                "LEFT JOIN m_wc_loan_product wc_loan_product ON wc_loan_product.id = wc_loan.product_id AND acc_gl_journal_entry.entity_type_enum = 6"),
+                "Query should join working capital loan products for entity type 6");
+        assertTrue(normalized.contains("share_product.id, wc_loan_product.id ) AS productId"),
+                "Product ID should fall back to the working capital loan product");
+        assertTrue(normalized.contains("CASE acc_gl_journal_entry.entity_type_enum WHEN 1 THEN (SELECT "),
+                "Loan originators should only be read for loan journal entries");
+        assertTrue(
+                normalized.contains("FROM m_loan_originator_mapping mlom JOIN m_loan_originator mlo ON mlo.id = mlom.originator_id"
+                        + " WHERE mlom.loan_id = loan.id) WHEN 6 THEN (SELECT "),
+                "Working capital loan originators should only be read for working capital loan journal entries");
+        assertTrue(
+                normalized.contains("FROM m_wc_loan_originator_mapping mlom JOIN m_loan_originator mlo ON mlo.id = mlom.originator_id"
+                        + " WHERE mlom.loan_id = wc_loan.id) END AS originatorExternalIds"),
+                "Query should read working capital loan originators");
+        assertFalse(query.contains("{aggregateFunction}"), "Every aggregate function placeholder should be resolved");
+    }
+
+    private String invokeBuildAggregationQuery() throws Exception {
+        Method buildAggregationQuery = JournalEntryAggregationJobReader.class.getDeclaredMethod("buildAggregationQuery",
+                DatabaseTypeResolver.class);
+        buildAggregationQuery.setAccessible(true);
+        return (String) buildAggregationQuery.invoke(null, databaseTypeResolver);
     }
 
     private void setupResultSetMocks() throws SQLException {
@@ -126,6 +187,7 @@ public class JournalEntryAggregationJobReaderTest {
         when(resultSet.getDate("aggregatedOnDate")).thenReturn(Date.valueOf(LocalDate.of(2023,6,15)));
         when(resultSet.findColumn("externalOwner")).thenReturn(5);
         when(resultSet.getLong(5)).thenReturn(500L);
+        when(resultSet.getString("originatorExternalIds")).thenReturn("originator1, originator2");
         when(resultSet.getLong("officeId")).thenReturn(1L);
         when(resultSet.getLong("entityTypeEnum")).thenReturn(1L);
         when(resultSet.getBigDecimal("debitAmount")).thenReturn(new BigDecimal("1000.00"));
@@ -137,6 +199,7 @@ public class JournalEntryAggregationJobReaderTest {
         when(resultSet.getLong("productId")).thenReturn(100L);
         when(resultSet.getString("currencyCode")).thenReturn("USD");
         when(resultSet.getDate("aggregatedOnDate")).thenReturn(Date.valueOf(LocalDate.of(2023,6,15)));
+        when(resultSet.getString("originatorExternalIds")).thenReturn("originator1");
         when(resultSet.getLong("officeId")).thenReturn(1L);
         when(resultSet.getLong("entityTypeEnum")).thenReturn(1L);
         when(resultSet.getBigDecimal("debitAmount")).thenReturn(new BigDecimal("1000.00"));
@@ -147,5 +210,41 @@ public class JournalEntryAggregationJobReaderTest {
         Method mapRowMethod = JournalEntryAggregationJobReader.class.getDeclaredMethod("mapRow", ResultSet.class, int.class);
         mapRowMethod.setAccessible(true);
         return (JournalEntryAggregationSummaryData) mapRowMethod.invoke(reader, rs, rowNum);
+    }
+
+    /**
+     * Verifies that {@code mapRow} preserves a {@code NULL} originator value as-is instead of coercing it to an empty
+     * string, so loans without an originator mapping are persisted as {@code NULL} in
+     * {@code m_journal_entry_aggregation_summary}.
+     **/
+    @Test
+    public void testRowMappingWithNullOriginatorExternalIds() throws Exception {
+        // Arrange
+        setupResultSetMocksWithNullOriginator();
+
+        // Act
+        reader = new JournalEntryAggregationJobReader(tenantDataSourceFactory, databaseTypeResolver);
+        JournalEntryAggregationSummaryData result = invokeMapRowMethod(resultSet, 1);
+
+        // Assert
+        assertNull(result.getOriginatorExternalIds(),
+                "Originator external IDs should be stored as null, not blank, when a loan has no originator mapping");
+    }
+
+    /**
+     * Verifies that {@code mapRow} preserves a {@code NULL} originator value as-is instead of coercing it to an empty
+     * string, so loans without an originator mapping are persisted as {@code NULL} in
+     * {@code m_journal_entry_aggregation_summary}.
+     */
+    private void setupResultSetMocksWithNullOriginator() throws SQLException {
+        when(resultSet.getLong("glAccountId")).thenReturn(1001L);
+        when(resultSet.getLong("productId")).thenReturn(100L);
+        when(resultSet.getString("currencyCode")).thenReturn("USD");
+        when(resultSet.getDate("aggregatedOnDate")).thenReturn(Date.valueOf(LocalDate.of(2023,6,15)));
+        when(resultSet.findColumn("externalOwner")).thenReturn(5);
+        when(resultSet.getLong("officeId")).thenReturn(1L);
+        when(resultSet.getLong("entityTypeEnum")).thenReturn(1L);
+        when(resultSet.getBigDecimal("debitAmount")).thenReturn(new BigDecimal("1000.00"));
+        when(resultSet.getBigDecimal("creditAmount")).thenReturn(new BigDecimal("800.00"));
     }
 }

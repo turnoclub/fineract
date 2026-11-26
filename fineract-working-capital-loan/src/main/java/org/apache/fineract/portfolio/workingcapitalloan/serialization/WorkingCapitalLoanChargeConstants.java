@@ -29,4 +29,21 @@ public final class WorkingCapitalLoanChargeConstants {
     public static final String localeParamName = "locale";
     public static final String dateFormatParamName = "dateFormat";
     public static final String externalIdParamName = "externalId";
+
+    // Adjustment parameters
+    public static final String transactionDateParamName = "transactionDate";
+    public static final String noteParamName = "note";
+    public static final String paymentDetailsParamName = "paymentDetails";
+    public static final String paymentTypeIdParamName = "paymentTypeId";
+    public static final String accountNumberParamName = "accountNumber";
+    public static final String checkNumberParamName = "checkNumber";
+    public static final String routingCodeParamName = "routingCode";
+    public static final String receiptNumberParamName = "receiptNumber";
+    public static final String bankNumberParamName = "bankNumber";
+
+    // Adjustment command
+    public static final String ADJUSTMENT_LOAN_CHARGE_COMMAND = "adjustment";
+
+    // Waiver command
+    public static final String WAIVE_LOAN_CHARGE_COMMAND = "waive";
 }

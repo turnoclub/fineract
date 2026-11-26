@@ -45,6 +45,7 @@ import org.apache.commons.lang3.StringUtils;
 import org.apache.fineract.commands.domain.CommandWrapper;
 import org.apache.fineract.commands.service.CommandWrapperBuilder;
 import org.apache.fineract.commands.service.PortfolioCommandSourceWritePlatformService;
+import org.apache.fineract.infrastructure.core.annotation.AlternativeOperationId;
 import org.apache.fineract.infrastructure.core.api.ApiParameterHelper;
 import org.apache.fineract.infrastructure.core.api.ApiRequestParameterHelper;
 import org.apache.fineract.infrastructure.core.data.CommandProcessingResult;
@@ -55,10 +56,11 @@ import org.apache.fineract.infrastructure.core.service.Page;
 import org.apache.fineract.infrastructure.core.service.SearchParameters;
 import org.apache.fineract.infrastructure.security.service.PlatformSecurityContext;
 import org.apache.fineract.portfolio.charge.data.ChargeData;
-import org.apache.fineract.portfolio.charge.service.ChargeReadPlatformService;
+import org.apache.fineract.portfolio.client.contract.ClientApplicableChargeReadService;
 import org.apache.fineract.portfolio.client.data.ClientChargeData;
 import org.apache.fineract.portfolio.client.data.ClientTransactionData;
 import org.apache.fineract.portfolio.client.service.ClientChargeReadPlatformService;
+import org.apache.fineract.portfolio.client.service.ClientReadPlatformService;
 import org.apache.fineract.portfolio.client.service.ClientTransactionReadPlatformService;
 import org.springframework.stereotype.Component;
 import org.springframework.util.CollectionUtils;
@@ -72,12 +74,13 @@ import org.springframework.util.CollectionUtils;
 public class ClientChargesApiResource {
 
     private final PlatformSecurityContext context;
-    private final ChargeReadPlatformService chargeReadPlatformService;
+    private final ClientApplicableChargeReadService chargeReadService;
     private final ClientChargeReadPlatformService clientChargeReadPlatformService;
     private final ClientTransactionReadPlatformService clientTransactionReadPlatformService;
     private final DefaultToApiJsonSerializer<ClientChargeData> toApiJsonSerializer;
     private final ApiRequestParameterHelper apiRequestParameterHelper;
     private final PortfolioCommandSourceWritePlatformService commandsSourceWritePlatformService;
+    private final ClientReadPlatformService clientReadPlatformService;
 
     @GET
     @Produces({ MediaType.APPLICATION_JSON })
@@ -114,12 +117,14 @@ public class ClientChargesApiResource {
     @Path("template")
     @Produces({ MediaType.APPLICATION_JSON })
     @Operation(summary = "Retrieve client charge template", operationId = "retrieveTemplateClientCharge")
+    @AlternativeOperationId("retrieveTemplate_4")
     public String retrieveTemplate(@Context final UriInfo uriInfo,
             @PathParam("clientId") @Parameter(description = "clientId") final Long clientId) {
 
         this.context.authenticatedUser().validateHasReadPermission(ClientApiConstants.CLIENT_CHARGES_RESOURCE_NAME);
 
-        final Collection<ChargeData> chargeOptions = this.chargeReadPlatformService.retrieveAllChargesApplicableToClients();
+        final Long clientOfficeId = this.clientReadPlatformService.retrieveOne(clientId).getOfficeId();
+        final Collection<ChargeData> chargeOptions = this.chargeReadService.retrieveAllChargesApplicableToClients(clientOfficeId);
         final ClientChargeData clientChargeData = ClientChargeData.template(chargeOptions);
 
         final ApiRequestJsonSerializationSettings settings = this.apiRequestParameterHelper.process(uriInfo.getQueryParameters());
@@ -132,6 +137,7 @@ public class ClientChargesApiResource {
     @Produces({ MediaType.APPLICATION_JSON })
     @Operation(summary = "Retrieve a Client Charge", operationId = "retrieveOneClientCharge", description = "Example Requests:\n"
             + "clients/1/charges/1\n" + "\n" + "\n" + "clients/1/charges/1?fields=name,id")
+    @AlternativeOperationId("retrieveClientCharge")
     @ApiResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = ClientChargesApiResourceSwagger.GetClientsClientIdChargesResponse.GetClientsChargesPageItems.class)))
     public String retrieveClientCharge(@PathParam("clientId") @Parameter(description = "clientId") final Long clientId,
             @PathParam("chargeId") @Parameter(description = "chargeId") final Long chargeId, @Context final UriInfo uriInfo) {
@@ -162,6 +168,7 @@ public class ClientChargesApiResource {
     @Produces({ MediaType.APPLICATION_JSON })
     @Operation(summary = "Add Client Charge", operationId = "createClientCharge", description = " This API associates a Client charge with an implicit Client account\n"
             + "Mandatory Fields : \n" + "chargeId and dueDate  \n" + "Optional Fields : \n" + "amount")
+    @AlternativeOperationId("applyClientCharge")
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = ClientChargesApiResourceSwagger.PostClientsClientIdChargesRequest.class)))
     @ApiResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = ClientChargesApiResourceSwagger.PostClientsClientIdChargesResponse.class)))
     public String applyClientCharge(@PathParam("clientId") @Parameter(description = "clientId") final Long clientId,

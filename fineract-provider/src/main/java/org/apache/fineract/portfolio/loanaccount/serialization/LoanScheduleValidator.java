@@ -56,6 +56,7 @@ public final class LoanScheduleValidator {
             LoanApiConstants.interestRatePerPeriodParameterName, LoanApiConstants.repaymentEveryParameterName,
             LoanApiConstants.numberOfRepaymentsParameterName, LoanApiConstants.loanTermFrequencyParameterName,
             LoanApiConstants.loanTermFrequencyTypeParameterName, LoanApiConstants.repaymentFrequencyTypeParameterName,
+            LoanApiConstants.FIRST_REPAYMENT_DAY_OF_MONTH, LoanApiConstants.SECOND_REPAYMENT_DAY_OF_MONTH,
             LoanApiConstants.amortizationTypeParameterName, LoanApiConstants.interestTypeParameterName,
             LoanApiConstants.interestCalculationPeriodTypeParameterName,
             LoanProductConstants.ALLOW_PARTIAL_PERIOD_INTEREST_CALCUALTION_PARAM_NAME,
@@ -76,7 +77,8 @@ public final class LoanScheduleValidator {
             LoanProductConstants.FIXED_LENGTH, LoanProductConstants.ENABLE_INSTALLMENT_LEVEL_DELINQUENCY,
             LoanProductConstants.ENABLE_DOWN_PAYMENT, LoanProductConstants.DISBURSED_AMOUNT_PERCENTAGE_DOWN_PAYMENT,
             LoanProductConstants.ENABLE_AUTO_REPAYMENT_DOWN_PAYMENT, LoanProductConstants.INTEREST_RECOGNITION_ON_DISBURSEMENT_DATE,
-            LoanProductConstants.ALLOW_FULL_TERM_FOR_TRANCHE_PARAM_NAME, LoanApiConstants.REPAYMENT_START_DATE_TYPE));
+            LoanProductConstants.ALLOW_FULL_TERM_FOR_TRANCHE_PARAM_NAME, LoanApiConstants.REPAYMENT_START_DATE_TYPE,
+            LoanApiConstants.daysInYearCustomStrategyParameterName));
 
     private final FromJsonHelper fromApiJsonHelper;
 

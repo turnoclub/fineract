@@ -38,6 +38,7 @@ import org.apache.commons.lang3.StringUtils;
 import org.apache.fineract.infrastructure.codes.domain.CodeValue;
 import org.apache.fineract.infrastructure.codes.domain.CodeValueRepository;
 import org.apache.fineract.infrastructure.configuration.domain.ConfigurationDomainService;
+import org.apache.fineract.infrastructure.configuration.service.BackdatedTransactionValidationService;
 import org.apache.fineract.infrastructure.core.api.JsonCommand;
 import org.apache.fineract.infrastructure.core.data.ApiParameterError;
 import org.apache.fineract.infrastructure.core.data.DataValidatorBuilder;
@@ -94,7 +95,7 @@ import org.apache.fineract.portfolio.loanaccount.exception.LoanRepaymentSchedule
 import org.apache.fineract.portfolio.loanaccount.loanschedule.domain.LoanScheduleType;
 import org.apache.fineract.portfolio.loanaccount.service.LoanUtilService;
 import org.apache.fineract.portfolio.loanproduct.domain.LoanProduct;
-import org.springframework.lang.NonNull;
+import org.jspecify.annotations.NonNull;
 import org.springframework.stereotype.Component;
 
 @Component("loanTransactionValidator")
@@ -113,6 +114,7 @@ public class LoanTransactionValidatorImpl implements LoanTransactionValidator {
     private final LoanDisbursementValidator loanDisbursementValidator;
     private final CodeValueRepository codeValueRepository;
     private final ConfigurationDomainService configurationDomainService;
+    private final BackdatedTransactionValidationService backdatedTransactionValidationService;
 
     private void throwExceptionIfValidationWarningsExist(final List<ApiParameterError> dataValidationErrors) {
         if (!dataValidationErrors.isEmpty()) {
@@ -153,6 +155,17 @@ public class LoanTransactionValidatorImpl implements LoanTransactionValidator {
                     .extractBigDecimalWithLocaleNamed(LoanApiConstants.fixedEmiAmountParameterName, element);
             baseDataValidator.reset().parameter(LoanApiConstants.fixedEmiAmountParameterName).value(emiAmount).ignoreIfNull()
                     .positiveAmount().notGreaterThanMax(principal);
+
+            final BigDecimal downPaymentFeeAmount = this.fromApiJsonHelper
+                    .extractBigDecimalWithLocaleNamed(LoanApiConstants.downPaymentFeeAmountParameterName, element);
+            baseDataValidator.reset().parameter(LoanApiConstants.downPaymentFeeAmountParameterName).value(downPaymentFeeAmount)
+                    .ignoreIfNull().positiveAmount();
+            if (downPaymentFeeAmount != null && Boolean.TRUE
+                    .equals(this.fromApiJsonHelper.extractBooleanNamed(LoanApiConstants.skipDownPaymentFeeParameterName, element))) {
+                baseDataValidator.reset().parameter(LoanApiConstants.downPaymentFeeAmountParameterName).value(downPaymentFeeAmount)
+                        .failWithCodeAndMessage("cannot.be.passed.with.skipDownPaymentFee",
+                                "Down payment fee amount cannot be passed together with skipDownPaymentFee.");
+            }
 
             validatePaymentDetails(baseDataValidator, element);
 
@@ -348,6 +361,7 @@ public class LoanTransactionValidatorImpl implements LoanTransactionValidator {
         final JsonElement element = this.fromApiJsonHelper.parse(json);
         final LocalDate transactionDate = this.fromApiJsonHelper.extractLocalDateNamed("transactionDate", element);
         baseDataValidator.reset().parameter("transactionDate").value(transactionDate).notNull();
+        this.backdatedTransactionValidationService.validateTransactionDate(transactionDate);
 
         final BigDecimal transactionAmount = this.fromApiJsonHelper.extractBigDecimalWithLocaleNamed("transactionAmount", element);
         baseDataValidator.reset().parameter("transactionAmount").value(transactionAmount).notNull().zeroOrPositiveAmount();
@@ -423,6 +437,7 @@ public class LoanTransactionValidatorImpl implements LoanTransactionValidator {
         final JsonElement element = this.fromApiJsonHelper.parse(json);
         final LocalDate transactionDate = this.fromApiJsonHelper.extractLocalDateNamed("transactionDate", element);
         baseDataValidator.reset().parameter("transactionDate").value(transactionDate).notNull();
+        this.backdatedTransactionValidationService.validateTransactionDate(transactionDate);
 
         final String note = this.fromApiJsonHelper.extractStringNamed("note", element);
         baseDataValidator.reset().parameter("note").value(note).notExceedingLengthOf(1000);
@@ -455,6 +470,7 @@ public class LoanTransactionValidatorImpl implements LoanTransactionValidator {
         final JsonElement element = fromApiJsonHelper.parse(json);
         final LocalDate transactionDate = fromApiJsonHelper.extractLocalDateNamed("transactionDate", element);
         baseDataValidator.reset().parameter("transactionDate").value(transactionDate).notNull();
+        this.backdatedTransactionValidationService.validateTransactionDate(transactionDate);
 
         final String note = fromApiJsonHelper.extractStringNamed("note", element);
         baseDataValidator.reset().parameter("note").value(note).ignoreIfNull().notExceedingLengthOf(1000);
@@ -609,6 +625,7 @@ public class LoanTransactionValidatorImpl implements LoanTransactionValidator {
         final JsonElement element = this.fromApiJsonHelper.parse(json);
         final LocalDate transactionDate = this.fromApiJsonHelper.extractLocalDateNamed("transactionDate", element);
         baseDataValidator.reset().parameter("transactionDate").value(transactionDate).notNull();
+        this.backdatedTransactionValidationService.validateTransactionDate(transactionDate);
 
         final BigDecimal transactionAmount = this.fromApiJsonHelper.extractBigDecimalWithLocaleNamed("transactionAmount", element);
         baseDataValidator.reset().parameter("transactionAmount").value(transactionAmount).notNull().positiveAmount();
@@ -642,6 +659,7 @@ public class LoanTransactionValidatorImpl implements LoanTransactionValidator {
         final JsonElement element = this.fromApiJsonHelper.parse(json);
         final LocalDate transactionDate = this.fromApiJsonHelper.extractLocalDateNamed("transactionDate", element);
         baseDataValidator.reset().parameter("transactionDate").value(transactionDate).notNull();
+        this.backdatedTransactionValidationService.validateTransactionDate(transactionDate);
 
         final String note = this.fromApiJsonHelper.extractStringNamed("note", element);
         baseDataValidator.reset().parameter("note").value(note).notExceedingLengthOf(1000);
@@ -966,12 +984,15 @@ public class LoanTransactionValidatorImpl implements LoanTransactionValidator {
         if (isAccountTransfer) {
             disbursementParameters = new HashSet<>(Arrays.asList("actualDisbursementDate", "externalId", "note", "locale", "dateFormat",
                     LoanApiConstants.principalDisbursedParameterName, LoanApiConstants.fixedEmiAmountParameterName,
-                    LoanApiConstants.disbursementNetDisbursalAmountParameterName));
+                    LoanApiConstants.disbursementNetDisbursalAmountParameterName, LoanApiConstants.ORIGINATORS_PARAM,
+                    LoanApiConstants.skipDownPaymentFeeParameterName, LoanApiConstants.downPaymentFeeAmountParameterName));
         } else {
             disbursementParameters = new HashSet<>(Arrays.asList("actualDisbursementDate", "externalId", "note", "locale", "dateFormat",
                     "paymentTypeId", "accountNumber", "checkNumber", "routingCode", "receiptNumber", "bankNumber", "adjustRepaymentDate",
                     LoanApiConstants.principalDisbursedParameterName, LoanApiConstants.fixedEmiAmountParameterName,
-                    LoanApiConstants.postDatedChecks, LoanApiConstants.disbursementNetDisbursalAmountParameterName));
+                    LoanApiConstants.postDatedChecks, LoanApiConstants.disbursementNetDisbursalAmountParameterName,
+                    LoanApiConstants.ORIGINATORS_PARAM, LoanApiConstants.skipDownPaymentFeeParameterName,
+                    LoanApiConstants.downPaymentFeeAmountParameterName));
         }
         return disbursementParameters;
     }
@@ -992,6 +1013,7 @@ public class LoanTransactionValidatorImpl implements LoanTransactionValidator {
         final JsonElement element = this.fromApiJsonHelper.parse(json);
         final LocalDate transactionDate = this.fromApiJsonHelper.extractLocalDateNamed("transactionDate", element);
         baseDataValidator.reset().parameter("transactionDate").value(transactionDate).notNull();
+        this.backdatedTransactionValidationService.validateTransactionDate(transactionDate);
 
         final BigDecimal transactionAmount = this.fromApiJsonHelper.extractBigDecimalWithLocaleNamed("transactionAmount", element);
         baseDataValidator.reset().parameter("transactionAmount").value(transactionAmount).notNull().positiveAmount();

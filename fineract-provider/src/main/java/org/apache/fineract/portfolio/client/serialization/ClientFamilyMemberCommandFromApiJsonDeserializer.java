@@ -63,7 +63,6 @@ public final class ClientFamilyMemberCommandFromApiJsonDeserializer {
             Arrays.asList(ID, CLIENT_ID, FIRST_NAME, MIDDLE_NAME, LAST_NAME, QUALIFICATION, MOBILE_NUMBER, AGE, IS_DEPENDENT,
                     RELATIONSHIP_ID, MARITAL_STATUS_ID, GENDER_ID, DATE_OF_BIRTH, PROFESSION_ID, LOCALE, DATE_FORMAT, FAMILY_MEMBERS));
     public static final String FAMILY_MEMBERS1 = "FamilyMembers";
-    public static final String RELATION_SHIP_ID = "relationShipId";
     private final FromJsonHelper fromApiJsonHelper;
 
     @Autowired
@@ -148,12 +147,12 @@ public final class ClientFamilyMemberCommandFromApiJsonDeserializer {
             baseDataValidator.reset().parameter(IS_DEPENDENT).value(isDependent).notNull().notBlank().notExceedingLengthOf(100);
         }
 
-        if (this.fromApiJsonHelper.extractLongNamed(RELATION_SHIP_ID, element) != null) {
-            final long relationShipId = this.fromApiJsonHelper.extractLongNamed(RELATION_SHIP_ID, element);
-            baseDataValidator.reset().parameter(RELATION_SHIP_ID).value(relationShipId).notBlank().longGreaterThanZero();
+        if (this.fromApiJsonHelper.extractLongNamed(RELATIONSHIP_ID, element) != null) {
+            final long relationshipId = this.fromApiJsonHelper.extractLongNamed(RELATIONSHIP_ID, element);
+            baseDataValidator.reset().parameter(RELATIONSHIP_ID).value(relationshipId).notBlank().longGreaterThanZero();
 
         } else {
-            baseDataValidator.reset().parameter(RELATION_SHIP_ID).value(this.fromApiJsonHelper.extractLongNamed(RELATION_SHIP_ID, element))
+            baseDataValidator.reset().parameter(RELATIONSHIP_ID).value(this.fromApiJsonHelper.extractLongNamed(RELATIONSHIP_ID, element))
                     .notBlank().longGreaterThanZero();
         }
 
@@ -189,85 +188,4 @@ public final class ClientFamilyMemberCommandFromApiJsonDeserializer {
         }
 
     }
-
-    public void validateForUpdate(final long familyMemberId, String json) {
-
-        if (StringUtils.isBlank(json)) {
-            throw new InvalidJsonException();
-        }
-
-        final Type typeOfMap = new TypeToken<Map<String, Object>>() {
-
-        }.getType();
-        this.fromApiJsonHelper.checkForUnsupportedParameters(typeOfMap, json, SUPPORTED_PARAMETERS);
-
-        final List<ApiParameterError> dataValidationErrors = new ArrayList<>();
-        final DataValidatorBuilder baseDataValidator = new DataValidatorBuilder(dataValidationErrors).resource(FAMILY_MEMBERS1);
-
-        final JsonElement element = this.fromApiJsonHelper.parse(json);
-
-        baseDataValidator.reset().value(familyMemberId).notBlank().integerGreaterThanZero();
-
-        if (this.fromApiJsonHelper.extractStringNamed(FIRST_NAME, element) != null) {
-            final String firstName = this.fromApiJsonHelper.extractStringNamed(FIRST_NAME, element);
-            baseDataValidator.reset().parameter(FIRST_NAME).value(firstName).notNull().notBlank().notExceedingLengthOf(100);
-        }
-
-        if (this.fromApiJsonHelper.extractStringNamed(LAST_NAME, element) != null) {
-            final String lastName = this.fromApiJsonHelper.extractStringNamed(LAST_NAME, element);
-            baseDataValidator.reset().parameter(LAST_NAME).value(lastName).notNull().notBlank().notExceedingLengthOf(100);
-        }
-
-        if (this.fromApiJsonHelper.extractStringNamed(MIDDLE_NAME, element) != null) {
-            final String middleName = this.fromApiJsonHelper.extractStringNamed(MIDDLE_NAME, element);
-            baseDataValidator.reset().parameter(MIDDLE_NAME).value(middleName).notNull().notBlank().notExceedingLengthOf(100);
-        }
-
-        if (this.fromApiJsonHelper.extractStringNamed(QUALIFICATION, element) != null) {
-            final String qualification = this.fromApiJsonHelper.extractStringNamed(QUALIFICATION, element);
-            baseDataValidator.reset().parameter(QUALIFICATION).value(qualification).notNull().notBlank().notExceedingLengthOf(100);
-        }
-
-        if (this.fromApiJsonHelper.extractLongNamed(RELATION_SHIP_ID, element) != null) {
-            final long relationShipId = this.fromApiJsonHelper.extractLongNamed(RELATION_SHIP_ID, element);
-            baseDataValidator.reset().parameter(RELATION_SHIP_ID).value(relationShipId).notBlank().longGreaterThanZero();
-
-        }
-
-        if (this.fromApiJsonHelper.extractLongNamed(MARITAL_STATUS_ID, element) != null) {
-            final long maritalStatusId = this.fromApiJsonHelper.extractLongNamed(MARITAL_STATUS_ID, element);
-            baseDataValidator.reset().parameter(MARITAL_STATUS_ID).value(maritalStatusId).notBlank().longGreaterThanZero();
-
-        }
-
-        if (this.fromApiJsonHelper.extractLongNamed(GENDER_ID, element) != null) {
-            final long genderId = this.fromApiJsonHelper.extractLongNamed(GENDER_ID, element);
-            baseDataValidator.reset().parameter(GENDER_ID).value(genderId).longGreaterThanZero();
-
-        }
-
-        if (this.fromApiJsonHelper.extractLongNamed(PROFESSION_ID, element) != null) {
-            final long professionId = this.fromApiJsonHelper.extractLongNamed(PROFESSION_ID, element);
-            baseDataValidator.reset().parameter(PROFESSION_ID).value(professionId).longGreaterThanZero();
-
-        }
-
-        if (this.fromApiJsonHelper.extractLocalDateNamed(DATE_OF_BIRTH, element) != null) {
-            final LocalDate dateOfBirth = this.fromApiJsonHelper.extractLocalDateNamed(DATE_OF_BIRTH, element);
-            baseDataValidator.reset().parameter(DATE_OF_BIRTH).value(dateOfBirth).validateDateBefore(DateUtils.getBusinessLocalDate());
-
-        }
-
-    }
-
-    public void validateForDelete(final long familyMemberId) {
-
-        final List<ApiParameterError> dataValidationErrors = new ArrayList<>();
-        final DataValidatorBuilder baseDataValidator = new DataValidatorBuilder(dataValidationErrors).resource(FAMILY_MEMBERS1);
-
-        // final JsonElement element = this.fromApiJsonHelper.parse(json);
-
-        baseDataValidator.reset().value(familyMemberId).notBlank().integerGreaterThanZero();
-    }
-
 }

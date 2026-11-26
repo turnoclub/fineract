@@ -18,7 +18,10 @@
  */
 package org.apache.fineract.infrastructure.bulkimport.populator.savings;
 
+import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 import org.apache.fineract.infrastructure.bulkimport.constants.SavingsConstants;
 import org.apache.fineract.infrastructure.bulkimport.constants.TemplatePopulateImportConstants;
 import org.apache.fineract.infrastructure.bulkimport.populator.AbstractWorkbookPopulator;
@@ -329,27 +332,37 @@ public class SavingsWorkbookPopulator extends AbstractWorkbookPopulator {
         officeGroup.setRefersToFormula(TemplatePopulateImportConstants.OFFICE_SHEET_NAME + "!$B$2:$B$" + (officeNames.size() + 1));
 
         // Client and Loan Officer Names for each office
+        Set<String> seenOfficeScopedNames = new HashSet<>();
         for (Integer i = 0; i < officeNames.size(); i++) {
             Integer[] officeNameToBeginEndIndexesOfClients = clientSheetPopulator.getOfficeNameToBeginEndIndexesOfClients().get(i);
             Integer[] officeNameToBeginEndIndexesOfStaff = personnelSheetPopulator.getOfficeNameToBeginEndIndexesOfStaff().get(i);
             Integer[] officeNameToBeginEndIndexesOfGroups = groupSheetPopulator.getOfficeNameToBeginEndIndexesOfGroups().get(i);
-            Name clientName = savingsWorkbook.createName();
-            Name fieldOfficerName = savingsWorkbook.createName();
-            Name groupName = savingsWorkbook.createName();
             if (officeNameToBeginEndIndexesOfStaff != null) {
-                setSanitized(fieldOfficerName, "Staff_" + officeNames.get(i));
-                fieldOfficerName.setRefersToFormula(TemplatePopulateImportConstants.STAFF_SHEET_NAME + "!$B$"
-                        + officeNameToBeginEndIndexesOfStaff[0] + ":$B$" + officeNameToBeginEndIndexesOfStaff[1]);
+                String staffName = "Staff_" + officeNames.get(i);
+                if (seenOfficeScopedNames.add(sanitizeName(staffName).toUpperCase(Locale.ROOT))) {
+                    Name fieldOfficerName = savingsWorkbook.createName();
+                    setSanitized(fieldOfficerName, staffName);
+                    fieldOfficerName.setRefersToFormula(TemplatePopulateImportConstants.STAFF_SHEET_NAME + "!$B$"
+                            + officeNameToBeginEndIndexesOfStaff[0] + ":$B$" + officeNameToBeginEndIndexesOfStaff[1]);
+                }
             }
             if (officeNameToBeginEndIndexesOfClients != null) {
-                setSanitized(clientName, "Client_" + officeNames.get(i));
-                clientName.setRefersToFormula(TemplatePopulateImportConstants.CLIENT_SHEET_NAME + "!$B$"
-                        + officeNameToBeginEndIndexesOfClients[0] + ":$B$" + officeNameToBeginEndIndexesOfClients[1]);
+                String clientNameStr = "Client_" + officeNames.get(i);
+                if (seenOfficeScopedNames.add(sanitizeName(clientNameStr).toUpperCase(Locale.ROOT))) {
+                    Name clientName = savingsWorkbook.createName();
+                    setSanitized(clientName, clientNameStr);
+                    clientName.setRefersToFormula(TemplatePopulateImportConstants.CLIENT_SHEET_NAME + "!$B$"
+                            + officeNameToBeginEndIndexesOfClients[0] + ":$B$" + officeNameToBeginEndIndexesOfClients[1]);
+                }
             }
             if (officeNameToBeginEndIndexesOfGroups != null) {
-                setSanitized(groupName, "Group_" + officeNames.get(i));
-                groupName.setRefersToFormula(TemplatePopulateImportConstants.GROUP_SHEET_NAME + "!$B$"
-                        + officeNameToBeginEndIndexesOfGroups[0] + ":$B$" + officeNameToBeginEndIndexesOfGroups[1]);
+                String groupNameStr = "Group_" + officeNames.get(i);
+                if (seenOfficeScopedNames.add(sanitizeName(groupNameStr).toUpperCase(Locale.ROOT))) {
+                    Name groupName = savingsWorkbook.createName();
+                    setSanitized(groupName, groupNameStr);
+                    groupName.setRefersToFormula(TemplatePopulateImportConstants.GROUP_SHEET_NAME + "!$B$"
+                            + officeNameToBeginEndIndexesOfGroups[0] + ":$B$" + officeNameToBeginEndIndexesOfGroups[1]);
+                }
             }
         }
 
@@ -365,7 +378,16 @@ public class SavingsWorkbookPopulator extends AbstractWorkbookPopulator {
         // Withdrawal Fee Amount, Withdrawal Fee Type, Annual Fee, Annual Fee on
         // Date
         // Names for each product
+        Set<String> seenProductNames = new HashSet<>();
         for (Integer i = 0; i < products.size(); i++) {
+            SavingsProductData product = products.get(i);
+            String productName = product.getName();
+            // Guard against duplicate product-keyed defined names — POI rejects a duplicate and 500s the whole
+            // template. Excel defined names are case-insensitive, so key on the sanitised, upper-cased name. The name
+            // is resolved before any createName() call so a skipped product leaves no orphan Name in the workbook.
+            if (!seenProductNames.add(sanitizeName(productName).toUpperCase(Locale.ROOT))) {
+                continue;
+            }
             Name interestRateName = savingsWorkbook.createName();
             Name interestCompoundingPeriodName = savingsWorkbook.createName();
             Name interestPostingPeriodName = savingsWorkbook.createName();
@@ -380,8 +402,6 @@ public class SavingsWorkbookPopulator extends AbstractWorkbookPopulator {
             Name withdrawalFeeName = savingsWorkbook.createName();
             Name allowOverdraftName = savingsWorkbook.createName();
             Name overdraftLimitName = savingsWorkbook.createName();
-            SavingsProductData product = products.get(i);
-            String productName = product.getName();
             if (product.getNominalAnnualInterestRate() != null) {
                 setSanitized(interestRateName, "Interest_Rate_" + productName);
                 interestRateName.setRefersToFormula("Products!$C$" + (i + 2));

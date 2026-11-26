@@ -18,8 +18,11 @@
  */
 package org.apache.fineract.test.stepdef.loan;
 
+import static org.apache.fineract.client.feign.util.FeignCalls.fail;
 import static org.apache.fineract.client.feign.util.FeignCalls.ok;
+import static org.assertj.core.api.Assertions.assertThat;
 
+import io.cucumber.java.en.Then;
 import io.cucumber.java.en.When;
 import java.io.IOException;
 import java.math.BigDecimal;
@@ -30,6 +33,7 @@ import java.util.Map;
 import org.apache.fineract.avro.loan.v1.LoanTransactionDataV1;
 import org.apache.fineract.avro.loan.v1.LoanTransactionEnumDataV1;
 import org.apache.fineract.client.feign.FineractFeignClient;
+import org.apache.fineract.client.feign.util.CallFailedRuntimeException;
 import org.apache.fineract.client.models.GetLoansLoanIdResponse;
 import org.apache.fineract.client.models.GetLoansLoanIdTransactions;
 import org.apache.fineract.client.models.GetLoansLoanIdTransactionsTransactionIdResponse;
@@ -40,6 +44,7 @@ import org.apache.fineract.client.models.PostLoansResponse;
 import org.apache.fineract.test.data.paymenttype.DefaultPaymentType;
 import org.apache.fineract.test.data.paymenttype.PaymentTypeResolver;
 import org.apache.fineract.test.factory.LoanRequestFactory;
+import org.apache.fineract.test.helper.ErrorMessageHelper;
 import org.apache.fineract.test.messaging.EventAssertion;
 import org.apache.fineract.test.messaging.event.EventCheckHelper;
 import org.apache.fineract.test.messaging.event.loan.transaction.LoanChargebackTransactionEvent;
@@ -83,7 +88,8 @@ public class LoanChargeBackStepDef extends AbstractStepDef {
         PostLoansResponse loanResponse = testContext().get(TestContextKey.LOAN_CREATE_RESPONSE);
         long loanId = loanResponse.getLoanId();
 
-        GetLoansLoanIdResponse loanDetails = ok(() -> fineractClient.loans().retrieveLoan(loanId, Map.of("associations", "transactions")));
+        GetLoansLoanIdResponse loanDetails = ok(
+                () -> fineractClient.loans().retrieveOneLoan(loanId, Map.of("associations", "transactions")));
         List<GetLoansLoanIdTransactions> transactions = loanDetails.getTransactions();
 
         List<Long> transactionIdList = new ArrayList<>();
@@ -105,7 +111,8 @@ public class LoanChargeBackStepDef extends AbstractStepDef {
         PostLoansResponse loanResponse = testContext().get(TestContextKey.LOAN_CREATE_RESPONSE);
         long loanId = loanResponse.getLoanId();
 
-        GetLoansLoanIdResponse loanDetails = ok(() -> fineractClient.loans().retrieveLoan(loanId, Map.of("associations", "transactions")));
+        GetLoansLoanIdResponse loanDetails = ok(
+                () -> fineractClient.loans().retrieveOneLoan(loanId, Map.of("associations", "transactions")));
         List<GetLoansLoanIdTransactions> transactions = loanDetails.getTransactions();
 
         List<Long> transactionIdList = new ArrayList<>();
@@ -126,7 +133,8 @@ public class LoanChargeBackStepDef extends AbstractStepDef {
         PostLoansResponse loanResponse = testContext().get(TestContextKey.LOAN_CREATE_RESPONSE);
         long loanId = loanResponse.getLoanId();
 
-        GetLoansLoanIdResponse loanDetails = ok(() -> fineractClient.loans().retrieveLoan(loanId, Map.of("associations", "transactions")));
+        GetLoansLoanIdResponse loanDetails = ok(
+                () -> fineractClient.loans().retrieveOneLoan(loanId, Map.of("associations", "transactions")));
         List<GetLoansLoanIdTransactions> transactions = loanDetails.getTransactions();
 
         List<Long> transactionIdList = new ArrayList<>();
@@ -140,6 +148,34 @@ public class LoanChargeBackStepDef extends AbstractStepDef {
         Long transactionId = transactionIdList.get((int) paymentNr - 1);
 
         makeChargebackCall(loanId, transactionId, repaymentType, transactionAmount);
+    }
+
+    @Then("Chargeback with {double} EUR transaction amount for Payment nr. {double} results a {int} error and {string} error message")
+    public void makeLoanChargebackForPaymentResultsError(double transactionAmount, double paymentNr, int errorCodeExpected,
+            String errorMessageExpected) {
+        PostLoansResponse loanResponse = testContext().get(TestContextKey.LOAN_CREATE_RESPONSE);
+        long loanId = loanResponse.getLoanId();
+
+        GetLoansLoanIdResponse loanDetails = ok(
+                () -> fineractClient.loans().retrieveOneLoan(loanId, Map.of("associations", "transactions")));
+        List<Long> transactionIdList = new ArrayList<>(
+                loanDetails.getTransactions().stream().filter(t -> "loanTransactionType.repayment".equals(t.getType().getCode()))
+                        .map(GetLoansLoanIdTransactions::getId).toList());
+        Collections.sort(transactionIdList);
+        Long transactionId = transactionIdList.get((int) paymentNr - 1);
+
+        Long paymentTypeValue = paymentTypeResolver.resolve(DefaultPaymentType.REPAYMENT_ADJUSTMENT_CHARGEBACK);
+        PostLoansLoanIdTransactionsTransactionIdRequest chargebackRequest = loanRequestFactory.defaultChargebackRequest()
+                .paymentTypeId(paymentTypeValue).transactionAmount(transactionAmount);
+
+        CallFailedRuntimeException exception = fail(() -> fineractClient.loanTransactions().adjustLoanTransaction(loanId, transactionId,
+                chargebackRequest, Map.of("command", "chargeback")));
+
+        assertThat(exception.getStatus()).as(ErrorMessageHelper.wrongErrorCode(exception.getStatus(), errorCodeExpected))
+                .isEqualTo(errorCodeExpected);
+        assertThat(exception.getDeveloperMessage())
+                .as(ErrorMessageHelper.wrongErrorMessage(exception.getDeveloperMessage(), errorMessageExpected))
+                .contains(errorMessageExpected);
     }
 
     private void makeChargebackCall(Long loanId, Long transactionId, String repaymentType, double transactionAmount) throws IOException {
@@ -172,7 +208,7 @@ public class LoanChargeBackStepDef extends AbstractStepDef {
 
         // retrieve transaction details
         GetLoansLoanIdTransactionsTransactionIdResponse transactionResponseBody = ok(
-                () -> fineractClient.loanTransactions().retrieveTransaction(loanId, transactionId, Map.of()));
+                () -> fineractClient.loanTransactions().retrieveOneLoanTransaction(loanId, transactionId, Map.of()));
 
         // Get transaction type from response
         GetLoansType transactionType = transactionResponseBody.getType();
@@ -185,7 +221,13 @@ public class LoanChargeBackStepDef extends AbstractStepDef {
                 .setWaiveCharges(transactionType.getWaiveCharges()).setAccrual(false).setWriteOff(transactionType.getWriteOff())
                 .setRecoveryRepayment(transactionType.getRecoveryRepayment()).setInitiateTransfer(false).setApproveTransfer(false)
                 .setWithdrawTransfer(false).setRejectTransfer(false).setChargePayment(false).setRefund(false).setRefundForActiveLoans(false)
-                .setCreditBalanceRefund(false).setChargeback(true).build();
+                .setCreditBalanceRefund(false).setChargeback(true).setInterestPaymentWaiver(false).setChargeAdjustment(false)
+                .setChargeoff(false).setDownPayment(false).setReAge(false).setReAmortize(false).setAccrualActivity(false)
+                .setInterestRefund(false).setFeeRefund(false).setAccrualAdjustment(false).setCapitalizedIncome(false)
+                .setCapitalizedIncomeAmortization(false).setCapitalizedIncomeAdjustment(false)
+                .setCapitalizedIncomeAmortizationAdjustment(false).setContractTermination(false).setBuyDownFee(false)
+                .setBuyDownFeeAdjustment(false).setBuyDownFeeAmortization(false).setBuyDownFeeAmortizationAdjustment(false)
+                .setLoanWithdrawal(false).build();
 
         // verify payload for loanId, transactionId, transactionType, amount
         eventAssertion.assertEvent(LoanChargebackTransactionEvent.class, transactionId).extractingData(LoanTransactionDataV1::getLoanId)

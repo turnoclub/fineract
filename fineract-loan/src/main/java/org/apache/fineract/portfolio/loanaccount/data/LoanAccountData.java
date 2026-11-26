@@ -107,6 +107,10 @@ public class LoanAccountData {
     private Integer numberOfRepayments;
     private Integer actualNoTerm;
     private Integer repaymentEvery;
+    /** First due day of the month of a semi-monthly loan. */
+    private Integer firstRepaymentDayOfMonth;
+    /** Second due day of the month of a semi-monthly loan; 31 is the last day of the month. */
+    private Integer secondRepaymentDayOfMonth;
     private Integer fixedLength;
     private EnumOptionData repaymentFrequencyType;
     private EnumOptionData repaymentFrequencyNthDayType;
@@ -174,6 +178,7 @@ public class LoanAccountData {
     private List<EnumOptionData> loanScheduleTypeOptions;
     private List<EnumOptionData> loanScheduleProcessingTypeOptions;
     private List<StringEnumOptionData> daysInYearCustomStrategyOptions;
+    private List<StringEnumOptionData> monthEndDueDateStrategyOptions;
     private List<StringEnumOptionData> capitalizedIncomeCalculationTypeOptions;
     private List<StringEnumOptionData> capitalizedIncomeStrategyOptions;
     private List<StringEnumOptionData> capitalizedIncomeTypeOptions;
@@ -226,6 +231,7 @@ public class LoanAccountData {
     private EnumOptionData daysInMonthType;
     private EnumOptionData daysInYearType;
     private StringEnumOptionData daysInYearCustomStrategy;
+    private StringEnumOptionData monthEndDueDateStrategy;
     // TODO: avoid prefix "is"
     private boolean isInterestRecalculationEnabled;
 
@@ -422,6 +428,8 @@ public class LoanAccountData {
                 .setInArrearsTolerance(product.getInArrearsTolerance()).setTermFrequency(numberOfRepayments * product.getRepaymentEvery())
                 .setTermPeriodFrequencyType(termPeriodFrequencyType).setNumberOfRepayments(numberOfRepayments)
                 .setRepaymentEvery(product.getRepaymentEvery()).setRepaymentFrequencyType(product.getRepaymentFrequencyType())
+                .setFirstRepaymentDayOfMonth(product.getFirstRepaymentDayOfMonth())
+                .setSecondRepaymentDayOfMonth(product.getSecondRepaymentDayOfMonth())
                 .setTransactionProcessingStrategyCode(product.getTransactionProcessingStrategyCode())
                 .setAmortizationType(product.getAmortizationType()).setInterestRatePerPeriod(interestRatePerPeriod)
                 .setInterestRateFrequencyType(product.getInterestRateFrequencyType()).setAnnualInterestRate(product.getAnnualInterestRate())
@@ -448,7 +456,9 @@ public class LoanAccountData {
                 .setRepaymentStartDateType(product.getRepaymentStartDateType())
                 .setInterestRecognitionOnDisbursementDate(product.isInterestRecognitionOnDisbursementDate())
                 .setDaysInYearCustomStrategyOptions(product.getDaysInYearCustomStrategyOptions())
-                .setDaysInYearCustomStrategy(product.getDaysInYearCustomStrategy());
+                .setDaysInYearCustomStrategy(product.getDaysInYearCustomStrategy())
+                .setMonthEndDueDateStrategyOptions(product.getMonthEndDueDateStrategyOptions())
+                .setMonthEndDueDateStrategy(product.getMonthEndDueDateStrategy());
     }
 
     /*

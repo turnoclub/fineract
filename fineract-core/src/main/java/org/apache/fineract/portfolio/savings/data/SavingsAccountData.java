@@ -88,7 +88,7 @@ public final class SavingsAccountData implements Serializable {
     private final BigDecimal minBalanceForInterestCalculation;
     private final BigDecimal onHoldFunds;
     private final boolean withHoldTax;
-    private final TaxGroupData taxGroup;
+    private TaxGroupData taxGroup;
     private final LocalDate lastActiveTransactionDate;
     private final boolean isDormancyTrackingActive;
     private final Integer daysToInactive;
@@ -146,6 +146,8 @@ public final class SavingsAccountData implements Serializable {
     private transient Set<Long> existingReversedTransactionIds = new HashSet<>();
     private transient Long glAccountIdForSavingsControl;
     private transient Long glAccountIdForInterestOnSavings;
+    private transient Long glAccountIdForIncomeFromInterest;
+    private transient Long glAccountIdForSavingsReference;
 
     private Long glAccountIdForInterestPayable;
     private Long glAccountIdForOverdraftPorfolio;
@@ -305,6 +307,14 @@ public final class SavingsAccountData implements Serializable {
 
     public void setGlAccountIdForInterestOnSavings(final Long glAccountIdForInterestOnSavings) {
         this.glAccountIdForInterestOnSavings = glAccountIdForInterestOnSavings;
+    }
+
+    public void setGlAccountIdForSavingsReference(final Long glAccountIdForSavingsReference) {
+        this.glAccountIdForSavingsReference = glAccountIdForSavingsReference;
+    }
+
+    public void setTaxGroup(final TaxGroupData taxGroup) {
+        this.taxGroup = taxGroup;
     }
 
     public void setHelpers(final SavingsAccountTransactionDataSummaryWrapper savingsAccountTransactionSummaryWrapper,
@@ -973,6 +983,14 @@ public final class SavingsAccountData implements Serializable {
 
     public boolean isIsDormancyTrackingActive() {
         return this.isDormancyTrackingActive;
+    }
+
+    /**
+     * An unmapped GL account is read as 0 by the interest posting row mapper, but may also be left null, so both mean
+     * the product has no interest receivable mapping.
+     */
+    public boolean hasInterestReceivableMapping() {
+        return this.glAccountIdForInterestReceivable != null && this.glAccountIdForInterestReceivable != 0L;
     }
 
 }

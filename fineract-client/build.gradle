@@ -16,6 +16,10 @@
  * specific language governing permissions and limitations
  * under the License.
  */
+import org.gradle.api.file.FileSystemOperations
+
+import javax.inject.Inject
+
 apply plugin: 'org.openapi.generator'
 apply plugin: 'idea'
 description = 'Fineract Client'
@@ -32,7 +36,7 @@ openApiMeta {
 }
 
 openApiValidate {
-    inputSpec = file(swaggerFile)
+    inputSpec = file(rootProject.ext.swaggerFile)
     recommend = true
 }
 
@@ -62,7 +66,8 @@ task buildJavaSdk(type: org.openapitools.generator.gradle.plugin.tasks.GenerateT
     verbose = false
     validateSpec = false
     skipValidateSpec = true
-    inputSpec = file(swaggerFile)
+    cleanupOutput = true
+    inputSpec = file(rootProject.ext.swaggerFile)
     outputDir = file("$buildDir/generated/temp-java")
     templateDir = file("$projectDir/src/main/resources/templates/java")
     groupId = 'org.apache.fineract'
@@ -79,6 +84,8 @@ task buildJavaSdk(type: org.openapitools.generator.gradle.plugin.tasks.GenerateT
     ]
     generateModelTests = false
     generateApiTests = false
+    generateModelDocumentation = false
+    generateApiDocumentation = false
     ignoreFileOverride = file("$projectDir/.openapi-generator-ignore")
     dependsOn(':fineract-provider:resolve')
 }
@@ -88,7 +95,8 @@ task buildTypescriptAngularSdk(type: org.openapitools.generator.gradle.plugin.ta
     verbose = false
     validateSpec = false
     skipValidateSpec = true
-    inputSpec = file(swaggerFile)
+    cleanupOutput = true
+    inputSpec = file(rootProject.ext.swaggerFile)
     outputDir = file("$buildDir/generated/typescript")
     apiPackage = 'apache-fineract-client/services'
     invokerPackage = 'apache-fineract-client/invoker'
@@ -98,9 +106,10 @@ task buildTypescriptAngularSdk(type: org.openapitools.generator.gradle.plugin.ta
         configurationPrefix: 'apacheFineractClient',
         ngVersion: '12.0.0',
         npmName: '@apache/fineract-client',
-        npmRepository: "${npmRepository}"
+        npmRepository: "${rootProject.ext.npmRepository}"
     ]
     dependsOn(':fineract-provider:resolve')
+    mustRunAfter(buildJavaSdk)
 }
 
 task buildTypescriptFetchSdk(type: org.openapitools.generator.gradle.plugin.tasks.GenerateTask) {
@@ -108,7 +117,8 @@ task buildTypescriptFetchSdk(type: org.openapitools.generator.gradle.plugin.task
     verbose = false
     validateSpec = false
     skipValidateSpec = true
-    inputSpec = file(swaggerFile)
+    cleanupOutput = true
+    inputSpec = file(rootProject.ext.swaggerFile)
     outputDir = file("$buildDir/generated/typescript-fetch")
     configOptions = [
         npmName: '@apache/fineract-client-fetch',
@@ -118,6 +128,7 @@ task buildTypescriptFetchSdk(type: org.openapitools.generator.gradle.plugin.task
         withInterfaces: 'true'
     ]
     dependsOn(':fineract-provider:resolve')
+    mustRunAfter(buildTypescriptAngularSdk)
 }
 
 task buildAsciidoc(type: org.openapitools.generator.gradle.plugin.tasks.GenerateTask){
@@ -125,7 +136,8 @@ task buildAsciidoc(type: org.openapitools.generator.gradle.plugin.tasks.Generate
     verbose = false
     validateSpec = false
     skipValidateSpec = true
-    inputSpec = file(swaggerFile)
+    cleanupOutput = true
+    inputSpec = file(rootProject.ext.swaggerFile)
     outputDir = file("$buildDir/generated/asciidoc")
     apiPackage = 'org.apache.fineract.client.services'
     invokerPackage = 'org.apache.fineract.client'
@@ -145,6 +157,10 @@ task buildAsciidoc(type: org.openapitools.generator.gradle.plugin.tasks.Generate
         useMethodAndPath: 'true'
     ]
     dependsOn(':fineract-provider:resolve')
+    mustRunAfter(buildTypescriptAngularSdk)
+    // ':fineract-doc' used to force a regeneration by depending on ':fineract-client:clean', which
+    // put an unordered clean into any graph that also built this project. Regenerate here instead.
+    outputs.upToDateWhen { false }
 }
 
 // Configure source sets with proper output directories
@@ -170,11 +186,28 @@ tasks.withType(Jar).configureEach {
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 }
 
+// Project.fileTree()/copy()/delete() are unsupported in a task action under the configuration
+// cache; the injected FileSystemOperations service is the supported replacement (same reasoning
+// as ExecOperations for Project.javaexec() in static-weaving.gradle). The file trees themselves
+// are built here, at configuration time, and simply captured -- a FileTree is one of the Gradle
+// types that can safely cross into a cached task action.
+interface CleanupGeneratedJavaFilesOperations {
+    @Inject
+    FileSystemOperations getFileSystemOperations()
+}
+
 // Improve the cleanup task to track inputs and outputs
 task cleanupGeneratedJavaFiles() {
     def tempDir = file("$buildDir/generated/temp-java")
     def targetDir = file("$buildDir/generated/java")
-    
+    def tempOAuthClientFiles = fileTree(tempDir) {
+        include "src/main/java/org/apache/fineract/client/auth/OAuthOkHttpClient.java"
+    }
+    def targetOAuthClientFiles = fileTree(targetDir) {
+        include "src/main/java/org/apache/fineract/client/auth/OAuthOkHttpClient.java"
+    }
+    def fileSystemOperations = objects.newInstance(CleanupGeneratedJavaFilesOperations).fileSystemOperations
+
     inputs.dir(tempDir).optional()
     outputs.dir(targetDir)
     onlyIf { tempDir.exists() }
@@ -182,19 +215,19 @@ task cleanupGeneratedJavaFiles() {
     //TODO: remove harcoded, autogenerated Oltu's OAuthOkHttpClient.java from the generated files
     doFirst {
         if (tempDir.exists()) {
-            delete fileTree(tempDir) {
-                include "src/main/java/org/apache/fineract/client/auth/OAuthOkHttpClient.java"
+            fileSystemOperations.delete {
+                delete(tempOAuthClientFiles)
             }
         }
         if (targetDir.exists()) {
-            delete fileTree(targetDir) {
-                include "src/main/java/org/apache/fineract/client/auth/OAuthOkHttpClient.java"
+            fileSystemOperations.delete {
+                delete(targetOAuthClientFiles)
             }
         }
     }
     doLast {
         if (tempDir.exists()) {
-            copy {
+            fileSystemOperations.copy {
                 from tempDir
                 into targetDir
                 filter { line ->
@@ -215,8 +248,8 @@ task cleanupGeneratedJavaFiles() {
 // Configure Java compilation
 tasks.named('compileJava') {
     outputs.cacheIf { true }
-    dependsOn(buildJavaSdk, buildTypescriptAngularSdk, buildAsciidoc, cleanupGeneratedJavaFiles, licenseFormatMain, spotlessMiscApply)
-    mustRunAfter(licenseFormatMain, cleanupGeneratedJavaFiles)
+    dependsOn(buildJavaSdk, buildTypescriptAngularSdk, buildAsciidoc, cleanupGeneratedJavaFiles, spotlessMiscApply)
+    mustRunAfter(cleanupGeneratedJavaFiles)
 }
 
 // Configure sources jar task
@@ -229,22 +262,13 @@ tasks.named('sourcesJar') {
     }
 }
 
-// Configure license formatting
-tasks.named('licenseFormatMain') {
-    dependsOn(cleanupGeneratedJavaFiles)
-    mustRunAfter(cleanupGeneratedJavaFiles)
-    source = sourceSets.main.java.srcDirs
-}
-
-tasks.named('licenseMain') {
-    dependsOn(licenseFormatMain)
-    mustRunAfter(licenseFormatMain)
-}
-
 java {
-    // keep this at Java 8, not 17; see https://issues.apache.org/jira/browse/FINERACT-1214
-    sourceCompatibility = JavaVersion.VERSION_1_8
-    targetCompatibility = JavaVersion.VERSION_1_8
+    // This SDK is published for external consumers, including Android apps, so it stays behind the
+    // project toolchain. Java 17 is the ceiling that buys us: Android 14 ships OpenJDK 17 core
+    // libraries, and the Android Gradle Plugin still requires/targets JDK 17. Java 21+ bytecode is
+    // not consumable by D8/R8. The previous Java 8 pin (FINERACT-1214) predates all of that.
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
 }
 
 tasks.withType(JavaCompile).configureEach {

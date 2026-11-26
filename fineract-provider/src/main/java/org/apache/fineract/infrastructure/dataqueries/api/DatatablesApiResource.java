@@ -46,6 +46,7 @@ import lombok.RequiredArgsConstructor;
 import org.apache.fineract.commands.domain.CommandWrapper;
 import org.apache.fineract.commands.service.CommandWrapperBuilder;
 import org.apache.fineract.commands.service.PortfolioCommandSourceWritePlatformService;
+import org.apache.fineract.infrastructure.core.annotation.AlternativeOperationId;
 import org.apache.fineract.infrastructure.core.api.ApiParameterHelper;
 import org.apache.fineract.infrastructure.core.data.CommandProcessingResult;
 import org.apache.fineract.infrastructure.core.data.CommandProcessingResultBuilder;
@@ -287,7 +288,8 @@ public class DatatablesApiResource {
             datatables/extra_family_details/1?order=`Date of Birth` desc
 
             datatables/extra_client_details/1?genericResultSet=true""")
-    @ApiResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = Object.class)))
+    @AlternativeOperationId("getDatatable_1")
+    @ApiResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = String.class)))
     public String getDatatable(@PathParam("datatable") @Parameter(description = "datatable") final String datatable,
             @PathParam("apptableId") @Parameter(description = "apptableId") final Long apptableId,
             @QueryParam("order") @Parameter(description = "order") final String order, @Context final UriInfo uriInfo) {
@@ -315,7 +317,7 @@ public class DatatablesApiResource {
     @Operation(summary = "Retrieve Entry from Data Table (One to Many)", description = """
             Gets the entry (if it exists) for data tables that are one-to-many with the application table, by the \
             datatable entry id. Returns the stored row as a JSON object keyed by column name.""")
-    @ApiResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = Object.class)))
+    @ApiResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = String.class)))
     public String getDatatableManyEntry(@PathParam("datatable") final String datatable, @PathParam("apptableId") final Long apptableId,
             @PathParam("datatableId") final Long datatableId, @QueryParam("order") final String order,
             @DefaultValue("false") @QueryParam("genericResultSet") @Parameter(in = ParameterIn.QUERY, name = "genericResultSet", description = "Optional flag to format the response") final boolean genericResultSet,
@@ -346,7 +348,7 @@ public class DatatablesApiResource {
             Note that the default datatable UI functionality converts any field name containing spaces to underscores \
             when using the API. This means the field name "Business Description" is considered the same as \
             "Business_Description". So you shouldn't have both "versions" in any data table.""")
-    @RequestBody(required = true, content = @Content(schema = @Schema(implementation = Object.class)), description = "{\n  \"BusinessDescription\": \"Livestock sales\",\n  \"Comment\": \"First comment made\",\n  \"Education_cv\": \"Primary\",\n  \"Gender_cd\": 6,\n  \"HighestRatePaid\": 8.5,\n  \"NextVisit\": \"01 October 2012\",\n  \"YearsinBusiness\": 5,\n  \"dateFormat\": \"dd MMMM yyyy\",\n  \"locale\": \"en\"\n}")
+    @RequestBody(required = true, content = @Content(schema = @Schema(implementation = String.class)), description = "{\n  \"BusinessDescription\": \"Livestock sales\",\n  \"Comment\": \"First comment made\",\n  \"Education_cv\": \"Primary\",\n  \"Gender_cd\": 6,\n  \"HighestRatePaid\": 8.5,\n  \"NextVisit\": \"01 October 2012\",\n  \"YearsinBusiness\": 5,\n  \"dateFormat\": \"dd MMMM yyyy\",\n  \"locale\": \"en\"\n}")
     @ApiResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = DatatablesApiResourceSwagger.PostDataTablesAppTableIdResponse.class)))
     public String createDatatableEntry(@PathParam("datatable") @Parameter(description = "datatable") final String datatable,
             @PathParam("apptableId") @Parameter(description = "apptableId") final Long apptableId,
@@ -367,7 +369,7 @@ public class DatatablesApiResource {
     @Consumes({ MediaType.APPLICATION_JSON })
     @Produces({ MediaType.APPLICATION_JSON })
     @Operation(summary = "Update Entry in Data Table (One to One)", description = "Updates the row (if it exists) of the data table.")
-    @RequestBody(required = true, content = @Content(schema = @Schema(implementation = Object.class)))
+    @RequestBody(required = true, content = @Content(schema = @Schema(implementation = String.class)))
     @ApiResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = DatatablesApiResourceSwagger.PutDataTablesAppTableIdResponse.class)))
     public String updateDatatableEntryOnetoOne(@PathParam("datatable") @Parameter(description = "datatable") final String datatable,
             @PathParam("apptableId") @Parameter(description = "apptableId") final Long apptableId,
@@ -387,8 +389,10 @@ public class DatatablesApiResource {
     @Path("{datatable}/{apptableId}/{datatableId}")
     @Consumes({ MediaType.APPLICATION_JSON })
     @Produces({ MediaType.APPLICATION_JSON })
-    @Operation(summary = "Update Entry in Data Table (One to Many)", description = "Updates the row (if it exists) of the data table.")
-    @RequestBody(required = true, content = @Content(schema = @Schema(implementation = Object.class)))
+    @Operation(summary = "Update Entry in Data Table (One to Many)", description = """
+            Updates the row (if it exists) of the data table. A data table that is one-to-one with the application table \
+            refuses an entry id.""")
+    @RequestBody(required = true, content = @Content(schema = @Schema(implementation = String.class)))
     @ApiResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = DatatablesApiResourceSwagger.PutDataTablesAppTableIdDatatableIdResponse.class)))
     public String updateDatatableEntryOneToMany(@PathParam("datatable") @Parameter(description = "datatable") final String datatable,
             @PathParam("apptableId") @Parameter(description = "apptableId") final Long apptableId,
@@ -428,7 +432,8 @@ public class DatatablesApiResource {
     @Path("{datatable}/{apptableId}/{datatableId}")
     @Produces({ MediaType.APPLICATION_JSON })
     @Operation(summary = "Delete Entry in Datatable (One to Many)", description = """
-            Deletes the entry (if it exists) for data tables that are one to many with the application table.""")
+            Deletes the entry for data tables that are one to many with the application table. An entry that does not belong to \
+            apptableId is not found. A data table that is one-to-one with the application table refuses an entry id.""")
     @ApiResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = DatatablesApiResourceSwagger.DeleteDataTablesDatatableAppTableIdDatatableIdResponse.class)))
     public String deleteDatatableEntry(@PathParam("datatable") @Parameter(description = "datatable", example = "{}") final String datatable,
             @PathParam("apptableId") @Parameter(description = "apptableId") final Long apptableId,

@@ -41,8 +41,8 @@ import org.springframework.transaction.annotation.Transactional;
 @Transactional(readOnly = true)
 public class ProgressivePossibleNextRepaymentCalculationServiceImpl extends AbstractPossibleNextRepaymentCalculationService {
 
-    private final InterestScheduleModelRepositoryWrapper interestScheduleModelRepository;
-    private final AdvancedPaymentScheduleTransactionProcessor advancedPaymentScheduleTransactionProcessor;
+    protected final InterestScheduleModelRepositoryWrapper interestScheduleModelRepository;
+    protected final AdvancedPaymentScheduleTransactionProcessor advancedPaymentScheduleTransactionProcessor;
 
     @Override
     public BigDecimal calculateInterestRecalculationFutureOutstandingValue(Loan loan, LocalDate nextPaymentDueDate,
@@ -61,7 +61,7 @@ public class ProgressivePossibleNextRepaymentCalculationServiceImpl extends Abst
                 loan.getActiveLoanTermVariations());
         ctx.setChargedOff(loan.isChargedOff());
         ctx.setWrittenOff(loan.isClosedWrittenOff());
-        ctx.setContractTerminated(loan.isContractTermination());
+        ctx.setContractTerminated(loan.isTerminatedEarly());
         advancedPaymentScheduleTransactionProcessor.recalculateInterestForDate(nextPaymentDueDate, ctx, false);
         RepaymentPeriod repaymentPeriod = scheduleModel
                 .findRepaymentPeriodByFromAndDueDate(nextInstallment.getFromDate(), nextInstallment.getDueDate())

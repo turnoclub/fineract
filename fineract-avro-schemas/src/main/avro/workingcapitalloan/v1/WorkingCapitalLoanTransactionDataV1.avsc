@@ -21,6 +21,14 @@
         },
         {
             "default": null,
+            "name": "externalLoanId",
+            "type": [
+                "null",
+                "string"
+            ]
+        },
+        {
+            "default": null,
             "name": "type",
             "type": [
                 "null",
@@ -41,6 +49,14 @@
             "type": [
                 "null",
                 "string"
+            ]
+        },
+        {
+            "default": null,
+            "name": "currency",
+            "type": [
+                "null",
+                "org.apache.fineract.avro.generic.v1.CurrencyDataV1"
             ]
         },
         {
@@ -121,6 +137,25 @@
             "type": [
                 "null",
                 "bigdecimal"
+            ]
+        },
+        {
+            "default": null,
+            "name": "overpaymentPortion",
+            "type": [
+                "null",
+                "bigdecimal"
+            ]
+        },
+        {
+            "default": null,
+            "name": "chargePaidByList",
+            "type": [
+                "null",
+                {
+                    "type": "array",
+                    "items": "org.apache.fineract.avro.workingcapitalloan.v1.WorkingCapitalLoanChargePaidByDataV1"
+                }
             ]
         }
     ]

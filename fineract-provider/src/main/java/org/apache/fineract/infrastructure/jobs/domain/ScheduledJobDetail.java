@@ -21,20 +21,14 @@ package org.apache.fineract.infrastructure.jobs.domain;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Table;
-import jakarta.persistence.Temporal;
-import jakarta.persistence.TemporalType;
 import jakarta.persistence.UniqueConstraint;
-import java.util.Date;
-import java.util.LinkedHashMap;
-import java.util.Map;
+import java.time.Instant;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 import lombok.experimental.Accessors;
 import org.apache.commons.lang3.StringUtils;
-import org.apache.fineract.infrastructure.core.api.JsonCommand;
 import org.apache.fineract.infrastructure.core.domain.AbstractPersistableCustom;
-import org.apache.fineract.infrastructure.jobs.api.SchedulerJobApiConstants;
 
 @Entity
 @Table(name = "job", uniqueConstraints = { @UniqueConstraint(columnNames = { "short_name" }, name = "job_short_name_key") })
@@ -60,8 +54,7 @@ public class ScheduledJobDetail extends AbstractPersistableCustom<Long> {
     private String cronExpression;
 
     @Column(name = "create_time")
-    @Temporal(TemporalType.TIMESTAMP)
-    private Date createTime;
+    private Instant createTime;
 
     @Column(name = "task_priority")
     private Short taskPriority;
@@ -70,12 +63,10 @@ public class ScheduledJobDetail extends AbstractPersistableCustom<Long> {
     private String groupName;
 
     @Column(name = "previous_run_start_time")
-    @Temporal(TemporalType.TIMESTAMP)
-    private Date previousRunStartTime;
+    private Instant previousRunStartTime;
 
     @Column(name = "next_run_time")
-    @Temporal(TemporalType.TIMESTAMP)
-    private Date nextRunTime;
+    private Instant nextRunTime;
 
     @Column(name = "job_key")
     private String jobKey;
@@ -101,27 +92,15 @@ public class ScheduledJobDetail extends AbstractPersistableCustom<Long> {
     @Column(name = "short_name", nullable = false)
     private String shortName;
 
-    public Map<String, Object> update(final JsonCommand command) {
-        final Map<String, Object> actualChanges = new LinkedHashMap<>(9);
-
-        if (command.isChangeInStringParameterNamed(SchedulerJobApiConstants.displayNameParamName, this.jobDisplayName)) {
-            final String newValue = command.stringValueOfParameterNamed(SchedulerJobApiConstants.displayNameParamName).trim();
-            actualChanges.put(SchedulerJobApiConstants.displayNameParamName, newValue);
-            this.jobDisplayName = StringUtils.defaultIfEmpty(newValue, null);
-        }
-        if (command.isChangeInStringParameterNamed(SchedulerJobApiConstants.cronExpressionParamName, this.cronExpression)) {
-            final String newValue = command.stringValueOfParameterNamed(SchedulerJobApiConstants.cronExpressionParamName).trim();
-            actualChanges.put(SchedulerJobApiConstants.cronExpressionParamName, newValue);
-            this.cronExpression = StringUtils.defaultIfEmpty(newValue, null);
-        }
-
-        if (command.isChangeInBooleanParameterNamed(SchedulerJobApiConstants.jobActiveStatusParamName, this.activeSchedular)) {
-            final boolean newValue = command.booleanPrimitiveValueOfParameterNamed(SchedulerJobApiConstants.jobActiveStatusParamName);
-            actualChanges.put(SchedulerJobApiConstants.jobActiveStatusParamName, newValue);
-            this.activeSchedular = newValue;
-        }
-
-        return actualChanges;
+    public void updateDisplayName(final String displayName) {
+        this.jobDisplayName = StringUtils.defaultIfEmpty(displayName, null);
     }
 
+    public void updateCronExpression(final String cronExpression) {
+        this.cronExpression = StringUtils.defaultIfEmpty(cronExpression, null);
+    }
+
+    public void updateActive(final boolean active) {
+        this.activeSchedular = active;
+    }
 }

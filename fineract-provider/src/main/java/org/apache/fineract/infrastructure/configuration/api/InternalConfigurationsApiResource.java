@@ -32,6 +32,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.fineract.infrastructure.configuration.domain.GlobalConfigurationProperty;
 import org.apache.fineract.infrastructure.configuration.domain.GlobalConfigurationRepositoryWrapper;
 import org.apache.fineract.infrastructure.configuration.service.MoneyHelperInitializationService;
+import org.apache.fineract.infrastructure.core.annotation.AlternativeOperationId;
 import org.apache.fineract.infrastructure.core.boot.FineractProfiles;
 import org.apache.fineract.infrastructure.core.domain.FineractPlatformTenant;
 import org.apache.fineract.infrastructure.core.service.ThreadLocalContextUtil;
@@ -67,6 +68,7 @@ public class InternalConfigurationsApiResource implements InitializingBean {
     @Consumes({ MediaType.APPLICATION_JSON })
     @Produces({ MediaType.APPLICATION_JSON })
     @Operation(summary = "Update internal global configuration", operationId = "updateInternalGlobalConfiguration")
+    @AlternativeOperationId("updateGlobalConfiguration")
     @SuppressFBWarnings("SLF4J_SIGN_ONLY_FORMAT")
     public Response updateGlobalConfiguration(@PathParam("configName") String configName, @PathParam("configValue") Long configValue) {
         log.warn("------------------------------------------------------------");
@@ -75,11 +77,11 @@ public class InternalConfigurationsApiResource implements InitializingBean {
         log.warn("                                                            ");
         log.warn("------------------------------------------------------------");
 
-        final GlobalConfigurationProperty config = repository.findOneByNameWithNotFoundDetection(configName);
+        final GlobalConfigurationProperty config = repository.findOneByNameForUpdateWithNotFoundDetection(configName);
         config.setValue(configValue);
         repository.save(config);
         log.warn("Config {} updated to {}", config.getName(), config.getValue());
-        repository.removeFromCache(config.getName());
+        repository.removeFromCache();
 
         // Update MoneyHelper when rounding mode configuration changes
         if (GlobalConfigurationConstants.ROUNDING_MODE.equals(configName) && configValue != null) {

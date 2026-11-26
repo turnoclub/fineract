@@ -51,11 +51,13 @@ public interface LoanTransactionApiConstants {
         interestPaymentWaiver, //
         accrualActivity, //
         interestRefund, //
+        feeRefund, //
         accrualAdjustment, //
         capitalizedIncome, //
         capitalizedIncomeAmortization, //
         capitalizedIncomeAdjustment, //
         contractTermination, //
+        loanWithdrawal, //
         capitalizedIncomeAmortizationAdjustment, //
         buyDownFeeAmortization, //
         buyDownFeeAmortizationAdjustment, //

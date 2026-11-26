@@ -7035,6 +7035,8 @@ GET https://DomainName/api/v1/clients/{clientId}/identifiers
       "name": "Drivers License"
     },
     "documentKey": "12345",
+    "issuanceDate": [2024, 1, 1],
+    "expiryDate": [2034, 1, 1],
     "description": "Issued in the year 2--7"
   }
 ]
@@ -7120,6 +7122,8 @@ GET https://DomainName/api/v1/clients/{clientId}/identifiers/{identifierId}
     "name": "Drivers License"
   },
   "documentKey": "12345",
+  "issuanceDate": [2024, 1, 1],
+  "expiryDate": [2034, 1, 1],
   "description": "Issued in 2007"
 }
 					</code>
@@ -7151,7 +7155,11 @@ Request Body:
 {
 "documentTypeId":"1",
 "documentKey":"KA-54677",
-"description":"Document has been verified"
+"description":"Document has been verified",
+"issuanceDate":"01 January 2024",
+"expiryDate":"01 January 2034",
+"dateFormat":"dd MMMM yyyy",
+"locale":"en"
 }
 					</code>
 					<code class="method-response">
@@ -7180,7 +7188,11 @@ Request Body:
 {
 "documentTypeId":"4",
 "documentKey":"KA-94667",
-"description":"Document has been updated"
+"description":"Document has been updated",
+"issuanceDate":"01 February 2024",
+"expiryDate":"01 February 2034",
+"dateFormat":"dd MMMM yyyy",
+"locale":"en"
 }
 					</code>
 					<code class="method-response">
@@ -7191,7 +7203,9 @@ Request Body:
   "changes": {
     "documentTypeId": 4,
     "documentKey": "KA-94667",
-    "description": "Document has been updated"
+    "description": "Document has been updated",
+    "issuanceDate": [2024, 2, 1],
+    "expiryDate": [2034, 2, 1]
   }
 }
 					</code>
@@ -24296,7 +24310,7 @@ Request Body:
             <table class=matrixHeading>
                 <tr class="matrixHeadingBG"><td><div class="fineractHeading2">Optional Fields</div></td></tr>
                 <tr class=alt><td>sharesIssued, minimumShares, maximumShares, minimumActivePeriodForDividends, minimumactiveperiodFrequencyType,
-				lockinPeriodFrequency, lockinPeriodFrequencyType, marketPricePeriods, chargesSelected</tr>
+				lockinPeriodFrequency, lockinPeriodFrequencyType, marketPricePeriods, chargesSelected, paymentChannelToFundSourceMappings</tr>
             </table>
         </div>
         <div class="method-example">
@@ -26359,7 +26373,7 @@ Content-Type: application/json
 	        <br/>
 	        <table class=matrixHeading>
 	            <tr class="matrixHeadingBG"><td><div class="fineractHeading2">Optional Fields</div></td></tr>
-	            <tr class=alt><td>accountNo, externalId</td></tr>
+	            <tr class=alt><td>accountNo, externalId, paymentTypeId, accountNumber, checkNumber, routingCode, receiptNumber, bankNumber</td></tr>
 	        </table>
 	        <br/>
 	        <table class=matrixHeading>
@@ -26588,6 +26602,15 @@ Request Body:
                 </tr>
             </table>
             <br />
+            <table class=matrixHeading>
+                <tr class="matrixHeadingBG">
+                    <td><div class="fineractHeading2">Optional Fields</div></td>
+                </tr>
+                <tr class=alt>
+                    <td>note, paymentTypeId, accountNumber, checkNumber, routingCode, receiptNumber, bankNumber</td>
+                </tr>
+            </table>
+            <br />
 
 	    </div>
 	    <div class="method-example">
@@ -26641,6 +26664,15 @@ Request Body:
                 </tr>
                 <tr class=alt>
                     <td>dateFormat,locale,requestedDate, requestedShares</td>
+                </tr>
+            </table>
+            <br />
+            <table class=matrixHeading>
+                <tr class="matrixHeadingBG">
+                    <td><div class="fineractHeading2">Optional Fields</div></td>
+                </tr>
+                <tr class=alt>
+                    <td>paymentTypeId, accountNumber, checkNumber, routingCode, receiptNumber, bankNumber</td>
                 </tr>
             </table>
             <br />
@@ -26756,6 +26788,15 @@ Request Body:
                 </tr>
                 <tr class=alt>
                     <td>dateFormat,locale,requestedDate,requestedShares</td>
+                </tr>
+            </table>
+            <br />
+            <table class=matrixHeading>
+                <tr class="matrixHeadingBG">
+                    <td><div class="fineractHeading2">Optional Fields</div></td>
+                </tr>
+                <tr class=alt>
+                    <td>paymentTypeId, accountNumber, checkNumber, routingCode, receiptNumber, bankNumber</td>
                 </tr>
             </table>
             <br />
@@ -34857,6 +34898,9 @@ No Request Body:
 				<tr class=alt><td>recurrenceOnMonthDay</td></tr>
 				<tr><td class=fielddesc>The Month and Day of recurrence. Must be provided if the <b>recurrenceFrequency</b> is monthly or yearly</td></tr>
 
+				<tr class=alt><td>allowPartialTransfer</td></tr>
+				<tr><td class=fielddesc>Defaults to false. When true and the from account is a savings account, a run whose amount and withdrawal fee the account cannot cover transfers what it can cover, and the run history records it with status <b>partial</b> instead of <b>success</b>. The run still counts for its date: a periodic instruction does not retry the shortfall before its next due date, while an "As per dues" instruction picks up the remaining dues on its next run. When nothing can be covered, the run fails as it does without this option.</td></tr>
+
 
 			</table>
 	    </div>
@@ -35740,7 +35784,8 @@ No Request Body:
 	"locale":"en",
 	"dateFormat":"dd MMMM yyyy",
 	"recurrenceOnMonthDay":"02 April",
-	"monthDayFormat":"dd MMMM"
+	"monthDayFormat":"dd MMMM",
+	"allowPartialTransfer":false
 }
 	        </code>
 	        <code class="method-response">
@@ -35765,14 +35810,16 @@ No Request Body:
 Content-Type: application/json
 No Request Body:
 {
-	"recurrenceInterval":"2"
+	"recurrenceInterval":"2",
+	"allowPartialTransfer":true
 }
 	        </code>
 	        <code class="method-response">
 {
 	"resourceId":20,
 	"changes":{
-		"recurrenceInterval":2
+		"recurrenceInterval":2,
+		"allowPartialTransfer":true
 	}
 }
 	        </code>
@@ -37164,7 +37211,7 @@ Request Body:
 			<div class="method-section">
 				<div class="method-description">
 					<h4>Update Entry in Data Table (One to Many)</h4>
-					<p>Updates the row (if it exists) of the data table.</p>
+					<p>Updates the row (if it exists) of the data table. A data table that is one-to-one with the application table refuses an entry id.</p>
 				</div>
 				<div class="method-example">
 					<code class="method-declaration">
@@ -37222,8 +37269,9 @@ Request Body:
 			<div class="method-section">
 				<div class="method-description">
 					<h4>Delete Entry in Datatable (One to Many)</h4>
-					<p>Deletes the entry (if it exists) for data tables that are
-						one to many with the application table.</p>
+					<p>Deletes the entry for data tables that are one to many with the application table.
+						An entry that does not belong to apptableId is not found. A data table that is
+						one-to-one with the application table refuses an entry id.</p>
 				</div>
 				<div class="method-example">
 					<code class="method-declaration">
@@ -41019,6 +41067,15 @@ No Request Body:
                         	products etc shall be excluded)
                         	<br/>
                         	Set to "false" by default if not passed in explicity
+                        </dd>
+                        <dt>entrySource</dt>
+                        <dd>
+                            String <span>optional</span>
+                        </dd>
+                        <dd>MANUAL returns manual entries, their reversals and opening
+                            balances; SYSTEM returns the entries posted by the system.
+                            Any other value is rejected. Combined with
+                            manualEntriesOnly=true, SYSTEM returns no entries.
                         </dd>
                         <dt>fromDate</dt>
                         <dd>

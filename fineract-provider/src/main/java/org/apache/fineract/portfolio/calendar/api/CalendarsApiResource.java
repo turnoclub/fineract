@@ -18,14 +18,9 @@
  */
 package org.apache.fineract.portfolio.calendar.api;
 
-import static org.apache.fineract.portfolio.calendar.domain.CalendarEntityType.CENTERS;
-import static org.apache.fineract.portfolio.calendar.domain.CalendarEntityType.CLIENTS;
-import static org.apache.fineract.portfolio.calendar.domain.CalendarEntityType.GROUPS;
-import static org.apache.fineract.portfolio.calendar.domain.CalendarEntityType.LOANS;
-import static org.apache.fineract.portfolio.calendar.domain.CalendarEntityType.SAVINGS;
-
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.DELETE;
 import jakarta.ws.rs.DefaultValue;
@@ -43,23 +38,28 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
-import java.util.Map;
+import java.util.Locale;
 import java.util.Set;
 import lombok.RequiredArgsConstructor;
-import org.apache.fineract.commands.domain.CommandWrapper;
-import org.apache.fineract.commands.service.CommandWrapperBuilder;
-import org.apache.fineract.commands.service.PortfolioCommandSourceWritePlatformService;
+import org.apache.fineract.command.core.CommandDispatcher;
+import org.apache.fineract.infrastructure.core.annotation.AlternativeOperationId;
 import org.apache.fineract.infrastructure.core.api.ApiParameterHelper;
 import org.apache.fineract.infrastructure.core.api.ApiRequestParameterHelper;
-import org.apache.fineract.infrastructure.core.data.CommandProcessingResult;
 import org.apache.fineract.infrastructure.core.data.EnumOptionData;
 import org.apache.fineract.infrastructure.core.serialization.ApiRequestJsonSerializationSettings;
 import org.apache.fineract.infrastructure.core.serialization.DefaultToApiJsonSerializer;
 import org.apache.fineract.infrastructure.security.service.PlatformSecurityContext;
+import org.apache.fineract.portfolio.calendar.command.CalendarCreateCommand;
+import org.apache.fineract.portfolio.calendar.command.CalendarDeleteCommand;
+import org.apache.fineract.portfolio.calendar.command.CalendarUpdateCommand;
+import org.apache.fineract.portfolio.calendar.data.CalendarCreateRequest;
+import org.apache.fineract.portfolio.calendar.data.CalendarCreateResponse;
 import org.apache.fineract.portfolio.calendar.data.CalendarData;
-import org.apache.fineract.portfolio.calendar.data.request.CalendarRequest;
+import org.apache.fineract.portfolio.calendar.data.CalendarDeleteRequest;
+import org.apache.fineract.portfolio.calendar.data.CalendarDeleteResponse;
+import org.apache.fineract.portfolio.calendar.data.CalendarUpdateRequest;
+import org.apache.fineract.portfolio.calendar.data.CalendarUpdateResponse;
 import org.apache.fineract.portfolio.calendar.domain.CalendarEntityType;
-import org.apache.fineract.portfolio.calendar.exception.CalendarEntityTypeNotSupportedException;
 import org.apache.fineract.portfolio.calendar.service.CalendarDropdownReadPlatformService;
 import org.apache.fineract.portfolio.calendar.service.CalendarReadPlatformService;
 import org.apache.fineract.portfolio.calendar.service.CalendarUtils;
@@ -77,8 +77,8 @@ public class CalendarsApiResource {
     private final CalendarReadPlatformService readPlatformService;
     private final DefaultToApiJsonSerializer<CalendarData> toApiJsonSerializer;
     private final ApiRequestParameterHelper apiRequestParameterHelper;
-    private final PortfolioCommandSourceWritePlatformService commandsSourceWritePlatformService;
     private final CalendarDropdownReadPlatformService dropdownReadPlatformService;
+    private final CommandDispatcher dispatcher;
 
     @GET
     @Path("{calendarId}")
@@ -88,7 +88,7 @@ public class CalendarsApiResource {
             @PathParam("entityId") final Long entityId, @Context final UriInfo uriInfo) {
 
         context.authenticatedUser().validateHasReadPermission(RESOURCE_NAME_FOR_PERMISSIONS);
-        final Integer entityTypeId = CalendarEntityType.valueOf(entityType.toUpperCase()).getValue();
+        final Integer entityTypeId = CalendarEntityType.valueOf(entityType.toUpperCase(Locale.ROOT)).getValue();
         final ApiRequestJsonSerializationSettings settings = apiRequestParameterHelper.process(uriInfo.getQueryParameters());
 
         CalendarData calendarData = readPlatformService.retrieveCalendar(calendarId, entityId, entityTypeId);
@@ -113,6 +113,7 @@ public class CalendarsApiResource {
     @GET
     @Produces({ MediaType.APPLICATION_JSON })
     @Operation(summary = "Retrieve Calendars by Entity", operationId = "retrieveCalendarsByEntityId")
+    @AlternativeOperationId("retrieveCalendarsByEntity")
     public List<CalendarData> retrieveCalendarsByEntity(@PathParam("entityType") final String entityType,
             @PathParam("entityId") final Long entityId, @Context final UriInfo uriInfo,
             @DefaultValue("all") @QueryParam("calendarType") final String calendarType) {
@@ -125,11 +126,11 @@ public class CalendarsApiResource {
 
         if (!associationParameters.isEmpty() && associationParameters.contains("parentCalendars")) {
             calendarsData.addAll(readPlatformService.retrieveParentCalendarsByEntity(entityId,
-                    CalendarEntityType.valueOf(entityType.toUpperCase()).getValue(), calendarTypeOptions));
+                    CalendarEntityType.valueOf(entityType.toUpperCase(Locale.ROOT)).getValue(), calendarTypeOptions));
         }
 
         calendarsData.addAll(readPlatformService.retrieveCalendarsByEntity(entityId,
-                CalendarEntityType.valueOf(entityType.toUpperCase()).getValue(), calendarTypeOptions));
+                CalendarEntityType.valueOf(entityType.toUpperCase(Locale.ROOT)).getValue(), calendarTypeOptions));
 
         return readPlatformService.updateWithRecurringDates(calendarsData);
     }
@@ -138,6 +139,7 @@ public class CalendarsApiResource {
     @Path("template")
     @Produces({ MediaType.APPLICATION_JSON })
     @Operation(summary = "Retrieve Calendar Template", operationId = "retrieveTemplateCalendar")
+    @AlternativeOperationId("retrieveNewCalendarDetails")
     public CalendarData retrieveNewCalendarDetails(@Context final UriInfo uriInfo, @PathParam("entityType") final String entityType,
             @PathParam("entityId") final Long entityId) {
         context.authenticatedUser().validateHasReadPermission(RESOURCE_NAME_FOR_PERMISSIONS);
@@ -148,20 +150,13 @@ public class CalendarsApiResource {
     @Consumes({ MediaType.APPLICATION_JSON })
     @Produces({ MediaType.APPLICATION_JSON })
     @Operation(summary = "Create a Calendar", operationId = "createCalendar")
-    public CommandProcessingResult createCalendar(@PathParam("entityType") final String entityType,
-            @PathParam("entityId") final Long entityId, CalendarRequest calendarRequest) {
-
-        final CalendarEntityType calendarEntityType = CalendarEntityType.getEntityType(entityType);
-        if (calendarEntityType == null) {
-            throw new CalendarEntityTypeNotSupportedException(entityType);
-        }
-
-        final CommandWrapper resourceDetails = getResourceDetails(calendarEntityType, entityId);
-        final CommandWrapper commandRequest = new CommandWrapperBuilder().createCalendar(resourceDetails, entityType, entityId)
-                .withJson(toApiJsonSerializer.serialize(calendarRequest)).build();
-
-        return commandsSourceWritePlatformService.logCommandSource(commandRequest);
-
+    public CalendarCreateResponse createCalendar(@PathParam("entityType") final String entityType,
+            @PathParam("entityId") final Long entityId, @Valid final CalendarCreateRequest request) {
+        request.setEntityType(entityType);
+        request.setEntityId(entityId);
+        final CalendarCreateCommand command = new CalendarCreateCommand();
+        command.setPayload(request);
+        return dispatcher.<CalendarCreateRequest, CalendarCreateResponse>dispatch(command).get();
     }
 
     @PUT
@@ -169,25 +164,26 @@ public class CalendarsApiResource {
     @Consumes({ MediaType.APPLICATION_JSON })
     @Produces({ MediaType.APPLICATION_JSON })
     @Operation(summary = "Update a Calendar", operationId = "updateCalendar")
-    public CommandProcessingResult updateCalendar(@PathParam("entityType") final String entityType,
-            @PathParam("entityId") final Long entityId, @PathParam("calendarId") final Long calendarId, final String jsonRequestBody) {
-
-        final CommandWrapper commandRequest = new CommandWrapperBuilder().updateCalendar(entityType, entityId, calendarId)
-                .withJson(jsonRequestBody).build();
-
-        return commandsSourceWritePlatformService.logCommandSource(commandRequest);
+    public CalendarUpdateResponse updateCalendar(@PathParam("entityType") final String entityType,
+            @PathParam("entityId") final Long entityId, @PathParam("calendarId") final Long calendarId,
+            @Valid final CalendarUpdateRequest request) {
+        request.setEntityType(entityType);
+        request.setEntityId(entityId);
+        request.setCalendarId(calendarId);
+        final CalendarUpdateCommand command = new CalendarUpdateCommand();
+        command.setPayload(request);
+        return dispatcher.<CalendarUpdateRequest, CalendarUpdateResponse>dispatch(command).get();
     }
 
     @DELETE
     @Path("{calendarId}")
     @Produces({ MediaType.APPLICATION_JSON })
     @Operation(summary = "Delete a Calendar", operationId = "deleteCalendar")
-    public CommandProcessingResult deleteCalendar(@PathParam("entityType") final String entityType,
+    public CalendarDeleteResponse deleteCalendar(@PathParam("entityType") final String entityType,
             @PathParam("entityId") final Long entityId, @PathParam("calendarId") final Long calendarId) {
-
-        final CommandWrapper commandRequest = new CommandWrapperBuilder().deleteCalendar(entityType, entityId, calendarId).build();
-
-        return commandsSourceWritePlatformService.logCommandSource(commandRequest);
+        final CalendarDeleteCommand command = new CalendarDeleteCommand();
+        command.setPayload(CalendarDeleteRequest.builder().calendarId(calendarId).build());
+        return dispatcher.<CalendarDeleteRequest, CalendarDeleteResponse>dispatch(command).get();
     }
 
     private CalendarData handleTemplate(final CalendarData calendarData) {
@@ -202,12 +198,4 @@ public class CalendarsApiResource {
                 .setRemindByOptions(remindByOptions).setFrequencyOptions(frequencyOptions).setRepeatsOnDayOptions(repeatsOnDayOptions)
                 .setFrequencyNthDayTypeOptions(frequencyNthDayTypeOptions);
     }
-
-    private CommandWrapper getResourceDetails(final CalendarEntityType type, final Long entityId) {
-        final CommandWrapperBuilder resourceDetails = new CommandWrapperBuilder();
-        return Map.of(CENTERS, resourceDetails.withGroupId(entityId).build(), CLIENTS, resourceDetails.withClientId(entityId).build(),
-                GROUPS, resourceDetails.withGroupId(entityId).build(), LOANS, resourceDetails.withLoanId(entityId).build(), SAVINGS,
-                resourceDetails.withSavingsId(entityId).build()).getOrDefault(type, resourceDetails.build());
-    }
-
 }

@@ -19,12 +19,17 @@
 package org.apache.fineract.test.stepdef.common;
 
 import static org.apache.fineract.client.feign.util.FeignCalls.ok;
+import static org.assertj.core.api.Assertions.assertThat;
 
+import io.cucumber.java.en.Then;
 import io.cucumber.java.en.When;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import lombok.RequiredArgsConstructor;
 import org.apache.fineract.client.feign.FineractFeignClient;
+import org.apache.fineract.client.models.GetPermissionsResponse;
+import org.apache.fineract.client.models.PostOfficesResponse;
 import org.apache.fineract.client.models.PostRolesRequest;
 import org.apache.fineract.client.models.PostRolesResponse;
 import org.apache.fineract.client.models.PostUsersRequest;
@@ -33,19 +38,28 @@ import org.apache.fineract.client.models.PutRolesRoleIdPermissionsRequest;
 import org.apache.fineract.test.helper.Utils;
 import org.apache.fineract.test.stepdef.AbstractStepDef;
 import org.apache.fineract.test.support.TestContextKey;
-import org.springframework.beans.factory.annotation.Autowired;
 
+@RequiredArgsConstructor
 public class UserStepDef extends AbstractStepDef {
 
     private static final String EMAIL = "test@test.com";
 
-    @Autowired
-    private FineractFeignClient fineractClient;
+    private final FineractFeignClient fineractClient;
 
     private static final String PWD_USER_WITH_ROLE = "1234567890Aa!";
 
     @When("Admin creates new user with {string} username, {string} role name and given permissions:")
     public void createUserWithUsernameAndRoles(String username, String roleName, List<String> permissions) {
+        createUserWithUsernameAndRoles(username, roleName, permissions, 1L);
+    }
+
+    @When("Admin creates new user with {string} username, {string} role name, assigned to the last created office and given permissions:")
+    public void createUserInLastCreatedOffice(String username, String roleName, List<String> permissions) {
+        PostOfficesResponse officeResponse = testContext().get(TestContextKey.OFFICE_CREATE_RESPONSE);
+        createUserWithUsernameAndRoles(username, roleName, permissions, officeResponse.getOfficeId());
+    }
+
+    private void createUserWithUsernameAndRoles(String username, String roleName, List<String> permissions, Long officeId) {
         ok(() -> fineractClient.roles().retrieveAllRoles());
         PostRolesRequest newRoleRequest = new PostRolesRequest().name(Utils.randomStringGenerator(roleName, 8)).description(roleName);
         PostRolesResponse createNewRole = ok(() -> fineractClient.roles().createRole(newRoleRequest));
@@ -63,7 +77,7 @@ public class UserStepDef extends AbstractStepDef {
                 .firstname(Utils.randomFirstNameGenerator()) //
                 .lastname(Utils.randomLastNameGenerator()) //
                 .sendPasswordToEmail(Boolean.FALSE) //
-                .officeId(1L) //
+                .officeId(officeId) //
                 .password(PWD_USER_WITH_ROLE) //
                 .repeatPassword(PWD_USER_WITH_ROLE) //
                 .roles(List.of(roleId));
@@ -72,5 +86,15 @@ public class UserStepDef extends AbstractStepDef {
         testContext().set(TestContextKey.CREATED_SIMPLE_USER_RESPONSE, createUserResponse);
         testContext().set(TestContextKey.CREATED_SIMPLE_USER_USERNAME, generatedUsername);
         testContext().set(TestContextKey.CREATED_SIMPLE_USER_PASSWORD, PWD_USER_WITH_ROLE);
+    }
+
+    @Then("Permission {string} is returned with grouping {string}, entity {string} and action {string}")
+    public void verifyPermissionIsReturned(final String code, final String grouping, final String entityName, final String actionName) {
+        final List<GetPermissionsResponse> permissions = ok(() -> fineractClient.permissions().retrieveAllPermissions());
+        final GetPermissionsResponse permission = permissions.stream().filter(p -> code.equals(p.getCode())).findFirst()
+                .orElseThrow(() -> new AssertionError("Permission " + code + " is not returned by GET /permissions"));
+        assertThat(permission.getGrouping()).isEqualTo(grouping);
+        assertThat(permission.getEntityName()).isEqualTo(entityName);
+        assertThat(permission.getActionName()).isEqualTo(actionName);
     }
 }

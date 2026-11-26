@@ -18,27 +18,21 @@
  */
 package org.apache.fineract.cob.loan;
 
-import lombok.extern.slf4j.Slf4j;
+import org.apache.fineract.cob.AbstractAccountItemReader;
 import org.apache.fineract.cob.service.BeforeStepLockingItemReaderHelper;
-import org.apache.fineract.portfolio.loanaccount.domain.Loan;
-import org.apache.fineract.portfolio.loanaccount.domain.LoanRepository;
-import org.springframework.batch.core.StepExecution;
-import org.springframework.batch.core.annotation.BeforeStep;
-import org.springframework.lang.NonNull;
+import org.jspecify.annotations.NonNull;
+import org.springframework.batch.core.step.StepExecution;
 
-@Slf4j
-public class LoanItemReader extends AbstractLoanItemReader<Loan> {
+public class LoanItemReader extends AbstractAccountItemReader {
 
     private final BeforeStepLockingItemReaderHelper beforeStepLockingItemReaderHelper;
 
-    public LoanItemReader(LoanRepository loanRepository, BeforeStepLockingItemReaderHelper beforeStepLockingItemReaderHelper) {
-        super(loanRepository);
+    public LoanItemReader(BeforeStepLockingItemReaderHelper beforeStepLockingItemReaderHelper) {
         this.beforeStepLockingItemReaderHelper = beforeStepLockingItemReaderHelper;
     }
 
-    @BeforeStep
+    @Override
     public void beforeStep(@NonNull StepExecution stepExecution) {
         setRemainingData(beforeStepLockingItemReaderHelper.filterRemainingData(stepExecution));
     }
-
 }

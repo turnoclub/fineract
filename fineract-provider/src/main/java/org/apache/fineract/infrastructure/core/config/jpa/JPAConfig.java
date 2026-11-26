@@ -19,9 +19,11 @@
 
 package org.apache.fineract.infrastructure.core.config.jpa;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import javax.sql.DataSource;
@@ -31,12 +33,14 @@ import org.apache.fineract.infrastructure.core.persistence.DatabaseSelectingPers
 import org.apache.fineract.infrastructure.core.service.database.DatabaseTypeResolver;
 import org.apache.fineract.infrastructure.core.service.database.RoutingDataSource;
 import org.eclipse.persistence.config.PersistenceUnitProperties;
+import org.eclipse.persistence.sessions.SessionCustomizer;
+import org.springframework.beans.factory.ListableBeanFactory;
 import org.springframework.beans.factory.ObjectProvider;
-import org.springframework.boot.autoconfigure.orm.jpa.EntityManagerFactoryBuilderCustomizer;
-import org.springframework.boot.autoconfigure.orm.jpa.JpaBaseConfiguration;
-import org.springframework.boot.autoconfigure.orm.jpa.JpaProperties;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
-import org.springframework.boot.orm.jpa.EntityManagerFactoryBuilder;
+import org.springframework.boot.jpa.EntityManagerFactoryBuilder;
+import org.springframework.boot.jpa.autoconfigure.EntityManagerFactoryBuilderCustomizer;
+import org.springframework.boot.jpa.autoconfigure.JpaBaseConfiguration;
+import org.springframework.boot.jpa.autoconfigure.JpaProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.Configuration;
@@ -61,8 +65,7 @@ import org.springframework.transaction.jta.JtaTransactionManager;
 @EnableJpaRepositories(basePackages = { "org.apache.fineract.**.domain",
         "org.apache.fineract.**.repository" }, excludeFilters = @ComponentScan.Filter(type = FilterType.REGEX, pattern = {
                 "org\\.apache\\.fineract\\.command\\.jdbc\\.store\\.domain\\..*",
-                "org\\.apache\\.fineract\\.infrastructure\\.documentmanagement\\.domain\\..*Repository",
-                "org\\.apache\\.fineract\\.mix\\.domain\\..*Repository" }))
+                "org\\.apache\\.fineract\\.infrastructure\\.documentmanagement\\.domain\\..*Repository" }))
 @EnableConfigurationProperties(JpaProperties.class)
 @Import(JpaAuditingHandlerRegistrar.class)
 public class JPAConfig extends JpaBaseConfiguration {
@@ -95,7 +98,21 @@ public class JPAConfig extends JpaBaseConfiguration {
         vendorProperties.put(PersistenceUnitProperties.WEAVING, "static");
         vendorProperties.put(PersistenceUnitProperties.PERSISTENCE_CONTEXT_CLOSE_ON_COMMIT, "true");
         vendorProperties.put(PersistenceUnitProperties.CACHE_SHARED_DEFAULT, "false");
-        emFactoryCustomizers.forEach(c -> vendorProperties.putAll(c.additionalVendorProperties()));
+        List<SessionCustomizer> sessionCustomizers = new ArrayList<>();
+        emFactoryCustomizers.forEach(customizer -> customizer.additionalVendorProperties().forEach((key, value) -> {
+            if (PersistenceUnitProperties.SESSION_CUSTOMIZER.equals(key) && value instanceof SessionCustomizer sessionCustomizer) {
+                sessionCustomizers.add(sessionCustomizer);
+            } else {
+                vendorProperties.put(key, value);
+            }
+        }));
+        if (!sessionCustomizers.isEmpty()) {
+            vendorProperties.put(PersistenceUnitProperties.SESSION_CUSTOMIZER, (SessionCustomizer) session -> {
+                for (SessionCustomizer customizer : sessionCustomizers) {
+                    customizer.customize(session);
+                }
+            });
+        }
         return vendorProperties;
     }
 
@@ -109,8 +126,9 @@ public class JPAConfig extends JpaBaseConfiguration {
     @Override
     public EntityManagerFactoryBuilder entityManagerFactoryBuilder(JpaVendorAdapter jpaVendorAdapter,
             ObjectProvider<PersistenceUnitManager> persistenceUnitManager,
-            ObjectProvider<EntityManagerFactoryBuilderCustomizer> customizers) {
-        EntityManagerFactoryBuilder builder = super.entityManagerFactoryBuilder(jpaVendorAdapter, persistenceUnitManager, customizers);
+            ObjectProvider<EntityManagerFactoryBuilderCustomizer> customizers, ListableBeanFactory beanFactory) {
+        EntityManagerFactoryBuilder builder = super.entityManagerFactoryBuilder(jpaVendorAdapter, persistenceUnitManager, customizers,
+                beanFactory);
         builder.setPersistenceUnitPostProcessors(getPersistenceUnitPostProcessors());
         return builder;
     }

@@ -1,4 +1,3 @@
-
 /**
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements. See the NOTICE file
@@ -19,6 +18,8 @@
  */
 package org.apache.fineract.command.jdbc;
 
+import static org.apache.fineract.command.jdbc.JdbcCommandConstants.COMMAND_JDBC_PROPERTIES_PREFIX;
+
 import java.io.Serial;
 import java.io.Serializable;
 import lombok.AllArgsConstructor;
@@ -33,7 +34,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 @NoArgsConstructor
 @AllArgsConstructor
 @FieldNameConstants
-@ConfigurationProperties(prefix = "fineract.command.jdbc")
+@ConfigurationProperties(prefix = COMMAND_JDBC_PROPERTIES_PREFIX)
 public final class JdbcCommandProperties implements Serializable {
 
     @Serial

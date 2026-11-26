@@ -18,13 +18,21 @@
  */
 package org.apache.fineract.portfolio.workingcapitalloan.repository;
 
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Optional;
 import org.apache.fineract.infrastructure.core.domain.ExternalId;
+import org.apache.fineract.portfolio.loanaccount.domain.LoanTransactionType;
+import org.apache.fineract.portfolio.workingcapitalloan.data.TransactionDateAndAmountHolder;
+import org.apache.fineract.portfolio.workingcapitalloan.data.TransactionTypeTotalHolder;
 import org.apache.fineract.portfolio.workingcapitalloan.domain.WorkingCapitalLoanTransaction;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 public interface WorkingCapitalLoanTransactionRepository extends JpaRepository<WorkingCapitalLoanTransaction, Long> {
 
@@ -34,7 +42,202 @@ public interface WorkingCapitalLoanTransactionRepository extends JpaRepository<W
 
     Optional<WorkingCapitalLoanTransaction> findByIdAndWcLoan_Id(Long id, Long wcLoanId);
 
+    @Query("""
+            select t from WorkingCapitalLoanTransaction t
+            where t.wcLoan.id = :wcLoanId and t.transactionType = :transactionType and t.reversed = false
+            order by t.id desc
+            """)
+    List<WorkingCapitalLoanTransaction> findActiveByTypeOrderByIdDesc(@Param("wcLoanId") Long wcLoanId,
+            @Param("transactionType") LoanTransactionType transactionType);
+
+    @Query("""
+            select t from WorkingCapitalLoanTransaction t
+            where t.wcLoan.id = :wcLoanId and t.transactionType = :transactionType and t.reversed = false
+              and t.transactionDate = :transactionDate
+            """)
+    Optional<WorkingCapitalLoanTransaction> findActiveByTypeAndTransactionDate(@Param("wcLoanId") Long wcLoanId,
+            @Param("transactionType") LoanTransactionType transactionType, @Param("transactionDate") LocalDate transactionDate);
+
+    /** Net amortized discount fee income from non-reversed transactions: sum(amortization) - sum(adjustment). */
+    // 'else 0' is required by EclipseLink's CASE grammar; EclipseLink also rejects unary negation in JPQL CASE, so the
+    // adjustment branch subtracts via (0 - amount) rather than -amount.
+    @Query("""
+            select coalesce(sum(case when t.transactionType = :amortizationType then t.transactionAmount
+                                     when t.transactionType = :adjustmentType then (0 - t.transactionAmount)
+                                     else 0 end), 0)
+            from WorkingCapitalLoanTransaction t
+            where t.wcLoan.id = :wcLoanId and t.reversed = false
+              and t.transactionType in (:amortizationType, :adjustmentType)
+            """)
+    BigDecimal sumNetAmortization(@Param("wcLoanId") Long wcLoanId, @Param("amortizationType") LoanTransactionType amortizationType,
+            @Param("adjustmentType") LoanTransactionType adjustmentType);
+
+    /**
+     * The same net, restricted to the transactions dated on or before {@code asOfDate}. A COB day compares what the
+     * schedule has earned by that day against what has been posted by that day; summing every amortization whatever its
+     * date would measure the two over different periods, so a replayed day would correct itself against income that
+     * belongs to a later one.
+     */
+    @Query("""
+            select coalesce(sum(case when t.transactionType = :amortizationType then t.transactionAmount
+                                     when t.transactionType = :adjustmentType then (0 - t.transactionAmount)
+                                     else 0 end), 0)
+            from WorkingCapitalLoanTransaction t
+            where t.wcLoan.id = :wcLoanId and t.reversed = false
+              and t.transactionType in (:amortizationType, :adjustmentType)
+              and t.transactionDate <= :asOfDate
+            """)
+    BigDecimal sumNetAmortizationAsOf(@Param("wcLoanId") Long wcLoanId, @Param("amortizationType") LoanTransactionType amortizationType,
+            @Param("adjustmentType") LoanTransactionType adjustmentType, @Param("asOfDate") LocalDate asOfDate);
+
+    /**
+     * Total amount of non-reversed discount fee adjustments dated strictly after {@code date} (not yet effective then).
+     */
+    @Query("""
+            select coalesce(sum(t.transactionAmount), 0)
+            from WorkingCapitalLoanTransaction t
+            where t.wcLoan.id = :wcLoanId and t.reversed = false
+              and t.transactionType = :transactionType and t.transactionDate > :date
+            """)
+    BigDecimal sumDiscountFeeAdjustmentsAfter(@Param("wcLoanId") Long wcLoanId,
+            @Param("transactionType") LoanTransactionType transactionType, @Param("date") LocalDate date);
+
+    /**
+     * Total of the non-reversed transactions of the given types dated on or before {@code date}. Used to rebuild the
+     * charged side of the balance as of a past date: the stored balance is a running snapshot with no date dimension,
+     * so it cannot answer what had been disbursed or discounted by then.
+     */
+    @Query("""
+            select coalesce(sum(t.transactionAmount), 0)
+            from WorkingCapitalLoanTransaction t
+            where t.wcLoan.id = :wcLoanId and t.reversed = false
+              and t.transactionType in :transactionTypes and t.transactionDate <= :date
+            """)
+    BigDecimal sumAmountsOfTypesUpTo(@Param("wcLoanId") Long wcLoanId,
+            @Param("transactionTypes") List<LoanTransactionType> transactionTypes, @Param("date") LocalDate date);
+
+    @Query("""
+            select coalesce(sum(t.transactionAmount), 0)
+            from WorkingCapitalLoanTransaction t
+            where t.wcLoan.id = :wcLoanId and t.reversed = false
+              and t.transactionType in :transactionTypes
+            """)
+    BigDecimal sumActiveAmountsOfTypes(@Param("wcLoanId") Long wcLoanId,
+            @Param("transactionTypes") List<LoanTransactionType> transactionTypes);
+
     Optional<WorkingCapitalLoanTransaction> findByWcLoan_IdAndExternalId(Long wcLoanId, ExternalId externalId);
 
     boolean existsByExternalId(ExternalId externalId);
+
+    boolean existsByReversalExternalId(ExternalId externalId);
+
+    List<WorkingCapitalLoanTransaction> findByWcLoan_IdAndTransactionDateGreaterThanEqualOrderByTransactionDateAscIdAsc(Long wcLoanId,
+            LocalDate boundaryDate);
+
+    @Query("""
+            SELECT t.transactionDate, SUM(t.transactionAmount)
+            FROM WorkingCapitalLoanTransaction t
+            WHERE t.reversed = FALSE
+            AND t.wcLoan.id = :wcLoanId
+            AND t.transactionType in :transactionTypes
+            GROUP BY t.transactionDate
+            """)
+    List<TransactionDateAndAmountHolder> fetchTransactionDateAndAmount(@Param("wcLoanId") Long wcLoanId,
+            @Param("transactionTypes") List<LoanTransactionType> transactionTypes);
+
+    /**
+     * Whether a non-reversed transaction sorts strictly after the given one, in the same (transaction date, id) order
+     * the replay uses. The given transaction is excluded by the strict comparison itself, and reversed transactions no
+     * longer move money so they cannot make an earlier allocation order-dependent.
+     */
+    @Query("""
+            SELECT CASE WHEN COUNT(transaction) > 0 THEN TRUE ELSE FALSE END
+            FROM WorkingCapitalLoanTransaction transaction
+            WHERE transaction.wcLoan.id = :loanId
+            AND transaction.reversed = FALSE
+            AND (transaction.transactionDate > :transactionDate
+                OR (transaction.transactionDate = :transactionDate AND transaction.createdDate > :createdDateTime))
+            """)
+    boolean existsLaterTransaction(@Param("loanId") Long loanId, @Param("transactionDate") LocalDate transactionDate,
+            @Param("createdDateTime") OffsetDateTime createdDateTime);
+
+    @Query("""
+            SELECT t.transactionType, t.reversed, SUM(t.transactionAmount)
+            FROM WorkingCapitalLoanTransaction t
+            WHERE t.wcLoan.id = :wcLoanId
+            AND t.transactionType in :transactionTypes
+            GROUP BY t.transactionType, t.reversed
+            """)
+    List<TransactionTypeTotalHolder> fetchTotalsPerTypeAndReversed(@Param("wcLoanId") Long wcLoanId,
+            @Param("transactionTypes") List<LoanTransactionType> transactionTypes);
+
+    @Query("""
+            SELECT t.transactionDate, t.transactionAmount FROM WorkingCapitalLoanTransaction t
+            WHERE t.wcLoan.id = :wcLoanId
+            AND t.reversed = FALSE
+            AND t.transactionType in :transactionTypes
+            ORDER BY t.transactionDate DESC, t.id DESC
+            """)
+    List<TransactionDateAndAmountHolder> findActiveByTypesOrderByDateDesc(@Param("wcLoanId") Long wcLoanId,
+            @Param("transactionTypes") List<LoanTransactionType> transactionTypes, Pageable pageable);
+
+    @Query("""
+            SELECT t.transactionDate, t.transactionAmount FROM WorkingCapitalLoanTransaction t
+            WHERE t.wcLoan.id = :wcLoanId
+            AND t.reversed = FALSE
+            AND t.transactionType in :transactionTypes
+                        AND t.allocation.overpaymentPortion > 0
+            ORDER BY t.transactionDate ASC, t.submittedOnDate ASC, t.createdDate ASC, t.id DESC
+            """)
+    List<TransactionDateAndAmountHolder> findFirstActiveTransactionDateAndAmountByLoanIdWithOverpaidPortion(
+            @Param("wcLoanId") Long wcLoanId, @Param("transactionTypes") List<LoanTransactionType> transactionTypes, Pageable pageable);
+
+    /**
+     * The date of the latest non-reversed transaction of the given types that was actually needed to meet the loan's
+     * obligations - that is, whose allocation is not wholly overpayment - or {@code null} when there is none.
+     * <p>
+     * Money is allocated in date order, so every transaction up to and including that one paid down something that was
+     * due, and the ones after it are pure excess. That makes its date the day the obligations were met. A plain
+     * {@code MAX(transactionDate)} would answer the same on a loan that is settled exactly, where nothing is excess,
+     * but would name a surplus payment on a loan that is or once was overpaid - a payment the loan never needed, and
+     * which therefore says nothing about when it was settled.
+     * <p>
+     * The left join keeps transactions that carry no allocation at all rather than silently dropping them.
+     */
+    @Query("""
+            SELECT MAX(t.transactionDate) FROM WorkingCapitalLoanTransaction t
+            LEFT JOIN t.allocation a
+            WHERE t.wcLoan.id = :wcLoanId
+            AND t.reversed = FALSE
+            AND t.transactionType in :transactionTypes
+            AND (a IS NULL OR COALESCE(a.overpaymentPortion, 0) < t.transactionAmount)
+            """)
+    LocalDate findLatestActiveTransactionDateWithDuePortion(@Param("wcLoanId") Long wcLoanId,
+            @Param("transactionTypes") List<LoanTransactionType> transactionTypes);
+
+    /** Whether the loan carries a non-reversed transaction of the given type dated exactly on {@code date}. */
+    @Query("""
+            SELECT CASE WHEN COUNT(t) > 0 THEN TRUE ELSE FALSE END FROM WorkingCapitalLoanTransaction t
+            WHERE t.wcLoan.id = :wcLoanId
+            AND t.reversed = FALSE
+            AND t.transactionType = :transactionType
+            AND t.transactionDate = :date
+            """)
+    boolean existsActiveTransactionOn(@Param("wcLoanId") Long wcLoanId, @Param("transactionType") LoanTransactionType transactionType,
+            @Param("date") LocalDate date);
+
+    /**
+     * Non-reversed transactions of the loan whose type is none of {@code excludedTypes}, latest first in the
+     * (transaction date, id) order the replay uses. Used to find the last user transaction without loading the loan's
+     * whole transaction history.
+     */
+    @Query("""
+            SELECT t FROM WorkingCapitalLoanTransaction t
+            WHERE t.wcLoan.id = :wcLoanId
+            AND t.reversed = FALSE
+            AND t.transactionType not in :excludedTypes
+            ORDER BY t.transactionDate DESC, t.id DESC
+            """)
+    List<WorkingCapitalLoanTransaction> findActiveExcludingTypesOrderByDateDesc(@Param("wcLoanId") Long wcLoanId,
+            @Param("excludedTypes") List<LoanTransactionType> excludedTypes, Pageable pageable);
 }

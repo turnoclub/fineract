@@ -30,6 +30,7 @@ import org.apache.fineract.notification.domain.NotificationMapperRepository;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
+import org.springframework.transaction.annotation.Transactional;
 
 @RequiredArgsConstructor
 public class NotificationReadPlatformServiceImpl implements NotificationReadPlatformService {
@@ -40,6 +41,7 @@ public class NotificationReadPlatformServiceImpl implements NotificationReadPlat
     private final NotificationMapperRepository notificationMapperRepository;
 
     @Override
+    @Transactional(readOnly = true)
     public boolean hasUnreadNotifications(Long appUserId) {
         Long tenantId = ThreadLocalContextUtil.getTenant().getId();
         Long now = System.currentTimeMillis() / 1000L;
@@ -94,7 +96,7 @@ public class NotificationReadPlatformServiceImpl implements NotificationReadPlat
         final Long appUserId = context.authenticatedUser().getId();
         final Pageable pageable = toPageable(searchParameters);
         final org.springframework.data.domain.Page<NotificationData> springPage = this.notificationMapperRepository
-                .findNotificationDataByUserIdAndReadStatus(appUserId, false, pageable);
+                .findUnreadNotificationDataByUserId(appUserId, pageable);
         return toFineractPage(springPage);
     }
 
@@ -102,8 +104,9 @@ public class NotificationReadPlatformServiceImpl implements NotificationReadPlat
     public Page<NotificationData> getAllNotifications(final SearchParameters searchParameters) {
         final Long appUserId = context.authenticatedUser().getId();
         final Pageable pageable = toPageable(searchParameters);
+        // Use the new method that doesn't filter by isRead, avoiding the NULL parameter type issue
         final org.springframework.data.domain.Page<NotificationData> springPage = this.notificationMapperRepository
-                .findNotificationDataByUserIdAndReadStatus(appUserId, null, pageable);
+                .findNotificationDataByUserId(appUserId, pageable);
         return toFineractPage(springPage);
     }
 

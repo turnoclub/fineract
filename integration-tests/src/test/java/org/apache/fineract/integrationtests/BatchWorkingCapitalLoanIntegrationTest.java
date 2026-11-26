@@ -18,6 +18,7 @@
  */
 package org.apache.fineract.integrationtests;
 
+import static org.apache.fineract.client.feign.util.FeignCalls.ok;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -27,20 +28,39 @@ import com.jayway.jsonpath.DocumentContext;
 import com.jayway.jsonpath.JsonPath;
 import java.math.BigDecimal;
 import java.time.LocalDate;
-import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.apache.fineract.client.feign.util.CallFailedRuntimeException;
 import org.apache.fineract.client.models.BatchRequest;
 import org.apache.fineract.client.models.BatchResponse;
+import org.apache.fineract.client.models.DelinquencyRangeRequest;
 import org.apache.fineract.client.models.GetWorkingCapitalLoansLoanIdResponse;
-import org.apache.fineract.integrationtests.common.ClientHelper;
+import org.apache.fineract.client.models.MarkWorkingCapitalLoanAsFraudRequest;
+import org.apache.fineract.client.models.PostDelinquencyBucketResponse;
+import org.apache.fineract.client.models.PostDelinquencyRangeResponse;
+import org.apache.fineract.client.models.PostWorkingCapitalLoansBreachActionRequest;
+import org.apache.fineract.client.models.WorkingCapitalBreachRequest;
+import org.apache.fineract.client.models.WorkingCapitalLoanBreachActionData;
+import org.apache.fineract.client.models.WorkingCapitalLoanDelinquencyActionData;
+import org.apache.fineract.client.models.WorkingCapitalLoanNearBreachActionData;
+import org.apache.fineract.client.models.WorkingCapitalNearBreachRequest;
+import org.apache.fineract.integrationtests.client.feign.helpers.FeignClientHelper;
+import org.apache.fineract.integrationtests.client.feign.helpers.FeignDelinquencyHelper;
+import org.apache.fineract.integrationtests.client.feign.modules.ClientRequestBuilders;
+import org.apache.fineract.integrationtests.common.FineractFeignClientHelper;
 import org.apache.fineract.integrationtests.common.Utils;
 import org.apache.fineract.integrationtests.common.batch.BatchServiceHelper;
 import org.apache.fineract.integrationtests.common.workingcapitalloan.WorkingCapitalLoanApplicationTestBuilder;
+import org.apache.fineract.integrationtests.common.workingcapitalloan.WorkingCapitalLoanDelinquencyActionHelper;
+import org.apache.fineract.integrationtests.common.workingcapitalloan.WorkingCapitalLoanDelinquencyRangeScheduleHelper;
 import org.apache.fineract.integrationtests.common.workingcapitalloan.WorkingCapitalLoanDisbursementTestBuilder;
 import org.apache.fineract.integrationtests.common.workingcapitalloan.WorkingCapitalLoanHelper;
+import org.apache.fineract.integrationtests.common.workingcapitalloanbreach.WorkingCapitalBreachHelper;
+import org.apache.fineract.integrationtests.common.workingcapitalloanbreach.WorkingCapitalLoanBreachActionHelper;
+import org.apache.fineract.integrationtests.common.workingcapitalloannearbreach.WorkingCapitalLoanNearBreachActionsHelper;
+import org.apache.fineract.integrationtests.common.workingcapitalloannearbreach.WorkingCapitalNearBreachHelper;
 import org.apache.fineract.integrationtests.common.workingcapitalloanproduct.WorkingCapitalLoanProductHelper;
 import org.apache.fineract.integrationtests.common.workingcapitalloanproduct.WorkingCapitalLoanProductTestBuilder;
 import org.apache.http.HttpStatus;
@@ -50,16 +70,27 @@ import org.junit.jupiter.api.Test;
 /**
  * Integration tests for the Working Capital Loan Batch API endpoints. Tests that the batch command strategies for
  * working capital loans correctly process submit, modify, approve, disburse, repayment, delete, and GET requests
- * through the batch API.
+ * through the batch API, as well as the breach, delinquency and near breach actions.
  */
 public class BatchWorkingCapitalLoanIntegrationTest {
 
+    private final FeignClientHelper clientHelper = new FeignClientHelper(FineractFeignClientHelper.getFineractFeignClient());
     private final BatchServiceHelper batchServiceHelper = new BatchServiceHelper();
     private final WorkingCapitalLoanHelper loanHelper = new WorkingCapitalLoanHelper();
     private final WorkingCapitalLoanProductHelper productHelper = new WorkingCapitalLoanProductHelper();
+    private final WorkingCapitalBreachHelper breachHelper = new WorkingCapitalBreachHelper();
+    private final WorkingCapitalNearBreachHelper nearBreachHelper = new WorkingCapitalNearBreachHelper();
+    private final WorkingCapitalLoanBreachActionHelper breachActionHelper = new WorkingCapitalLoanBreachActionHelper();
+    private final WorkingCapitalLoanNearBreachActionsHelper nearBreachActionsHelper = new WorkingCapitalLoanNearBreachActionsHelper();
 
     private final List<Long> createdLoanIds = new ArrayList<>();
     private final List<Long> createdProductIds = new ArrayList<>();
+    private final List<Long> createdBreachIds = new ArrayList<>();
+    private final List<Long> createdNearBreachIds = new ArrayList<>();
+    private final List<Long> createdDelinquencyBucketIds = new ArrayList<>();
+    private final List<Long> createdDelinquencyRangeIds = new ArrayList<>();
+
+    private final FeignDelinquencyHelper delinquencyHelper = new FeignDelinquencyHelper(FineractFeignClientHelper.getFineractFeignClient());
 
     @AfterEach
     void cleanupEntities() {
@@ -96,6 +127,42 @@ public class BatchWorkingCapitalLoanIntegrationTest {
             }
         }
         createdProductIds.clear();
+
+        for (final Long breachId : createdBreachIds) {
+            try {
+                breachHelper.delete(breachId);
+            } catch (final CallFailedRuntimeException ignored) {
+                // best-effort cleanup
+            }
+        }
+        createdBreachIds.clear();
+
+        for (final Long nearBreachId : createdNearBreachIds) {
+            try {
+                nearBreachHelper.delete(nearBreachId);
+            } catch (final CallFailedRuntimeException ignored) {
+                // best-effort cleanup
+            }
+        }
+        createdNearBreachIds.clear();
+
+        for (final Long bucketId : createdDelinquencyBucketIds) {
+            try {
+                WorkingCapitalLoanDelinquencyRangeScheduleHelper.deleteBucket(bucketId);
+            } catch (final CallFailedRuntimeException ignored) {
+                // best-effort cleanup
+            }
+        }
+        createdDelinquencyBucketIds.clear();
+
+        for (final Long rangeId : createdDelinquencyRangeIds) {
+            try {
+                ok(() -> FineractFeignClientHelper.getFineractFeignClient().delinquencyRangeAndBucketsManagement().deleteRange(rangeId));
+            } catch (final CallFailedRuntimeException ignored) {
+                // best-effort cleanup
+            }
+        }
+        createdDelinquencyRangeIds.clear();
     }
 
     /**
@@ -136,7 +203,7 @@ public class BatchWorkingCapitalLoanIntegrationTest {
     public void testWorkingCapitalLoanLifecycleViaBatchApiByLoanId() {
         final Long productId = createProduct();
         final Long clientId = createClient();
-        final LocalDate today = LocalDate.now(ZoneId.systemDefault());
+        final LocalDate today = Utils.getLocalDateOfTenant();
 
         final String submitBody = new Gson().toJson(new WorkingCapitalLoanApplicationTestBuilder() //
                 .withClientId(clientId) //
@@ -144,6 +211,7 @@ public class BatchWorkingCapitalLoanIntegrationTest {
                 .withPrincipal(BigDecimal.valueOf(5000)) //
                 .withPeriodPaymentRate(WorkingCapitalLoanProductTestBuilder.DEFAULT_PERIOD_PAYMENT_RATE_PERCENT) //
                 .withTotalPaymentVolume(BigDecimal.valueOf(5500)) //
+                .withSubmittedOnDate(today) //
                 .buildSubmitRequest());
 
         // Submit via batch
@@ -213,7 +281,7 @@ public class BatchWorkingCapitalLoanIntegrationTest {
     public void testWorkingCapitalLoanLifecycleViaSingleBatchApiCallByLoanId() {
         final Long productId = createProduct();
         final Long clientId = createClient();
-        final LocalDate today = LocalDate.now(ZoneId.systemDefault());
+        final LocalDate today = Utils.getLocalDateOfTenant();
 
         List<BatchRequest> batchRequests = new ArrayList<>();
 
@@ -223,6 +291,7 @@ public class BatchWorkingCapitalLoanIntegrationTest {
                 .withPrincipal(BigDecimal.valueOf(5000)) //
                 .withPeriodPaymentRate(WorkingCapitalLoanProductTestBuilder.DEFAULT_PERIOD_PAYMENT_RATE_PERCENT) //
                 .withTotalPaymentVolume(BigDecimal.valueOf(5500)) //
+                .withSubmittedOnDate(today) //
                 .buildSubmitRequest());
 
         // Submit via batch
@@ -337,6 +406,84 @@ public class BatchWorkingCapitalLoanIntegrationTest {
         assertEquals(1, responses.size());
         assertEquals(HttpStatus.SC_OK, responses.get(0).getStatusCode(),
                 "Expected HTTP 200 for modify working capital loan by external id via batch");
+
+        createdLoanIds.add(loanId);
+        createdProductIds.add(productId);
+    }
+
+    /**
+     * Tests that a working capital loan can be marked as fraud via the Batch API by loan ID.
+     */
+    @Test
+    public void testMarkWorkingCapitalLoanAsFraudViaBatchApiByLoanId() {
+        final Long productId = createProduct();
+        final Long clientId = createClient();
+        final LocalDate today = Utils.getLocalDateOfTenant();
+
+        final Long loanId = submitAndTrack(new WorkingCapitalLoanApplicationTestBuilder() //
+                .withClientId(clientId) //
+                .withProductId(productId) //
+                .withPrincipal(BigDecimal.valueOf(5000)) //
+                .withPeriodPaymentRate(WorkingCapitalLoanProductTestBuilder.DEFAULT_PERIOD_PAYMENT_RATE_PERCENT) //
+                .withTotalPaymentVolume(BigDecimal.valueOf(5500)) //
+                .withSubmittedOnDate(today) //
+                .buildSubmitRequest());
+
+        // A loan can only be marked as fraud while active.
+        loanHelper.approveById(loanId, WorkingCapitalLoanApplicationTestBuilder.buildApproveRequest(today, BigDecimal.valueOf(5000), null));
+        loanHelper.disburseById(loanId, WorkingCapitalLoanDisbursementTestBuilder.buildDisburseRequest(today, BigDecimal.valueOf(5000)));
+
+        final String markAsFraudBody = new Gson().toJson(new MarkWorkingCapitalLoanAsFraudRequest().fraud(true));
+
+        final BatchRequest markAsFraudRequest = buildBatchRequest(1L, null, "v1/working-capital-loans/" + loanId + "/mark-as-fraud", "PUT",
+                markAsFraudBody);
+
+        final List<BatchResponse> responses = batchServiceHelper.handleBatch(markAsFraudRequest, false);
+
+        assertEquals(1, responses.size());
+        assertEquals(HttpStatus.SC_OK, responses.get(0).getStatusCode(),
+                "Expected HTTP 200 for mark working capital loan as fraud via batch");
+        assertEquals(Boolean.TRUE, loanHelper.retrieveById(loanId).getFraud());
+
+        createdLoanIds.add(loanId);
+        createdProductIds.add(productId);
+    }
+
+    /**
+     * Tests that a working capital loan can be marked as fraud via the Batch API by external ID.
+     */
+    @Test
+    public void testMarkWorkingCapitalLoanAsFraudViaBatchApiByExternalId() {
+        final Long productId = createProduct();
+        final Long clientId = createClient();
+        final String externalId = "wcl-batch-" + UUID.randomUUID().toString().substring(0, 8);
+        final LocalDate today = Utils.getLocalDateOfTenant();
+
+        final Long loanId = submitAndTrack(new WorkingCapitalLoanApplicationTestBuilder() //
+                .withClientId(clientId) //
+                .withProductId(productId) //
+                .withExternalId(externalId) //
+                .withPrincipal(BigDecimal.valueOf(5000)) //
+                .withPeriodPaymentRate(WorkingCapitalLoanProductTestBuilder.DEFAULT_PERIOD_PAYMENT_RATE_PERCENT) //
+                .withTotalPaymentVolume(BigDecimal.valueOf(5500)) //
+                .withSubmittedOnDate(today) //
+                .buildSubmitRequest());
+
+        // A loan can only be marked as fraud while active.
+        loanHelper.approveById(loanId, WorkingCapitalLoanApplicationTestBuilder.buildApproveRequest(today, BigDecimal.valueOf(5000), null));
+        loanHelper.disburseById(loanId, WorkingCapitalLoanDisbursementTestBuilder.buildDisburseRequest(today, BigDecimal.valueOf(5000)));
+
+        final String markAsFraudBody = new Gson().toJson(new MarkWorkingCapitalLoanAsFraudRequest().fraud(true));
+
+        final BatchRequest markAsFraudRequest = buildBatchRequest(1L, null,
+                "v1/working-capital-loans/external-id/" + externalId + "/mark-as-fraud", "PUT", markAsFraudBody);
+
+        final List<BatchResponse> responses = batchServiceHelper.handleBatch(markAsFraudRequest, false);
+
+        assertEquals(1, responses.size());
+        assertEquals(HttpStatus.SC_OK, responses.get(0).getStatusCode(),
+                "Expected HTTP 200 for mark working capital loan as fraud by external id via batch");
+        assertEquals(Boolean.TRUE, loanHelper.retrieveById(loanId).getFraud());
 
         createdLoanIds.add(loanId);
         createdProductIds.add(productId);
@@ -468,7 +615,7 @@ public class BatchWorkingCapitalLoanIntegrationTest {
         final Long productId = createProduct();
         final Long clientId = createClient();
         final String externalId = "wcl-lc-batch-" + UUID.randomUUID().toString().substring(0, 8);
-        final LocalDate today = LocalDate.now(ZoneId.systemDefault());
+        final LocalDate today = Utils.getLocalDateOfTenant();
 
         final Long loanId = submitAndTrack(new WorkingCapitalLoanApplicationTestBuilder() //
                 .withClientId(clientId) //
@@ -477,6 +624,7 @@ public class BatchWorkingCapitalLoanIntegrationTest {
                 .withPrincipal(BigDecimal.valueOf(5000)) //
                 .withPeriodPaymentRate(WorkingCapitalLoanProductTestBuilder.DEFAULT_PERIOD_PAYMENT_RATE_PERCENT) //
                 .withTotalPaymentVolume(BigDecimal.valueOf(5500)) //
+                .withSubmittedOnDate(today) //
                 .buildSubmitRequest());
 
         // Approve via batch by external id
@@ -521,7 +669,7 @@ public class BatchWorkingCapitalLoanIntegrationTest {
     public void testGetWorkingCapitalLoanTransactionByIdViaBatchApi() {
         final Long productId = createProduct();
         final Long clientId = createClient();
-        final LocalDate today = LocalDate.now(ZoneId.systemDefault());
+        final LocalDate today = Utils.getLocalDateOfTenant();
 
         final Long loanId = submitAndTrack(new WorkingCapitalLoanApplicationTestBuilder() //
                 .withClientId(clientId) //
@@ -529,6 +677,7 @@ public class BatchWorkingCapitalLoanIntegrationTest {
                 .withPrincipal(BigDecimal.valueOf(5000)) //
                 .withPeriodPaymentRate(WorkingCapitalLoanProductTestBuilder.DEFAULT_PERIOD_PAYMENT_RATE_PERCENT) //
                 .withTotalPaymentVolume(BigDecimal.valueOf(5500)) //
+                .withSubmittedOnDate(today) //
                 .buildSubmitRequest());
 
         loanHelper.approveById(loanId, WorkingCapitalLoanApplicationTestBuilder.buildApproveRequest(today, BigDecimal.valueOf(5000), null));
@@ -559,7 +708,7 @@ public class BatchWorkingCapitalLoanIntegrationTest {
         final Long productId = createProduct();
         final Long clientId = createClient();
         final String txnExternalId = "wcl-txn-ext-" + UUID.randomUUID().toString().substring(0, 8);
-        final LocalDate today = LocalDate.now(ZoneId.systemDefault());
+        final LocalDate today = Utils.getLocalDateOfTenant();
 
         final Long loanId = submitAndTrack(new WorkingCapitalLoanApplicationTestBuilder() //
                 .withClientId(clientId) //
@@ -567,6 +716,7 @@ public class BatchWorkingCapitalLoanIntegrationTest {
                 .withPrincipal(BigDecimal.valueOf(5000)) //
                 .withPeriodPaymentRate(WorkingCapitalLoanProductTestBuilder.DEFAULT_PERIOD_PAYMENT_RATE_PERCENT) //
                 .withTotalPaymentVolume(BigDecimal.valueOf(5500)) //
+                .withSubmittedOnDate(today) //
                 .buildSubmitRequest());
 
         loanHelper.approveById(loanId, WorkingCapitalLoanApplicationTestBuilder.buildApproveRequest(today, BigDecimal.valueOf(5000), null));
@@ -595,7 +745,7 @@ public class BatchWorkingCapitalLoanIntegrationTest {
         final Long productId = createProduct();
         final Long clientId = createClient();
         final String loanExternalId = "wcl-txn-batch-" + UUID.randomUUID().toString().substring(0, 8);
-        final LocalDate today = LocalDate.now(ZoneId.systemDefault());
+        final LocalDate today = Utils.getLocalDateOfTenant();
 
         final Long loanId = submitAndTrack(new WorkingCapitalLoanApplicationTestBuilder() //
                 .withClientId(clientId) //
@@ -604,6 +754,7 @@ public class BatchWorkingCapitalLoanIntegrationTest {
                 .withPrincipal(BigDecimal.valueOf(5000)) //
                 .withPeriodPaymentRate(WorkingCapitalLoanProductTestBuilder.DEFAULT_PERIOD_PAYMENT_RATE_PERCENT) //
                 .withTotalPaymentVolume(BigDecimal.valueOf(5500)) //
+                .withSubmittedOnDate(today) //
                 .buildSubmitRequest());
 
         loanHelper.approveById(loanId, WorkingCapitalLoanApplicationTestBuilder.buildApproveRequest(today, BigDecimal.valueOf(5000), null));
@@ -635,7 +786,7 @@ public class BatchWorkingCapitalLoanIntegrationTest {
         final Long clientId = createClient();
         final String loanExternalId = "wcl-txn-batch-" + UUID.randomUUID().toString().substring(0, 8);
         final String txnExternalId = "wcl-txn-ext-" + UUID.randomUUID().toString().substring(0, 8);
-        final LocalDate today = LocalDate.now(ZoneId.systemDefault());
+        final LocalDate today = Utils.getLocalDateOfTenant();
 
         final Long loanId = submitAndTrack(new WorkingCapitalLoanApplicationTestBuilder() //
                 .withClientId(clientId) //
@@ -644,6 +795,7 @@ public class BatchWorkingCapitalLoanIntegrationTest {
                 .withPrincipal(BigDecimal.valueOf(5000)) //
                 .withPeriodPaymentRate(WorkingCapitalLoanProductTestBuilder.DEFAULT_PERIOD_PAYMENT_RATE_PERCENT) //
                 .withTotalPaymentVolume(BigDecimal.valueOf(5500)) //
+                .withSubmittedOnDate(today) //
                 .buildSubmitRequest());
 
         loanHelper.approveById(loanId, WorkingCapitalLoanApplicationTestBuilder.buildApproveRequest(today, BigDecimal.valueOf(5000), null));
@@ -662,6 +814,134 @@ public class BatchWorkingCapitalLoanIntegrationTest {
 
         createdLoanIds.add(loanId);
         createdProductIds.add(productId);
+    }
+
+    /**
+     * Tests that a delinquency action can be batched by loan ID: submit → approve → disburse → pause in a single
+     * enclosing-transaction batch call, the pause resolving the loan created by the first sub-request.
+     */
+    @Test
+    public void testDelinquencyActionViaSingleBatchApiCallByLoanId() {
+        final Long productId = createProductWithDelinquencyBucket();
+        final Long clientId = createClient();
+        final LocalDate today = Utils.getLocalDateOfTenant();
+
+        final List<BatchRequest> batchRequests = buildActiveLoanBatchRequests(clientId, productId, null, today);
+        final String pauseBody = new Gson()
+                .toJson(WorkingCapitalLoanDelinquencyActionHelper.buildActionRequest("pause", today, today.plusDays(10)));
+        batchRequests.add(buildBatchRequest(4L, 1L, "v1/working-capital-loans/$.resourceId/delinquency-actions", "POST", pauseBody));
+
+        final List<BatchResponse> batchResponses = batchServiceHelper.handleBatch(batchRequests, true);
+        final Long loanId = assertAllSucceededAndGetLoanId(batchResponses, 4);
+
+        final List<WorkingCapitalLoanDelinquencyActionData> actions = WorkingCapitalLoanDelinquencyActionHelper
+                .retrieveDelinquencyActions(loanId);
+        assertEquals(1, actions.size());
+        assertEquals(WorkingCapitalLoanDelinquencyActionData.ActionEnum.PAUSE, actions.getFirst().getAction());
+        assertEquals(today, actions.getFirst().getStartDate());
+        assertEquals(today.plusDays(10), actions.getFirst().getEndDate());
+    }
+
+    /**
+     * Tests that a breach action can be batched by loan external ID: submit → approve → disburse → pause in a single
+     * enclosing-transaction batch call, the pause addressing the loan through the external ID sent on submit.
+     */
+    @Test
+    public void testBreachActionViaSingleBatchApiCallByLoanExternalId() {
+        final Long productId = createProductWithBreach(null);
+        final Long clientId = createClient();
+        final String externalId = UUID.randomUUID().toString();
+        final LocalDate today = Utils.getLocalDateOfTenant();
+
+        final List<BatchRequest> batchRequests = buildActiveLoanBatchRequests(clientId, productId, externalId, today);
+        final PostWorkingCapitalLoansBreachActionRequest pauseRequest = new PostWorkingCapitalLoansBreachActionRequest();
+        pauseRequest.setAction("pause");
+        pauseRequest.setStartDate(today.toString());
+        pauseRequest.setEndDate(today.plusDays(10).toString());
+        pauseRequest.setDateFormat("yyyy-MM-dd");
+        pauseRequest.setLocale("en");
+        batchRequests.add(buildBatchRequest(4L, 1L, "v1/working-capital-loans/external-id/" + externalId + "/breach-actions", "POST",
+                new Gson().toJson(pauseRequest)));
+
+        final List<BatchResponse> batchResponses = batchServiceHelper.handleBatch(batchRequests, true);
+        final Long loanId = assertAllSucceededAndGetLoanId(batchResponses, 4);
+
+        final List<WorkingCapitalLoanBreachActionData> actions = breachActionHelper.retrieveBreachActions(loanId);
+        assertEquals(1, actions.size());
+        assertEquals(WorkingCapitalLoanBreachActionData.ActionEnum.PAUSE, actions.getFirst().getAction());
+        assertEquals(today, actions.getFirst().getStartDate());
+        assertEquals(today.plusDays(10), actions.getFirst().getEndDate());
+    }
+
+    /**
+     * Tests that a near breach action can be batched by loan ID: submit → approve → disburse → reschedule in a single
+     * enclosing-transaction batch call, the reschedule resolving the loan created by the first sub-request.
+     */
+    @Test
+    public void testNearBreachActionViaSingleBatchApiCallByLoanId() {
+        final Long nearBreachId = nearBreachHelper
+                .create(new WorkingCapitalNearBreachRequest().nearBreachName(Utils.randomStringGenerator("NearBreach", 12))
+                        .nearBreachThreshold(BigDecimal.valueOf(20)).nearBreachFrequency(7).nearBreachFrequencyType("DAYS"))
+                .getResourceId();
+        createdNearBreachIds.add(nearBreachId);
+        final Long productId = createProductWithBreach(nearBreachId);
+        final Long clientId = createClient();
+        final LocalDate today = Utils.getLocalDateOfTenant();
+
+        final List<BatchRequest> batchRequests = buildActiveLoanBatchRequests(clientId, productId, null, today);
+        final String rescheduleBody = new Gson().toJson(Map.of("action", "RESCHEDULE", "nearBreachThreshold", BigDecimal.valueOf(40),
+                "nearBreachFrequency", 15, "nearBreachFrequencyType", "DAYS", "locale", "en"));
+        batchRequests.add(buildBatchRequest(4L, 1L, "v1/working-capital-loans/$.resourceId/near-breach-actions", "POST", rescheduleBody));
+
+        final List<BatchResponse> batchResponses = batchServiceHelper.handleBatch(batchRequests, true);
+        final Long loanId = assertAllSucceededAndGetLoanId(batchResponses, 4);
+
+        final List<WorkingCapitalLoanNearBreachActionData> history = nearBreachActionsHelper.getNearBreachChangeActionsById(loanId);
+        assertEquals(1, history.size());
+        assertEquals(0, BigDecimal.valueOf(40).compareTo(history.getFirst().getThreshold()));
+        assertEquals(15, history.getFirst().getFrequency());
+        assertEquals("DAYS", history.getFirst().getFrequencyType());
+    }
+
+    /**
+     * Builds the submit → approve → disburse sub-requests that leave a working capital loan active, the approve and
+     * disburse steps referencing the submit through {@code $.resourceId}.
+     */
+    private List<BatchRequest> buildActiveLoanBatchRequests(final Long clientId, final Long productId, final String externalId,
+            final LocalDate today) {
+        final WorkingCapitalLoanApplicationTestBuilder builder = new WorkingCapitalLoanApplicationTestBuilder() //
+                .withClientId(clientId) //
+                .withProductId(productId) //
+                .withPrincipal(BigDecimal.valueOf(5000)) //
+                .withPeriodPaymentRate(WorkingCapitalLoanProductTestBuilder.DEFAULT_PERIOD_PAYMENT_RATE_PERCENT) //
+                .withTotalPaymentVolume(BigDecimal.valueOf(100000)) //
+                .withSubmittedOnDate(today);
+        if (externalId != null) {
+            builder.withExternalId(externalId);
+        }
+        final String submitBody = new Gson().toJson(builder.buildSubmitRequest());
+        final String approveBody = new Gson()
+                .toJson(WorkingCapitalLoanApplicationTestBuilder.buildApproveRequest(today, BigDecimal.valueOf(5000), null));
+        final String disburseBody = new Gson()
+                .toJson(WorkingCapitalLoanDisbursementTestBuilder.buildDisburseRequest(today, BigDecimal.valueOf(5000)));
+
+        final List<BatchRequest> batchRequests = new ArrayList<>();
+        batchRequests.add(buildBatchRequest(1L, null, "v1/working-capital-loans", "POST", submitBody));
+        batchRequests.add(buildBatchRequest(2L, 1L, "v1/working-capital-loans/$.resourceId?command=approve", "POST", approveBody));
+        batchRequests.add(buildBatchRequest(3L, 1L, "v1/working-capital-loans/$.resourceId?command=disburse", "POST", disburseBody));
+        return batchRequests;
+    }
+
+    private Long assertAllSucceededAndGetLoanId(final List<BatchResponse> batchResponses, final int expectedSize) {
+        assertEquals(expectedSize, batchResponses.size());
+        for (final BatchResponse batchResponse : batchResponses) {
+            assertEquals(HttpStatus.SC_OK, batchResponse.getStatusCode(),
+                    "Expected HTTP 200 for request " + batchResponse.getRequestId() + ": " + batchResponse.getBody());
+        }
+        final Long loanId = extractResourceId(batchResponses.getFirst().getBody());
+        assertNotNull(loanId, "Expected a loanId in batch response body");
+        createdLoanIds.add(loanId);
+        return loanId;
     }
 
     private BatchRequest buildBatchRequest(final Long requestId, final Long reference, final String relativeUrl, final String method,
@@ -695,8 +975,44 @@ public class BatchWorkingCapitalLoanIntegrationTest {
         return productId;
     }
 
+    private Long createProductWithDelinquencyBucket() {
+        final PostDelinquencyRangeResponse range = delinquencyHelper.createRange(new DelinquencyRangeRequest()
+                .classification(Utils.randomStringGenerator("DLQ_R_", 10)).minimumAgeDays(1).maximumAgeDays(30).locale("en"));
+        assertNotNull(range);
+        createdDelinquencyRangeIds.add(range.getResourceId());
+        final PostDelinquencyBucketResponse bucket = WorkingCapitalLoanDelinquencyRangeScheduleHelper
+                .createWorkingCapitalLoanDelinquencyBucket(List.of(range.getResourceId()), 30, 0, new BigDecimal("3"), 1);
+        assertNotNull(bucket);
+        createdDelinquencyBucketIds.add(bucket.getResourceId());
+        final String uniqueName = "WCL Batch Product " + UUID.randomUUID().toString().substring(0, 8);
+        final String uniqueShortName = Utils.uniqueRandomStringGenerator("", 4);
+        final Long productId = productHelper.createWorkingCapitalLoanProduct(new WorkingCapitalLoanProductTestBuilder().withName(uniqueName)
+                .withShortName(uniqueShortName).withDelinquencyBucketId(bucket.getResourceId()).build()).getResourceId();
+        assertNotNull(productId);
+        createdProductIds.add(productId);
+        return productId;
+    }
+
+    private Long createProductWithBreach(final Long nearBreachId) {
+        final Long breachId = breachHelper
+                .create(new WorkingCapitalBreachRequest().name(Utils.randomStringGenerator("Breach", 12)).breachFrequency(60)
+                        .breachFrequencyType("DAYS").breachAmountCalculationType("PERCENTAGE").breachAmount(BigDecimal.valueOf(10)));
+        createdBreachIds.add(breachId);
+        final String uniqueName = "WCL Batch Product " + UUID.randomUUID().toString().substring(0, 8);
+        final String uniqueShortName = Utils.uniqueRandomStringGenerator("", 4);
+        final WorkingCapitalLoanProductTestBuilder builder = new WorkingCapitalLoanProductTestBuilder().withName(uniqueName)
+                .withShortName(uniqueShortName).withBreachId(breachId);
+        if (nearBreachId != null) {
+            builder.withNearBreachId(nearBreachId);
+        }
+        final Long productId = productHelper.createWorkingCapitalLoanProduct(builder.build()).getResourceId();
+        assertNotNull(productId);
+        createdProductIds.add(productId);
+        return productId;
+    }
+
     private Long createClient() {
-        return ClientHelper.createClient(ClientHelper.defaultClientCreationRequest()).getClientId();
+        return clientHelper.createClient(ClientRequestBuilders.defaultClient()).getClientId();
     }
 
     private Long extractResourceId(final String responseBody) {

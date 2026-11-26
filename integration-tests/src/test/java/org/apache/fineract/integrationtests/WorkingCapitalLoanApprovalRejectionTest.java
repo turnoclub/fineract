@@ -31,7 +31,9 @@ import java.util.UUID;
 import org.apache.fineract.client.feign.util.CallFailedRuntimeException;
 import org.apache.fineract.client.models.GetWorkingCapitalLoansLoanIdResponse;
 import org.apache.fineract.client.models.PostWorkingCapitalLoansLoanIdRequest;
-import org.apache.fineract.integrationtests.common.ClientHelper;
+import org.apache.fineract.integrationtests.client.feign.helpers.FeignClientHelper;
+import org.apache.fineract.integrationtests.client.feign.modules.ClientRequestBuilders;
+import org.apache.fineract.integrationtests.common.FineractFeignClientHelper;
 import org.apache.fineract.integrationtests.common.Utils;
 import org.apache.fineract.integrationtests.common.workingcapitalloan.WorkingCapitalLoanApplicationTestBuilder;
 import org.apache.fineract.integrationtests.common.workingcapitalloan.WorkingCapitalLoanHelper;
@@ -41,6 +43,7 @@ import org.junit.jupiter.api.Test;
 
 public class WorkingCapitalLoanApprovalRejectionTest {
 
+    private final FeignClientHelper clientHelper = new FeignClientHelper(FineractFeignClientHelper.getFineractFeignClient());
     private final WorkingCapitalLoanHelper applicationHelper = new WorkingCapitalLoanHelper();
     private final WorkingCapitalLoanProductHelper productHelper = new WorkingCapitalLoanProductHelper();
 
@@ -58,7 +61,7 @@ public class WorkingCapitalLoanApprovalRejectionTest {
         final GetWorkingCapitalLoansLoanIdResponse data = retrieveLoan(loanId);
         assert data.getStatus() != null;
         assertEquals("loanStatusType.approved", data.getStatus().getCode());
-        assertEquals(approvedOnDate, data.getApprovedOnDate());
+        assertEquals(approvedOnDate, data.getTimeline().getApprovedOnDate());
         // approvedPrincipal should default to proposedPrincipal
         assertNotNull(data.getApprovedPrincipal());
     }
@@ -91,9 +94,9 @@ public class WorkingCapitalLoanApprovalRejectionTest {
         assert data.getStatus() != null;
         assertEquals("loanStatusType.approved", data.getStatus().getCode());
         assertEqualBigDecimal(approvedAmount, data.getApprovedPrincipal());
-        assertEqualBigDecimal(BigDecimal.valueOf(100), data.getDiscountProposed());
-        assertEqualBigDecimal(discountAmount, data.getDiscountApproved());
-        assertNull(data.getDiscount());
+        assertEqualBigDecimal(BigDecimal.valueOf(100), data.getProposedDiscountFee());
+        assertEqualBigDecimal(discountAmount, data.getApprovedDiscountFee());
+        assertNull(data.getDiscountFee());
     }
 
     @Test
@@ -108,7 +111,7 @@ public class WorkingCapitalLoanApprovalRejectionTest {
         final GetWorkingCapitalLoansLoanIdResponse data = retrieveLoan(loanId);
         assert data.getStatus() != null;
         assertEquals("loanStatusType.rejected", data.getStatus().getCode());
-        assertEquals(rejectedOnDate, data.getRejectedOnDate());
+        assertEquals(rejectedOnDate, data.getTimeline().getRejectedOnDate());
     }
 
     // ===== AC: User should be able to undo the approval; moves back to created state =====
@@ -152,9 +155,9 @@ public class WorkingCapitalLoanApprovalRejectionTest {
 
         final GetWorkingCapitalLoansLoanIdResponse approvedData = retrieveLoan(loanId);
         assertEqualBigDecimal(BigDecimal.valueOf(3000), approvedData.getApprovedPrincipal());
-        assertEqualBigDecimal(BigDecimal.valueOf(100), approvedData.getDiscountProposed());
-        assertEqualBigDecimal(BigDecimal.valueOf(50), approvedData.getDiscountApproved());
-        assertNull(approvedData.getDiscount());
+        assertEqualBigDecimal(BigDecimal.valueOf(100), approvedData.getProposedDiscountFee());
+        assertEqualBigDecimal(BigDecimal.valueOf(50), approvedData.getApprovedDiscountFee());
+        assertNull(approvedData.getDiscountFee());
 
         // Undo approval
         applicationHelper.undoApprovalById(loanId, WorkingCapitalLoanApplicationTestBuilder.buildUndoApproveRequest());
@@ -442,7 +445,7 @@ public class WorkingCapitalLoanApprovalRejectionTest {
      * test JVM and the server (which uses the tenant timezone).
      */
     private LocalDate getSubmittedOnDate(final Long loanId) {
-        return retrieveLoan(loanId).getSubmittedOnDate();
+        return retrieveLoan(loanId).getTimeline().getSubmittedOnDate();
     }
 
     private Long createProduct() {
@@ -465,7 +468,7 @@ public class WorkingCapitalLoanApprovalRejectionTest {
     }
 
     private Long createClient() {
-        return ClientHelper.createClient(ClientHelper.defaultClientCreationRequest()).getClientId();
+        return clientHelper.createClient(ClientRequestBuilders.defaultClient()).getClientId();
     }
 
     private static void assertEqualBigDecimal(final BigDecimal expected, final BigDecimal actual) {

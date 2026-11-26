@@ -18,11 +18,18 @@
  */
 package org.apache.fineract.portfolio.workingcapitalloan.data;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 
 public record WorkingCapitalLoanPeriodPaymentRateChangeData(Long id, Long loanId, LocalDate effectiveDate, BigDecimal previousRate,
-        BigDecimal newRate, boolean reversed, LocalDate reversedOnDate, OffsetDateTime createdDate) {
+        BigDecimal newRate, boolean reversed, LocalDate reversedOnDate,
+        @Schema(deprecated = true, description = "Audit/system timestamp. Prefer submittedOnDate for the booking business/tenant date.") //
+        OffsetDateTime createdDate, LocalDate submittedOnDate,
+        @Schema(description = "Annual EIR of the segment this change opened, as a percentage (e.g. 43.756245), snapshotted when the change was booked") //
+        BigDecimal calculatedAnnualEir,
+        @Schema(description = "Payment amount per repayment period of the segment this change opened (per day on a daily schedule), snapshotted when the change was booked") //
+        BigDecimal dailyPaymentAmount, Integer segmentTerm) {
 
 }

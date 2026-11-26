@@ -29,6 +29,8 @@ import static org.springframework.http.HttpHeaders.CONTENT_LENGTH;
 import static org.springframework.http.MediaType.APPLICATION_OCTET_STREAM_VALUE;
 
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.ws.rs.Consumes;
@@ -163,14 +165,15 @@ public class DocumentApiResource {
             - file
             - description
             """)
-    @ApiResponse(responseCode = "200", description = "Not Shown (multi-part form data)")
+    @ApiResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = DocumentCreateResponse.class)))
     public DocumentCreateResponse createDocument(@PathParam(DOCUMENT_API_PARAM_ENTITY_TYPE) final String entityType,
             @PathParam(DOCUMENT_API_PARAM_ENTITY_ID) final Long entityId, @HeaderParam(CONTENT_LENGTH) final Long fileSize,
             @FormDataParam(DOCUMENT_API_PARAM_FILE) final InputStream is,
             @FormDataParam(DOCUMENT_API_PARAM_FILE) final FormDataContentDisposition fileDetails,
             @FormDataParam(DOCUMENT_API_PARAM_FILE) final FormDataBodyPart filePart,
             @FormDataParam(DOCUMENT_API_PARAM_NAME) final String name,
-            @FormDataParam(DOCUMENT_API_PARAM_DESCRIPTION) final String description) {
+            @FormDataParam(DOCUMENT_API_PARAM_DESCRIPTION) final String description,
+            @FormDataParam("issuanceDate") final String issuanceDate, @FormDataParam("expiryDate") final String expiryDate) {
 
         fileUploadValidator.validate(fileSize, is, fileDetails, filePart);
 
@@ -182,8 +185,9 @@ public class DocumentApiResource {
                 .orElse(APPLICATION_OCTET_STREAM_VALUE);
 
         command.setPayload(DocumentCreateRequest.builder().entityId(entityId).entityType(entityType).name(name).description(description)
-                .fileName(fileDetails.getFileName()).size(fileSize).type(type).stream(is).build());
-
+                .fileName(fileDetails.getFileName()).size(fileSize).type(type).stream(is)
+                .issuanceDate(issuanceDate != null ? java.time.LocalDate.parse(issuanceDate) : null)
+                .expiryDate(expiryDate != null ? java.time.LocalDate.parse(expiryDate) : null).build());
         final Supplier<DocumentCreateResponse> response = dispatcher.dispatch(command);
 
         return response.get();
@@ -203,26 +207,29 @@ public class DocumentApiResource {
             - description: description of the document
             - file: the file to be uploaded
             """)
-    @ApiResponse(responseCode = "200", description = "Not Shown (multi-part form data)")
+    @ApiResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = DocumentUpdateResponse.class)))
     public DocumentUpdateResponse updateDocument(@PathParam(DOCUMENT_API_PARAM_ENTITY_TYPE) final String entityType,
             @PathParam(DOCUMENT_API_PARAM_ENTITY_ID) final Long entityId, @PathParam(DOCUMENT_API_PARAM_DOCUMENT_ID) final Long documentId,
             @HeaderParam(CONTENT_LENGTH) final Long fileSize, @FormDataParam(DOCUMENT_API_PARAM_FILE) final InputStream is,
             @FormDataParam(DOCUMENT_API_PARAM_FILE) final FormDataContentDisposition fileDetails,
             @FormDataParam(DOCUMENT_API_PARAM_FILE) final FormDataBodyPart filePart,
             @FormDataParam(DOCUMENT_API_PARAM_NAME) final String name,
-            @FormDataParam(DOCUMENT_API_PARAM_DESCRIPTION) final String description) {
+            @FormDataParam(DOCUMENT_API_PARAM_DESCRIPTION) final String description,
+            @FormDataParam("issuanceDate") final String issuanceDate, @FormDataParam("expiryDate") final String expiryDate) {
 
         final var command = new DocumentUpdateCommand();
 
         final var request = DocumentUpdateRequest.builder().id(documentId).entityId(entityId).entityType(entityType).name(name)
-                .description(description).stream(is);
+                .description(description).stream(is).issuanceDate(issuanceDate != null ? java.time.LocalDate.parse(issuanceDate) : null)
+                .expiryDate(expiryDate != null ? java.time.LocalDate.parse(expiryDate) : null);
 
         if (fileDetails != null) {
             request.fileName(fileDetails.getFileName()).type(fileDetails.getType()).size(fileSize);
         }
 
         command.setPayload(DocumentUpdateRequest.builder().id(documentId).entityId(entityId).entityType(entityType).name(name)
-                .description(description).stream(is).build());
+                .description(description).stream(is).issuanceDate(issuanceDate != null ? java.time.LocalDate.parse(issuanceDate) : null)
+                .expiryDate(expiryDate != null ? java.time.LocalDate.parse(expiryDate) : null).build());
 
         final Supplier<DocumentUpdateResponse> response = dispatcher.dispatch(command);
 
@@ -234,7 +241,7 @@ public class DocumentApiResource {
     @Path("{documentId}")
     @Operation(summary = "Remove a Document", description = """
             """)
-    @ApiResponse(responseCode = "200", description = "OK")
+    @ApiResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = DocumentDeleteResponse.class)))
     public DocumentDeleteResponse deleteDocument(@PathParam(DOCUMENT_API_PARAM_ENTITY_TYPE) final String entityType,
             @PathParam(DOCUMENT_API_PARAM_ENTITY_ID) final Long entityId,
             @PathParam(DOCUMENT_API_PARAM_DOCUMENT_ID) final Long documentId) {

@@ -48,11 +48,11 @@ import org.apache.fineract.infrastructure.dataqueries.data.ResultsetColumnHeader
 import org.apache.fineract.infrastructure.dataqueries.data.ResultsetColumnValueData;
 import org.apache.fineract.infrastructure.dataqueries.data.ResultsetRowData;
 import org.apache.fineract.infrastructure.dataqueries.exception.DatatableNotFoundException;
+import org.jspecify.annotations.NonNull;
 import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.rowset.SqlRowSet;
 import org.springframework.jdbc.support.rowset.SqlRowSetMetaData;
-import org.springframework.lang.NonNull;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -75,7 +75,33 @@ public class GenericDataServiceImpl implements GenericDataService {
 
             final SqlRowSetMetaData rsmd = rs.getMetaData();
             for (int i = 0; i < rsmd.getColumnCount(); i++) {
-                final String columnName = rsmd.getColumnName(i + 1);
+                final String columnName = rsmd.getColumnLabel(i + 1);
+                final String columnType = rsmd.getColumnTypeName(i + 1);
+
+                final ResultsetColumnHeaderData columnHeader = ResultsetColumnHeaderData.basic(columnName, columnType,
+                        databaseTypeResolver.databaseType());
+                columnHeaders.add(columnHeader);
+            }
+
+            final List<ResultsetRowData> resultsetDataRows = fillResultsetRowData(rs, columnHeaders);
+
+            return new GenericResultsetData(columnHeaders, resultsetDataRows);
+        } catch (DataAccessException e) {
+            log.error("Reporting error: {}", e.getMessage());
+            throw ErrorHandler.getMappable(e, "error.msg.report.unknown.data.integrity.issue", e.getClass().getName(), null, e);
+        }
+    }
+
+    @Override
+    public GenericResultsetData fillGenericResultSet(final String sql, final Object... args) {
+        try {
+            final SqlRowSet rs = this.jdbcTemplate.queryForRowSet(sql, args);
+
+            final List<ResultsetColumnHeaderData> columnHeaders = new ArrayList<>();
+
+            final SqlRowSetMetaData rsmd = rs.getMetaData();
+            for (int i = 0; i < rsmd.getColumnCount(); i++) {
+                final String columnName = rsmd.getColumnLabel(i + 1);
                 final String columnType = rsmd.getColumnTypeName(i + 1);
 
                 final ResultsetColumnHeaderData columnHeader = ResultsetColumnHeaderData.basic(columnName, columnType,
@@ -155,17 +181,16 @@ public class GenericDataServiceImpl implements GenericDataService {
         while (rs.next()) {
             final List<Object> columnValues = new ArrayList<>();
             for (int i = 0; i < rsmd.getColumnCount(); i++) {
-                final String columnName = rsmd.getColumnName(i + 1);
                 final JdbcJavaType colType = columnHeaders.get(i).getColumnType();
                 if (colType == DATE) {
-                    Date tmpDate = (Date) rs.getObject(columnName);
+                    Date tmpDate = (Date) rs.getObject(i + 1);
                     columnValues.add(tmpDate == null ? null : tmpDate.toLocalDate());
                 } else if (colType == DATETIME || colType == TIMESTAMP) {
-                    Object tmpDate = rs.getObject(columnName);
+                    Object tmpDate = rs.getObject(i + 1);
                     columnValues.add(
                             tmpDate == null ? null : (tmpDate instanceof Timestamp ? ((Timestamp) tmpDate).toLocalDateTime() : tmpDate));
                 } else {
-                    columnValues.add(rs.getObject(columnName));
+                    columnValues.add(rs.getObject(i + 1));
                 }
             }
             resultsetDataRows.add(ResultsetRowData.create(columnValues));

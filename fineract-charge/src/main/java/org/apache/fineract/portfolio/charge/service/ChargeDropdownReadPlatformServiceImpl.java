@@ -85,7 +85,7 @@ public class ChargeDropdownReadPlatformServiceImpl implements ChargeDropdownRead
     public List<EnumOptionData> retrieveLoanCollectionTimeTypes() {
         return Arrays.asList(chargeTimeType(ChargeTimeType.DISBURSEMENT), chargeTimeType(ChargeTimeType.SPECIFIED_DUE_DATE),
                 chargeTimeType(ChargeTimeType.INSTALMENT_FEE), chargeTimeType(ChargeTimeType.OVERDUE_INSTALLMENT),
-                chargeTimeType(ChargeTimeType.TRANCHE_DISBURSEMENT));
+                chargeTimeType(ChargeTimeType.TRANCHE_DISBURSEMENT), chargeTimeType(ChargeTimeType.DOWN_PAYMENT));
     }
 
     @Override
@@ -128,15 +128,10 @@ public class ChargeDropdownReadPlatformServiceImpl implements ChargeDropdownRead
     @Override
     public List<EnumOptionData> retrieveCalculationTypes(ChargeAppliesTo chargeAppliesTo, ChargeTimeType chargeTimeType) {
         if (ChargeAppliesTo.WORKING_CAPITAL_LOAN.equals(chargeAppliesTo)) {
-            if (chargeTimeType == null) {
-                return ChargeCalculationType.validEnumsForWorkingCapitalLoan().stream().map(ChargeEnumerations::chargeCalculationType)
-                        .toList();
-            }
-            if (ChargeTimeType.SPECIFIED_DUE_DATE.equals(chargeTimeType)) {
-                return ChargeCalculationType.validEnumsForWorkingCapitalLoanSpecifiedDueDate().stream()
-                        .map(ChargeEnumerations::chargeCalculationType).toList();
-            }
-            return List.of();
+            final List<ChargeCalculationType> allowedCalculationTypes = chargeTimeType == null
+                    ? ChargeCalculationType.validEnumsForWorkingCapitalLoan()
+                    : ChargeCalculationType.validEnumsForWorkingCapitalLoan(chargeTimeType);
+            return allowedCalculationTypes.stream().map(ChargeEnumerations::chargeCalculationType).toList();
         }
         return retrieveCalculationTypes();
     }
@@ -144,7 +139,7 @@ public class ChargeDropdownReadPlatformServiceImpl implements ChargeDropdownRead
     @Override
     public List<EnumOptionData> retrieveCollectionTimeTypes(ChargeAppliesTo chargeAppliesTo) {
         if (ChargeAppliesTo.WORKING_CAPITAL_LOAN.equals(chargeAppliesTo)) {
-            return ChargeTimeType.validWorkingCapitalLoan().stream().map(ChargeEnumerations::chargeTimeType).toList();
+            return ChargeTimeType.validWorkingCapitalLoanProduct().stream().map(ChargeEnumerations::chargeTimeType).toList();
         }
         return retrieveCollectionTimeTypes();
     }
@@ -152,7 +147,7 @@ public class ChargeDropdownReadPlatformServiceImpl implements ChargeDropdownRead
     @Override
     public List<EnumOptionData> retrievePaymentModes(ChargeAppliesTo chargeAppliesTo) {
         if (ChargeAppliesTo.WORKING_CAPITAL_LOAN.equals(chargeAppliesTo)) {
-            return List.of(chargePaymentMode(ChargePaymentMode.REGULAR));
+            return ChargePaymentMode.validEnumsForWorkingCapitalLoan().stream().map(ChargeEnumerations::chargePaymentMode).toList();
         }
         return retrievePaymentModes();
     }

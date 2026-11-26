@@ -498,10 +498,7 @@ public class BatchApiStepDef extends AbstractStepDef {
         Boolean isEnclosingTransaction = Boolean.valueOf(enclosingTransaction);
         Map<String, Object> queryParams = new HashMap<>();
         queryParams.put(ENCLOSING_TRANSACTION, isEnclosingTransaction);
-        // TODO: Feign doesn't support per-request headers via API signature - need to use RequestInterceptor
-        // List<BatchResponse> batchResponseList = batchApiApi().handleBatchRequests(requestList, queryParams,
-        // headerMap);
-        List<BatchResponse> batchResponseList = batchApiApi().handleBatchRequests(requestList, queryParams);
+        List<BatchResponse> batchResponseList = batchApiApi().handleBatchRequests(requestList, queryParams, createdUserAuthorization());
 
         // Feign throws exceptions on errors, no errorBody()
         if (batchResponseList != null) {
@@ -554,18 +551,8 @@ public class BatchApiStepDef extends AbstractStepDef {
 
         // Feign throws exceptions on errors instead of returning error in response body
         ErrorResponse errorResponse = null;
-        Map<String, String> headerMap = new HashMap<>();
-
-        // Create new user which cannot bypass loan COB execution
-        PostUsersResponse createUserResponse = testContext().get(TestContextKey.CREATED_SIMPLE_USER_RESPONSE);
-        Long createdUserId = createUserResponse.getResourceId();
-        GetUsersUserIdResponse user = fineractFeignClient.users().retrieveOneUser(createdUserId);
-        String authorizationString = user.getUsername() + ":" + PWD_USER_WITH_ROLE;
-        Base64 base64 = new Base64();
-        headerMap.put("Authorization",
-                "Basic " + new String(base64.encode(authorizationString.getBytes(StandardCharsets.UTF_8)), StandardCharsets.UTF_8));
         try {
-            batchApiApi().handleBatchRequests(requestList, queryParams, headerMap);
+            batchApiApi().handleBatchRequests(requestList, queryParams, createdUserAuthorization());
         } catch (org.apache.fineract.client.feign.FeignException e) {
             errorResponse = fromJson(e.responseBodyAsString(), ErrorResponse.class);
         }
@@ -603,11 +590,21 @@ public class BatchApiStepDef extends AbstractStepDef {
         Boolean isEnclosingTransaction = Boolean.valueOf(enclosingTransaction);
         Map<String, Object> queryParams = new HashMap<>();
         queryParams.put(ENCLOSING_TRANSACTION, isEnclosingTransaction);
-        // TODO: Feign doesn't support per-request headers - need to use RequestInterceptor
-        List<BatchResponse> batchResponseList = batchApiApi().handleBatchRequests(requestList, queryParams);
+        List<BatchResponse> batchResponseList = batchApiApi().handleBatchRequests(requestList, queryParams, createdUserAuthorization());
         BatchResponse lastBatchResponse = batchResponseList.get(batchResponseList.size() - 1);
         assertThat(httpCodeExpected).isEqualTo(lastBatchResponse.getStatusCode());
         // Feign throws exceptions on errors, no errorBody()
+    }
+
+    /**
+     * Basic credentials of the user the scenario created, who cannot bypass the loan COB lock.
+     */
+    private Map<String, String> createdUserAuthorization() {
+        PostUsersResponse createUserResponse = testContext().get(TestContextKey.CREATED_SIMPLE_USER_RESPONSE);
+        GetUsersUserIdResponse user = fineractFeignClient.users().retrieveOneUser(createUserResponse.getResourceId());
+        String authorizationString = user.getUsername() + ":" + PWD_USER_WITH_ROLE;
+        return Map.of("Authorization",
+                "Basic " + new String(new Base64().encode(authorizationString.getBytes(StandardCharsets.UTF_8)), StandardCharsets.UTF_8));
     }
 
     @When("Batch API call with steps: queryDatatable, updateDatatable runs, with empty queryDatatable response")
@@ -822,7 +819,7 @@ public class BatchApiStepDef extends AbstractStepDef {
         Map<String, Object> loanQueryParams = new HashMap<>();
         loanQueryParams.put("staffInSelectedOfficeOnly", false);
         loanQueryParams.put("associations", "transactions");
-        GetLoansLoanIdResponse loanDetails = loansApi().retrieveLoan(loanId, loanQueryParams);
+        GetLoansLoanIdResponse loanDetails = loansApi().retrieveOneLoan(loanId, loanQueryParams);
 
         List<GetLoansLoanIdTransactions> transactions = loanDetails.getTransactions();
         List<String> transactionsMatched = new ArrayList<>();
@@ -872,7 +869,7 @@ public class BatchApiStepDef extends AbstractStepDef {
 
         Map<String, Object> loanQueryParams = new HashMap<>();
         loanQueryParams.put("staffInSelectedOfficeOnly", false);
-        GetLoansLoanIdResponse response = loansApi().retrieveLoanByExternalId(loanExternalId, loanQueryParams);
+        GetLoansLoanIdResponse response = loansApi().retrieveOneLoanByExternalId(loanExternalId, loanQueryParams);
         assertThat(response.getId()).as(ErrorMessageHelper.idNull()).isNotNull();
     }
 
@@ -889,7 +886,7 @@ public class BatchApiStepDef extends AbstractStepDef {
 
         Map<String, Object> loanQueryParams = new HashMap<>();
         loanQueryParams.put("staffInSelectedOfficeOnly", false);
-        GetLoansLoanIdResponse response = loansApi().retrieveLoanByExternalId(loanExternalId, loanQueryParams);
+        GetLoansLoanIdResponse response = loansApi().retrieveOneLoanByExternalId(loanExternalId, loanQueryParams);
         GetLoansLoanIdStatus status = response.getStatus();
         Long statusIdActual = status.getId();
         Long statusIdExpected = LoanStatus.APPROVED.value.longValue();
@@ -955,7 +952,7 @@ public class BatchApiStepDef extends AbstractStepDef {
         // Feign throws exceptions on errors instead of returning error in response body
         ErrorResponse errorResponse = null;
         try {
-            loansApi().retrieveLoanByExternalId(loanExternalId, loanQueryParams);
+            loansApi().retrieveOneLoanByExternalId(loanExternalId, loanQueryParams);
             throw new IllegalStateException("Expected Feign exception but call succeeded");
         } catch (org.apache.fineract.client.feign.FeignException e) {
             errorResponse = fromJson(e.responseBodyAsString(), ErrorResponse.class);
@@ -1146,7 +1143,7 @@ public class BatchApiStepDef extends AbstractStepDef {
         Map<String, Object> loanQueryParams = new HashMap<>();
         loanQueryParams.put("staffInSelectedOfficeOnly", false);
         loanQueryParams.put("associations", "all");
-        GetLoansLoanIdResponse loanDetails = loansApi().retrieveLoan(loanId, loanQueryParams);
+        GetLoansLoanIdResponse loanDetails = loansApi().retrieveOneLoan(loanId, loanQueryParams);
         // Check loan has a CHARGE_OFF transaction on the specified date
         DateTimeFormatter formatter = DateTimeFormatter.ofPattern(DATE_FORMAT);
         boolean hasChargeOffTransaction = loanDetails.getTransactions().stream().anyMatch(
@@ -1351,7 +1348,7 @@ public class BatchApiStepDef extends AbstractStepDef {
         Map<String, Object> loanQueryParams = new HashMap<>();
         loanQueryParams.put("staffInSelectedOfficeOnly", false);
         loanQueryParams.put("associations", "all");
-        GetLoansLoanIdResponse loanResponse = loansApi().retrieveLoan(loanId, loanQueryParams);
+        GetLoansLoanIdResponse loanResponse = loansApi().retrieveOneLoan(loanId, loanQueryParams);
         assertThat(loanResponse != null).isTrue();
         assertThat(loanResponse).isNotNull();
 

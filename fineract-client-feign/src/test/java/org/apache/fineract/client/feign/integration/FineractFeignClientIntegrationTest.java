@@ -19,6 +19,7 @@
 package org.apache.fineract.client.feign.integration;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
+import static com.github.tomakehurst.wiremock.client.WireMock.absent;
 import static com.github.tomakehurst.wiremock.client.WireMock.containing;
 import static com.github.tomakehurst.wiremock.client.WireMock.equalTo;
 import static com.github.tomakehurst.wiremock.client.WireMock.get;
@@ -32,12 +33,16 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.github.tomakehurst.wiremock.WireMockServer;
 import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
+import feign.HeaderMap;
 import feign.RequestLine;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import org.apache.fineract.client.feign.FeignException;
 import org.apache.fineract.client.feign.FineractFeignClientConfig;
+import org.apache.fineract.client.feign.services.ClientApi;
+import org.apache.fineract.client.feign.services.ClientApi.RetrieveAllClientsQueryParams;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
@@ -169,6 +174,41 @@ class FineractFeignClientIntegrationTest {
     }
 
     @Test
+    void testWithoutCredentialsSendsNoAuthorizationHeader() {
+        wireMockServer.stubFor(get(urlEqualTo("/test")).withHeader(AUTHORIZATION, absent())
+                .willReturn(aResponse().withStatus(200).withHeader(CONTENT_TYPE, APPLICATION_JSON)
+                        .withBody("{\"id\":1,\"message\":\"anonymous\",\"timestamp\":\"2024-01-01T00:00:00\"}")));
+
+        TestApi client = FineractFeignClientConfig.builder().baseUrl(baseUrl).withoutCredentials().build().createClient(TestApi.class);
+        TestResponse response = client.getTest();
+
+        assertThat(response.getMessage()).isEqualTo("anonymous");
+    }
+
+    @Test
+    void testWithoutCredentialsKeepsTheAuthorizationHeaderOfTheCall() {
+        wireMockServer.stubFor(get(urlEqualTo("/test")).withHeader(AUTHORIZATION, equalTo("Bearer test-token"))
+                .willReturn(aResponse().withStatus(200).withHeader(CONTENT_TYPE, APPLICATION_JSON)
+                        .withBody("{\"id\":1,\"message\":\"bearer\",\"timestamp\":\"2024-01-01T00:00:00\"}")));
+
+        TestApi client = FineractFeignClientConfig.builder().baseUrl(baseUrl).withoutCredentials().build().createClient(TestApi.class);
+        TestResponse response = client.getTest(Map.of(AUTHORIZATION, "Bearer test-token"));
+
+        assertThat(response.getMessage()).isEqualTo("bearer");
+    }
+
+    @Test
+    void testGeneratedQueryMapsEncodeRawAndPreEncodedValues() {
+        wireMockServer.stubFor(get(urlEqualTo("/v1/clients?externalId=a%2Bb%20c")).willReturn(
+                aResponse().withStatus(200).withHeader(CONTENT_TYPE, APPLICATION_JSON).withBody("{\"totalFilteredRecords\":0}")));
+
+        ClientApi client = config.createClient(ClientApi.class);
+
+        assertThat(client.retrieveAllClients(new RetrieveAllClientsQueryParams().externalId("a+b c")).getTotalFilteredRecords()).isZero();
+        assertThat(client.retrieveAllClients(Map.of("externalId", "a%2Bb%20c")).getTotalFilteredRecords()).isZero();
+    }
+
+    @Test
     void testNullValueHandling() {
         wireMockServer.stubFor(post(urlEqualTo("/test")).willReturn(aResponse().withStatus(200).withHeader(CONTENT_TYPE, APPLICATION_JSON)
                 .withBody("{\"id\":1,\"message\":null,\"timestamp\":\"2024-01-01T00:00:00\"}")));
@@ -188,6 +228,9 @@ class FineractFeignClientIntegrationTest {
 
         @RequestLine("GET /test")
         TestResponse getTest();
+
+        @RequestLine("GET /test")
+        TestResponse getTest(@HeaderMap Map<String, String> headers);
 
         @RequestLine("POST /test")
         TestResponse createTest(TestRequest request);

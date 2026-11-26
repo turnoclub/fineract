@@ -44,6 +44,7 @@ import org.apache.fineract.infrastructure.core.serialization.FromJsonHelper;
 import org.apache.fineract.infrastructure.core.serialization.JsonParserHelper;
 import org.apache.fineract.infrastructure.core.service.DateUtils;
 import org.apache.fineract.infrastructure.core.service.MathUtil;
+import org.apache.fineract.portfolio.common.service.CommonEnumerations;
 import org.apache.fineract.portfolio.loanaccount.api.LoanApiConstants;
 import org.apache.fineract.portfolio.loanaccount.api.LoanReAgingApiConstants;
 import org.apache.fineract.portfolio.loanaccount.api.request.ReAgePreviewRequest;
@@ -59,6 +60,10 @@ import org.springframework.stereotype.Component;
 @Component
 @RequiredArgsConstructor
 public class LoanReAgingValidator {
+
+    /** Re-aging derives each due date from a period length, which only the basic frequencies have. */
+    private static final List<String> SUPPORTED_FREQUENCY_TYPES = CommonEnumerations.BASIC_PERIOD_FREQUENCY_TYPES.stream().map(Enum::name)
+            .toList();
 
     private final LoanTransactionRepository loanTransactionRepository;
     private final CodeValueRepository codeValueRepository;
@@ -111,7 +116,8 @@ public class LoanReAgingValidator {
                     .validateDateAfter(loan.getMaturityDate());
         }
         String frequencyType = command.stringValueOfParameterNamedAllowingNull(LoanReAgingApiConstants.frequencyType);
-        baseDataValidator.reset().parameter(LoanReAgingApiConstants.frequencyType).value(frequencyType).notNull();
+        baseDataValidator.reset().parameter(LoanReAgingApiConstants.frequencyType).value(frequencyType).notNull()
+                .isOneOfTheseStringValues(SUPPORTED_FREQUENCY_TYPES);
 
         Integer frequencyNumber = command.integerValueOfParameterNamed(LoanReAgingApiConstants.frequencyNumber);
         baseDataValidator.reset().parameter(LoanReAgingApiConstants.frequencyNumber).value(frequencyNumber).notNull()
@@ -191,6 +197,11 @@ public class LoanReAgingValidator {
             throw new GeneralPlatformDomainRuleException("error.msg.loan.reage.not.allowed.on.contract.terminated",
                     "Loan re-aging is not allowed on contract terminated loan.", loan.getId());
         }
+
+        if (loan.isLoanWithdrawal()) {
+            throw new GeneralPlatformDomainRuleException("error.msg.loan.reage.not.allowed.on.loan.withdrawal",
+                    "Loan re-aging is not allowed after loan withdrawal has been applied to the loan account.", loan.getId());
+        }
     }
 
     public void validateUndoReAge(Loan loan) {
@@ -246,6 +257,8 @@ public class LoanReAgingValidator {
             baseDataValidator.reset().parameter(LoanReAgingApiConstants.startDate).value(startDate)
                     .validateDateAfter(loan.getMaturityDate());
         }
+        baseDataValidator.reset().parameter(LoanReAgingApiConstants.frequencyType).value(reAgePreviewRequest.getFrequencyType())
+                .isOneOfTheseStringValues(SUPPORTED_FREQUENCY_TYPES);
 
         throwExceptionIfValidationErrorsExist(dataValidationErrors);
     }

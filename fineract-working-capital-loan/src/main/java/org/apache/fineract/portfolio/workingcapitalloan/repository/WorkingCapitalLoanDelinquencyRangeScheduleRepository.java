@@ -24,6 +24,7 @@ import java.util.List;
 import java.util.Optional;
 import org.apache.fineract.portfolio.workingcapitalloan.domain.WorkingCapitalLoanDelinquencyRangeSchedule;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -37,13 +38,105 @@ public interface WorkingCapitalLoanDelinquencyRangeScheduleRepository
 
     Optional<WorkingCapitalLoanDelinquencyRangeSchedule> findTopByLoanIdOrderByPeriodNumberDesc(Long loanId);
 
-    List<WorkingCapitalLoanDelinquencyRangeSchedule> findByLoanIdAndToDateIsBeforeAndMinPaymentCriteriaMet(Long loanId,
-            LocalDate toDateBefore, Boolean minPaymentCriteriaMet);
+    @Query("""
+            SELECT s FROM WorkingCapitalLoanDelinquencyRangeSchedule s
+            WHERE s.loan.id = :loanId
+              AND s.toDate < :transactionDate
+              AND (s.minPaymentCriteriaMet IS NULL OR s.minPaymentCriteriaMet = FALSE)
+              AND s.reset = false
+            ORDER BY s.periodNumber ASC""")
+    List<WorkingCapitalLoanDelinquencyRangeSchedule> findPastOpenPeriodsForRepayment(@Param("loanId") Long loanId,
+            @Param("transactionDate") LocalDate transactionDate);
+
+    @Query("""
+            SELECT s FROM WorkingCapitalLoanDelinquencyRangeSchedule s
+            WHERE s.loan.id = :loanId
+              AND (s.minPaymentCriteriaMet IS NULL OR s.minPaymentCriteriaMet = FALSE)
+              AND s.expectedAmount IS NOT NULL
+              AND s.expectedAmount > COALESCE(s.paidAmount, 0) + :principalOutstanding
+            ORDER BY s.periodNumber ASC""")
+    List<WorkingCapitalLoanDelinquencyRangeSchedule> findOpenPeriodsExceedingRemainingBalanceCap(@Param("loanId") Long loanId,
+            @Param("principalOutstanding") BigDecimal principalOutstanding);
 
     Optional<WorkingCapitalLoanDelinquencyRangeSchedule> findByLoanIdAndFromDateLessThanEqualAndToDateGreaterThanEqual(Long loanId,
             LocalDate date, LocalDate date2);
 
+    /**
+     * The not yet evaluated period covering the business date. Periods are built contiguously and every mutation
+     * (append, re-date, pause shift, reset) keeps the chain contiguous, so at most one of them can cover a given date.
+     */
+    @Query("""
+            SELECT s FROM WorkingCapitalLoanDelinquencyRangeSchedule s
+            WHERE s.loan.id = :loanId
+              AND s.minPaymentCriteriaMet IS NULL
+              AND s.fromDate <= :businessDate
+              AND s.toDate >= :businessDate""")
+    Optional<WorkingCapitalLoanDelinquencyRangeSchedule> findCurrentOpenPeriod(@Param("loanId") Long loanId,
+            @Param("businessDate") LocalDate businessDate);
+
+    @Query("""
+            SELECT s FROM WorkingCapitalLoanDelinquencyRangeSchedule s
+            WHERE s.loan.id = :loanId
+              AND s.fromDate > :businessDate
+            ORDER BY s.periodNumber ASC""")
+    List<WorkingCapitalLoanDelinquencyRangeSchedule> findFuturePeriodsOrderByPeriodNumberAsc(@Param("loanId") Long loanId,
+            @Param("businessDate") LocalDate businessDate);
+
+    @Query("""
+            SELECT s FROM WorkingCapitalLoanDelinquencyRangeSchedule s
+            WHERE s.loan.id = :loanId
+              AND s.toDate >= :businessDate""")
+    List<WorkingCapitalLoanDelinquencyRangeSchedule> findNotEndedPeriods(@Param("loanId") Long loanId,
+            @Param("businessDate") LocalDate businessDate);
+
+    boolean existsByLoanId(Long loanId);
+
+    @Modifying(flushAutomatically = true)
+    @Query("delete from WorkingCapitalLoanDelinquencyRangeSchedule s where s.loan.id = :loanId")
+    void deleteByLoanId(@Param("loanId") Long loanId);
+
     List<WorkingCapitalLoanDelinquencyRangeSchedule> findByLoanIdAndToDateLessThanEqualAndMinPaymentCriteriaMetIsNull(Long loanId,
             LocalDate businessDate);
 
+    /**
+     * Still-open past periods that already carry a positive classified {@code delinquentDays} value, earliest first.
+     * Includes {@code minPaymentCriteriaMet IS NULL} because instant classification can populate delinquent days before
+     * COB evaluates the period. Reset periods are excluded: they are skipped by classification and must not drive
+     * pastDueDays / delinquency start dates.
+     */
+    @Query("""
+            SELECT s FROM WorkingCapitalLoanDelinquencyRangeSchedule s
+            WHERE s.loan.id = :loanId
+              AND s.toDate <= :businessDate
+              AND (s.minPaymentCriteriaMet IS NULL OR s.minPaymentCriteriaMet = FALSE)
+              AND s.reset = false
+              AND s.delinquentDays > 0
+            ORDER BY s.fromDate ASC""")
+    List<WorkingCapitalLoanDelinquencyRangeSchedule> findOpenPastDuePeriodsOrderByFromDateAsc(@Param("loanId") Long loanId,
+            @Param("businessDate") LocalDate businessDate);
+
+    List<WorkingCapitalLoanDelinquencyRangeSchedule> findByLoanIdAndResetIsNotAndToDateBeforeOrderByPeriodNumberAsc(Long id, Boolean reset,
+            LocalDate startDate);
+
+    @Modifying
+    @Query("""
+            update WorkingCapitalLoanDelinquencyRangeSchedule p
+            set p.reset = false
+            where p.loan.id = :loanId
+              and p.reset = true
+              and p.toDate < :actionStartDate
+            """)
+    int clearResetBeforeActionStartDate(@Param("loanId") Long loanId, @Param("actionStartDate") LocalDate actionStartDate);
+
+    @Modifying
+    @Query("""
+            update WorkingCapitalLoanDelinquencyRangeSchedule p
+            set p.reset = false
+            where p.loan.id = :loanId
+              and p.reset = true
+              and p.toDate < :actionStartDate
+              and p.toDate >= :lastActiveResetStartDate
+            """)
+    int clearResetBeforeActionStartDateFromLastActiveReset(@Param("loanId") Long loanId,
+            @Param("actionStartDate") LocalDate actionStartDate, @Param("lastActiveResetStartDate") LocalDate lastActiveResetStartDate);
 }
