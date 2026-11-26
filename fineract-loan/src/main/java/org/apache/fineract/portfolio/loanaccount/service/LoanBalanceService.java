@@ -50,7 +50,6 @@ public class LoanBalanceService {
 
     private final CapitalizedIncomeBalanceService capitalizedIncomeBalanceService;
     private final FlushModeHandler flushModeHandler;
-    private final LoanTransactionRepository loanTransactionRepository;
     private final ForeclosureInterestResolver foreclosureInterestResolver;
 
     public Money calculateTotalOverpayment(final Loan loan) {
